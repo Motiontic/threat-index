@@ -1,0 +1,58 @@
+// ti-api: Hono JSON API, Clerk auth (single-user), webhooks, E2B job callbacks.
+// This config also lists every D1 database with its migrations folder, so
+// `pnpm --filter @ti/db migrate:local` can apply all migrations from here.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ti-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB_CONTROL",
+      "database_name": "ti_control",
+      "database_id": "<fill-after-create>",
+      "migrations_dir": "../../packages/db/migrations/control"
+    },
+    {
+      "binding": "DB_VULNS",
+      "database_name": "ti_vulns",
+      "database_id": "<fill-after-create>",
+      "migrations_dir": "../../packages/db/migrations/vulns"
+    },
+    {
+      "binding": "DB_ADVISORIES",
+      "database_name": "ti_advisories",
+      "database_id": "<fill-after-create>",
+      "migrations_dir": "../../packages/db/migrations/advisories"
+    },
+    {
+      "binding": "DB_SIGNALS",
+      "database_name": "ti_signals",
+      "database_id": "<fill-after-create>",
+      "migrations_dir": "../../packages/db/migrations/signals"
+    },
+    {
+      "binding": "DB_WORLD",
+      "database_name": "ti_world",
+      "database_id": "<fill-after-create>",
+      "migrations_dir": "../../packages/db/migrations/world"
+    },
+    {
+      "binding": "DB_USERS",
+      "database_name": "ti_users",
+      "database_id": "<fill-after-create>",
+      "migrations_dir": "../../packages/db/migrations/users"
+    }
+  ],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
+  "kv_namespaces": [{ "binding": "SETTINGS", "id": "<fill-after-create>" }],
+  "queues": { "producers": [{ "binding": "LOAD", "queue": "ti-load" }] },
+  "vars": {
+    "CLERK_PUBLISHABLE_KEY": "<pk_live_or_pk_test>",
+    "ADMIN_USER_IDS": ""
+  }
+  // Secrets: CLERK_SECRET_KEY, CLERK_WEBHOOK_SIGNING_SECRET, RESEND_WEBHOOK_SECRET,
+  // UNSUBSCRIBE_SECRET, JOB_HMAC_SECRET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, E2B_API_KEY
+}

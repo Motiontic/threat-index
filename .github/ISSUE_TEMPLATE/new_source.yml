@@ -1,0 +1,28 @@
+name: New source request
+description: Suggest a public source to add
+labels: [source]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Source name and URL
+    validations:
+      required: true
+  - type: textarea
+    id: gives
+    attributes:
+      label: What does it give us that existing sources don't?
+    validations:
+      required: true
+  - type: textarea
+    id: access
+    attributes:
+      label: How can the data be fetched?
+      description: Bulk file, git repo, API, RSS, or HTML only. Is there a way to fetch only what changed?
+  - type: textarea
+    id: licence
+    attributes:
+      label: Licence and terms
+      description: Link the terms. Does it allow commercial use? Is attribution required?
+    validations:
+      required: true

@@ -1,0 +1,37 @@
+// ti-collector: cron planner + ti-jobs consumer (pull patterns, linker, watchdog).
+// Replace every <fill-after-create> with the IDs printed by `wrangler d1 create` / `wrangler kv namespace create`.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ti-collector",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "triggers": {
+    // every 3 h · daily after EPSS · nightly fold · weekly (4 of the 5 free cron triggers)
+    "crons": ["0 */3 * * *", "45 14 * * *", "30 2 * * *", "0 5 * * 1"]
+  },
+  "d1_databases": [
+    { "binding": "DB_CONTROL", "database_name": "ti_control", "database_id": "<fill-after-create>" },
+    { "binding": "DB_VULNS", "database_name": "ti_vulns", "database_id": "<fill-after-create>" },
+    { "binding": "DB_ADVISORIES", "database_name": "ti_advisories", "database_id": "<fill-after-create>" },
+    { "binding": "DB_SIGNALS", "database_name": "ti_signals", "database_id": "<fill-after-create>" },
+    { "binding": "DB_WORLD", "database_name": "ti_world", "database_id": "<fill-after-create>" }
+  ],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
+  "kv_namespaces": [{ "binding": "SETTINGS", "id": "<fill-after-create>" }],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "ti-jobs" }, { "binding": "NOTIFY", "queue": "ti-notify" }],
+    "consumers": [
+      { "queue": "ti-jobs", "max_batch_size": 5, "max_retries": 5, "dead_letter_queue": "ti-jobs-dlq" }
+    ]
+  },
+  // Watchdog emails go only to an address verified in Email Routing (free).
+  "send_email": [{ "name": "OPS_EMAIL", "destination_address": "<ops-contact>" }],
+  "vars": {
+    "USER_AGENT": "ThreatIndex/0.1 (+https://github.com/Motiontic/threat-index; <ops-contact>)",
+    "API_BASE": "https://api.<domain>"
+  }
+  // Secrets (wrangler secret put): GITHUB_TOKEN, GITLAB_TOKEN, NVD_API_KEY, E2B_API_KEY,
+  // R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, JOB_HMAC_SECRET
+}

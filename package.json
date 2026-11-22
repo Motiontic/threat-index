@@ -1,0 +1,26 @@
+{
+  "name": "threat-index",
+  "private": true,
+  "version": "0.0.0",
+  "description": "One record of every public vulnerability, exploit, breach and AI incident, refreshed every 3 hours on Cloudflare.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.10.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "pnpm -r --parallel --filter \"!@ti/web\" exec tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "pnpm -r --filter \"./apps/*\" deploy"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@cloudflare/workers-types": "^5.20261119.1",
+    "typescript": "^5.8.0",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.0.0"
+  }
+}

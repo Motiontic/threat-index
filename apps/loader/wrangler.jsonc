@@ -1,0 +1,19 @@
+// ti-loader: moves E2B output (R2 inbox/) into D1 within the free daily write budget.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ti-loader",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    { "binding": "DB_CONTROL", "database_name": "ti_control", "database_id": "<fill-after-create>" },
+    { "binding": "DB_VULNS", "database_name": "ti_vulns", "database_id": "<fill-after-create>" },
+    { "binding": "DB_ADVISORIES", "database_name": "ti_advisories", "database_id": "<fill-after-create>" },
+    { "binding": "DB_SIGNALS", "database_name": "ti_signals", "database_id": "<fill-after-create>" },
+    { "binding": "DB_WORLD", "database_name": "ti_world", "database_id": "<fill-after-create>" }
+  ],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
+  "queues": {
+    "consumers": [{ "queue": "ti-load", "max_batch_size": 1, "max_retries": 10 }]
+  }
+}

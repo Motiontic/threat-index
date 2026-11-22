@@ -1,0 +1,9 @@
+{
+  "name": "@ti/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Placeholder until M1: scaffold with the Cloudflare React Router template (see README.md).",
+  "scripts": {}
+}

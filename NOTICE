@@ -1,0 +1,14 @@
+Threat Index
+Copyright 2026 Motiontic
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The names "Motiontic" and "Threat Index", and any Motiontic logos, are not
+licensed under the Apache License and may not be used to endorse or promote
+products derived from this software without prior written permission.
+
+This repository contains no third-party vulnerability, exploit, breach or
+incident data. Data is fetched at run time from public sources, each under its
+own licence and terms of use. See DATA_LICENSES.md.
+
+This product uses the NVD API but is not endorsed or certified by the NVD.

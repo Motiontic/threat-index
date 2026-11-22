@@ -1,0 +1,21 @@
+{
+  "name": "@ti/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@ti/core": "workspace:*",
+    "@ti/db": "workspace:*",
+    "@ti/sources": "workspace:*",
+    "hono": "^4.13.0",
+    "@hono/clerk-auth": "^3.1.0",
+    "@clerk/backend": "^3.31.0",
+    "aws4fetch": "^1.0.20",
+    "zod": "^4.6.0"
+  }
+}

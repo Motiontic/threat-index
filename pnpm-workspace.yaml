@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "e2b/jobs"
+
+# Allow the native binaries wrangler needs for local dev.
+onlyBuiltDependencies:
+  - esbuild
+  - workerd

@@ -1,0 +1,9 @@
+# Copy to .dev.vars for local development. Never commit real values.
+CLERK_SECRET_KEY=sk_test_xxx
+CLERK_WEBHOOK_SIGNING_SECRET=whsec_xxx
+RESEND_WEBHOOK_SECRET=whsec_xxx
+UNSUBSCRIBE_SECRET=change-me
+JOB_HMAC_SECRET=change-me
+R2_ACCESS_KEY_ID=xxx
+R2_SECRET_ACCESS_KEY=xxx
+E2B_API_KEY=e2b_xxx

@@ -1,0 +1,20 @@
+// ti-notify: matches changes to watchlists and sends alerts with Resend (free: 100 emails/day).
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ti-notify",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    { "binding": "DB_SIGNALS", "database_name": "ti_signals", "database_id": "<fill-after-create>" },
+    { "binding": "DB_USERS", "database_name": "ti_users", "database_id": "<fill-after-create>" }
+  ],
+  "queues": {
+    "consumers": [{ "queue": "ti-notify", "max_batch_size": 1, "max_retries": 5 }]
+  },
+  "vars": {
+    "EMAIL_FROM": "Threat Index <alerts@<domain>>",
+    "APP_BASE": "https://<domain>"
+  }
+  // Secrets: RESEND_API_KEY, UNSUBSCRIBE_SECRET
+}

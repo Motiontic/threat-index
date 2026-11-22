@@ -1,0 +1,17 @@
+{
+  "name": "@ti/e2b-jobs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "job": "node --experimental-strip-types src/run.ts"
+  },
+  "dependencies": {
+    "@ti/core": "workspace:*",
+    "@ti/parsers": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}

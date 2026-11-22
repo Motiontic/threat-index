@@ -1,0 +1,16 @@
+{
+  "name": "@ti/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "drizzle-orm": "^0.44.0"
+  },
+  "scripts": {
+    "migrate:local": "for d in ti_control ti_vulns ti_advisories ti_signals ti_world ti_users; do wrangler d1 migrations apply $d --local -c ../../apps/api/wrangler.jsonc; done",
+    "migrate:remote": "for d in ti_control ti_vulns ti_advisories ti_signals ti_world ti_users; do wrangler d1 migrations apply $d --remote -c ../../apps/api/wrangler.jsonc; done"
+  }
+}
