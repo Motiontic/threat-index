@@ -1,0 +1,38 @@
+[
+  {
+    "name": "OPN Healthcare, Inc.",
+    "link": "https://oag.ca.gov/ecrime/databreach/reports/sb24-633250",
+    "breachDates": "06/03/2026",
+    "reported": "11/20/2026"
+  },
+  {
+    "name": "Bausch Health Companies Inc.",
+    "link": "https://oag.ca.gov/ecrime/databreach/reports/sb24-633182",
+    "breachDates": "06/24/2026",
+    "reported": "11/20/2026"
+  },
+  {
+    "name": "Hitachi Vantara LLC",
+    "link": "https://oag.ca.gov/ecrime/databreach/reports/sb24-633174",
+    "breachDates": "04/26/2025",
+    "reported": "11/20/2026"
+  },
+  {
+    "name": "Mercadien, P.C. CPAs",
+    "link": "https://oag.ca.gov/ecrime/databreach/reports/sb24-633059",
+    "breachDates": "n/a",
+    "reported": "11/17/2026"
+  },
+  {
+    "name": "Acadia Healthcare Company, Inc.",
+    "link": "https://oag.ca.gov/ecrime/databreach/reports/sb24-632903",
+    "breachDates": "03/25/2026, 07/13/2026",
+    "reported": "11/13/2026"
+  },
+  {
+    "name": "Elsewhere Corp",
+    "link": "https://example.com/ecrime/databreach/reports/sb24-1",
+    "breachDates": "01/02/2026",
+    "reported": "11/12/2026"
+  }
+]

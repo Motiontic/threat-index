@@ -1,0 +1,63 @@
+[
+  {
+    "name": "Central Ohio Primary Care Physicians, Inc. (COPC)",
+    "state": "OH",
+    "entityType": "Healthcare Provider",
+    "individuals": "1351650",
+    "submitted": "10/16/2026",
+    "breachType": "Hacking/IT Incident",
+    "location": "Network Server",
+    "associate": "No"
+  },
+  {
+    "name": "Rose Poney, LCMHC; Restoration Counseling LLC",
+    "state": "VT",
+    "entityType": "Healthcare Provider",
+    "individuals": "662",
+    "submitted": "10/16/2026",
+    "breachType": "Hacking/IT Incident",
+    "location": "Email",
+    "associate": "No"
+  },
+  {
+    "name": "Lisa Jo Adornetto, DDS, PA",
+    "state": "NC",
+    "entityType": "Healthcare Provider",
+    "individuals": "2000",
+    "submitted": "10/15/2026",
+    "breachType": "Unauthorized Access/Disclosure",
+    "location": "Email, Other",
+    "associate": "No"
+  },
+  {
+    "name": "Example Dental Group LLC",
+    "state": "TX",
+    "entityType": "Healthcare Provider",
+    "individuals": "n/a",
+    "submitted": "10/14/2026",
+    "breachType": "Theft",
+    "location": "Laptop",
+    "associate": "No"
+  },
+  {
+    "name": "Bad Date Clinic",
+    "state": "CA",
+    "entityType": "Healthcare Provider",
+    "individuals": "500",
+    "submitted": "02/30/2026",
+    "breachType": "Loss",
+    "location": "Other",
+    "associate": "No"
+  },
+  {
+    "name": "Unknown Key Clinic",
+    "state": "FL",
+    "entityType": "Healthcare Provider",
+    "individuals": "750",
+    "submitted": "10/13/2026",
+    "breachType": "Loss",
+    "location": "Other",
+    "associate": "No",
+    "surprise": "x"
+  }
+]
