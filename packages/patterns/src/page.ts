@@ -10,6 +10,9 @@ type Row = Record<string, string>;
 /** Attributes whose values are URLs, made absolute against the page's own URL. */
 const URL_ATTRS = new Set(['href', 'src', 'action', 'cite', 'poster', 'data']);
 
+/** Fields named like this hold a URL however they are selected (attribute or text). */
+const URL_FIELDS = new Set(['link', 'url']);
+
 /** Rows of the page: `item` starts a row, each field selector fills it. Needs `HTMLRewriter` (Workers). */
 export async function parseRows(
   html: string,
@@ -31,6 +34,8 @@ export async function parseRows(
   for (const [name, spec] of Object.entries(cfg.fields)) {
     const selector = typeof spec === 'string' ? spec : spec.selector;
     const attr = typeof spec === 'string' ? null : spec.attr;
+    const isUrlName = URL_FIELDS.has(name.toLowerCase());
+    const isUrl = isUrlName || (attr !== null && URL_ATTRS.has(attr.toLowerCase()));
     let capturing: Row | null = null;
     let buffer = '';
     rewriter.on(selector, {
@@ -41,7 +46,7 @@ export async function parseRows(
           const v = el.getAttribute(attr);
           if (v === null) return;
           const value = decodeEntities(v);
-          if (URL_ATTRS.has(attr.toLowerCase())) {
+          if (isUrl) {
             // Only absolute http(s) links survive; javascript:, data: and the like are dropped.
             const href = httpUrl(value, cfg.url);
             if (href === null) onDroppedLink?.();
@@ -52,7 +57,15 @@ export async function parseRows(
         capturing = target;
         buffer = '';
         el.onEndTag(() => {
-          if (capturing) capturing[name] = decodeEntities(buffer).replace(/\s+/g, ' ').trim();
+          if (capturing) {
+            const text = decodeEntities(buffer).replace(/\s+/g, ' ').trim();
+            if (!isUrlName) capturing[name] = text;
+            else if (text !== '') {
+              const href = httpUrl(text, cfg.url);
+              if (href === null) onDroppedLink?.();
+              else capturing[name] = href;
+            }
+          }
           capturing = null;
         });
       },
@@ -115,7 +128,13 @@ export async function fetch(ctx: PatternContext): Promise<PatternResult> {
   const items: RawItem[] = picked.fresh.map((e) => ({
     id: e.key,
     body: isLink
-      ? { id: e.key, title: e.row.title ?? '', date: e.row.date ?? '', link: e.row.link ?? '' }
+      ? {
+          id: e.key,
+          title: e.row.title ?? '',
+          date: e.row.date ?? '',
+          // Re-checked at the item boundary, whatever way the field was configured.
+          link: safeLink(ctx, e.row.link, cfg.url),
+        }
       : e.row,
   }));
   const receipt = buildReceipt(
@@ -156,3 +175,11 @@ const cursorOf = (key: string, etag: string | null): Cursor => ({
 /** Logs a dropped link with the source id only, never the value. */
 const droppedLink = (ctx: PatternContext) => () =>
   ctx.log('page: dropped a link that is not http(s)', { source: ctx.source.id });
+
+/** The link-only item's link: absolute http(s) or empty; a drop is logged with the source id only. */
+function safeLink(ctx: PatternContext, value: string | undefined, base: string): string {
+  if (!value) return '';
+  const href = httpUrl(value, base);
+  if (href === null) droppedLink(ctx)();
+  return href ?? '';
+}

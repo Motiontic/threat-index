@@ -82,6 +82,32 @@ export function parseFeed(xml: string): Node[] {
   throw new PatternError('not an RSS, RDF or Atom feed', 'format');
 }
 
+/**
+ * A copy of the entry whose links are absolute http(s) only: RSS `<link>` text and Atom
+ * `<link href>`. Other links are removed and reported through `onDroppedLink`.
+ */
+export function sanitizeLinks(item: Node, onDroppedLink?: () => void): Node {
+  if (item.link === undefined) return item;
+  const kept: unknown[] = [];
+  for (const l of arr(item.link)) {
+    if (l && typeof l === 'object' && '@_href' in l) {
+      const n = l as Node;
+      const href = httpUrl(String(n['@_href']));
+      if (href === null) onDroppedLink?.();
+      else kept.push({ ...n, '@_href': href });
+    } else {
+      const t = textOf(l);
+      if (t === '') continue;
+      const href = httpUrl(t);
+      if (href === null) onDroppedLink?.();
+      else kept.push(href);
+    }
+  }
+  const { link: _drop, ...rest } = item;
+  if (kept.length === 0) return rest;
+  return { ...rest, link: kept.length === 1 ? kept[0] : kept };
+}
+
 export function linkOnly(item: Node, id: string, onDroppedLink?: () => void): LinkOnlyItem {
   const raw = linkOf(item);
   let link = '';
@@ -142,7 +168,9 @@ export async function fetch(ctx: PatternContext): Promise<PatternResult> {
       ? linkOnly(e.item, e.key, () =>
           ctx.log('feed: dropped a link that is not http(s)', { source: ctx.source.id }),
         )
-      : e.item,
+      : sanitizeLinks(e.item, () =>
+          ctx.log('feed: dropped a link that is not http(s)', { source: ctx.source.id }),
+        ),
   }));
   const receipt = buildReceipt(
     ctx,

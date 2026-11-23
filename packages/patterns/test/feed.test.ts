@@ -215,6 +215,26 @@ describe('feed', () => {
     expect(links).toEqual({ a1: '', a2: 'https://example.test/b' });
   });
 
+  it('a non-link source drops a non-http(s) link from the item body, in RSS and Atom, and logs the source id', async () => {
+    const rss = `<rss><channel><item><title>T</title><link>javascript:alert(1)</link><guid>G-1</guid></item>
+      <item><title>U</title><link>https://x.test/u</link><guid>G-2</guid></item></channel></rss>`;
+    const h = makeCtx({ source, routes: [route(URL_, feedReply(rss))] });
+    const r = await fetch(h.ctx);
+    const bodies = Object.fromEntries(r.items.map((i) => [i.id, i.body as Record<string, unknown>]));
+    expect(bodies['G-1']?.link).toBeUndefined();
+    expect(bodies['G-2']?.link).toBe('https://x.test/u');
+    expect(JSON.stringify(r.items)).not.toContain('javascript');
+    const dropped = h.logs.filter((l) => l.msg.includes('dropped a link'));
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]?.extra).toEqual({ source: 'cisa-advisories' });
+
+    const atom = `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>a1</id><title>A</title><link href="data:text/html,x"/><link rel="alternate" href="https://x.test/a"/></entry></feed>`;
+    const h2 = makeCtx({ source, routes: [route(URL_, feedReply(atom))] });
+    const r2 = await fetch(h2.ctx);
+    expect(JSON.stringify(r2.items)).not.toContain('data:');
+    expect(JSON.stringify(r2.items)).toContain('https://x.test/a');
+  });
+
   it('with heavy, a change is a job hand-off with no items', async () => {
     const heavy = { ...source, heavy: true };
     const h = makeCtx({ source: heavy, cursor: at(key(3), '"f0"'), routes: [route(URL_, feedReply(xml))] });

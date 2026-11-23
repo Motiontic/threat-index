@@ -110,6 +110,29 @@ describe('page (Workers)', () => {
     expect(dropped[0]?.extra).toEqual({ source: 'cert-in' });
   });
 
+  it.each([
+    ['a text-selector link field', { link: 'td.title' }, '<td class="title">javascript:alert(1)</td>'],
+    [
+      'an attr outside the URL list',
+      { link: { selector: 'td.title a', attr: 'data-href' } },
+      '<td class="title"><a data-href="javascript:alert(1)">x</a></td>',
+    ],
+  ])('a link-only source drops a non-http(s) link set by %s', async (_n, fields, cell) => {
+    const base = source.pull?.page;
+    const link = {
+      ...(SOURCE_BY_ID.get('zdi') as NonNullable<ReturnType<typeof SOURCE_BY_ID.get>>),
+      pull: { page: { ...base, fields: { id: base?.fields?.id, date: base?.fields?.date, ...fields } } },
+    } as typeof source;
+    const doc = `<table><tr class="advisory"><td class="id">L-1</td>${cell}<td class="date">d</td></tr></table>`;
+    const h = makeCtx({ source: link, routes: [route(URL_, page(doc))] });
+    const r = await fetch(h.ctx);
+    expect(((r.items[0]?.body ?? {}) as { link?: string }).link).toBe('');
+    expect(String(r.receipt?.body)).not.toContain('javascript');
+    const dropped = h.logs.filter((l) => l.msg.includes('dropped a link'));
+    expect(dropped.length).toBeGreaterThan(0);
+    expect(JSON.stringify(dropped)).not.toContain('javascript');
+  });
+
   it('with heavy, a change is a job hand-off', async () => {
     const heavy = { ...source, heavy: true };
     const r = await fetch(
