@@ -4,6 +4,7 @@ import {
   BASE_HEADERS,
   buildCsp,
   makeNonce,
+  secureRedirect,
   shouldNoindex,
 } from '../app/lib/security.server';
 
@@ -69,5 +70,29 @@ describe('noindex rule', () => {
     expect(shouldNoindex(true, undefined)).toBe(true);
     expect(shouldNoindex(false, 'production')).toBe(false);
     expect(shouldNoindex(false, undefined)).toBe(false);
+  });
+});
+
+describe('redirects', () => {
+  it('carry the document headers, a fresh CSP nonce and noindex', () => {
+    const a = secureRedirect(new Response(null, { status: 301, headers: { Location: '/e/X' } }), {
+      noindex: true,
+    });
+    const b = secureRedirect(new Response(null, { status: 301, headers: { Location: '/e/X' } }), {
+      noindex: true,
+    });
+    expect(a.status).toBe(301);
+    expect(a.headers.get('Location')).toBe('/e/X');
+    for (const name of Object.keys(BASE_HEADERS)) expect(a.headers.get(name), name).toBe(BASE_HEADERS[name]);
+    expect(a.headers.get('X-Robots-Tag')).toBe('noindex');
+    expect(a.headers.get('Content-Security-Policy')).toMatch(
+      /^default-src 'self'; script-src 'self' 'nonce-/,
+    );
+    expect(a.headers.get('Content-Security-Policy')).not.toBe(b.headers.get('Content-Security-Policy'));
+  });
+
+  it('leaves non-redirect responses alone', () => {
+    const res = new Response('ok', { status: 200 });
+    expect(secureRedirect(res, { noindex: true })).toBe(res);
   });
 });

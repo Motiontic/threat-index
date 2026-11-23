@@ -54,3 +54,17 @@ export function applySecurityHeaders(
   if (options.nonce) headers.set('Content-Security-Policy', buildCsp(options.nonce, { dev: options.dev }));
   if (options.noindex) headers.set('X-Robots-Tag', 'noindex');
 }
+
+/**
+ * Redirects thrown by loaders (the `/e/:id` 301s) skip `handleRequest`, so the worker passes them here.
+ * They get the same headers as a document, with their own fresh nonce. Other responses pass through.
+ */
+export function secureRedirect(
+  response: Response,
+  options: { dev?: boolean; noindex?: boolean } = {},
+): Response {
+  if (response.status < 300 || response.status > 399) return response;
+  const headers = new Headers(response.headers);
+  applySecurityHeaders(headers, { nonce: makeNonce(), dev: options.dev, noindex: options.noindex });
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}

@@ -90,6 +90,9 @@ async function runChecks() {
     const loc = res.headers.get('location') ?? '';
     if (res.status !== 301) fail(from, `status ${res.status}, wanted 301`);
     if (!loc.endsWith('/e/CVE-2025-3248')) fail(from, `redirects to "${loc}"`);
+    if (!res.headers.get('content-security-policy')?.includes("'nonce-")) fail(from, 'redirect has no CSP');
+    if (res.headers.get('x-robots-tag') !== 'noindex') fail(from, 'redirect has no X-Robots-Tag: noindex');
+    if (res.headers.get('x-content-type-options') !== 'nosniff') fail(from, 'redirect has no nosniff');
   }
 
   for (const path of ['/e/CVE-1999-99999', '/no-such-page', '/index/ab']) {
