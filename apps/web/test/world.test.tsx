@@ -29,7 +29,7 @@ vi.mock('../app/data/data.server', async () => {
       return fixtures(req);
     },
   };
-  return { getData: () => create(api, 'fixtures') };
+  return { getData: () => create(api, 'fixtures', { requestId: 'req-test-0001', ip: null }) };
 });
 
 import { default as Breach, loader as breachLoader, meta as breachMeta } from '../app/routes/breach';
@@ -50,7 +50,7 @@ const SUMMARY = {
 };
 const site = (routes: Parameters<typeof fakeApi>[0]) => {
   const f = fakeApi(routes);
-  return { ...f, data: createSiteData(f.api, 'api') };
+  return { ...f, data: createSiteData(f.api, 'api', { requestId: 'req-test-0001', ip: null }) };
 };
 const metaOf = (tags: Record<string, string>[], key: string) =>
   tags.find((t) => t.name === key || t.rel === key || t.title !== undefined);
@@ -84,7 +84,7 @@ describe('request building', () => {
     for (const r of requests) {
       expect(r.headers.get('authorization')).toBeNull();
       expect(r.headers.get('cookie')).toBeNull();
-      expect([...r.headers.keys()]).toEqual(['accept']);
+      expect([...r.headers.keys()].sort()).toEqual(['accept', 'x-request-id']);
     }
     expect(worldQuery({ page: 1 })).toBe('');
   });

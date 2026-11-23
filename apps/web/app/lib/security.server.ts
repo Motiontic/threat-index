@@ -46,6 +46,8 @@ export function buildCsp(
 }
 
 export const BASE_HEADERS: Readonly<Record<string, string>> = {
+  // No `preload`: that is a domain-wide commitment.
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'X-Frame-Options': 'DENY',
@@ -71,7 +73,12 @@ export function applySecurityHeaders(
   headers: Headers,
   options: { nonce?: string; dev?: boolean; noindex?: boolean; clerk?: { frontendApi: string } | null },
 ): void {
-  for (const [name, value] of Object.entries(BASE_HEADERS)) headers.set(name, value);
+  // A route that asked for `no-store` (/ops) keeps it; every other page gets the base cache header.
+  const noStore = /no-store/i.test(headers.get('Cache-Control') ?? '');
+  for (const [name, value] of Object.entries(BASE_HEADERS)) {
+    if (name === 'Cache-Control' && noStore) continue;
+    headers.set(name, value);
+  }
   if (options.nonce)
     headers.set(
       'Content-Security-Policy',
@@ -92,4 +99,32 @@ export function secureRedirect(
   const headers = new Headers(response.headers);
   applySecurityHeaders(headers, { nonce: makeNonce(), dev: options.dev, noindex: options.noindex });
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+/** Sets each base header (no CSP) the response lacks. Used for resource routes and the 429 page. */
+export function applyMissingBaseHeaders(headers: Headers): void {
+  for (const [name, value] of Object.entries(BASE_HEADERS)) if (!headers.has(name)) headers.set(name, value);
+}
+
+/** Static page for an over-limit visitor: no script, no external asset. */
+export const RATE_LIMITED_HTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>Too many requests · Threat Index</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem}</style></head>
+<body><h1>Too many requests</h1><p>Too many requests. Wait a minute and try again.</p><p><a href="/">Back to the home page</a></p></body></html>`;
+
+export const RATE_LIMIT_RETRY_AFTER = '60';
+
+/** The 429 for a page request (or a `.data` request, which gets plain text). */
+export function rateLimitedResponse(isData: boolean): Response {
+  const headers = new Headers({ 'Retry-After': RATE_LIMIT_RETRY_AFTER, 'X-Robots-Tag': 'noindex' });
+  headers.set('Cache-Control', 'no-store');
+  applyMissingBaseHeaders(headers);
+  if (isData) {
+    headers.set('Content-Type', 'text/plain; charset=utf-8');
+    return new Response('Too many requests', { status: 429, headers });
+  }
+  headers.set('Content-Type', 'text/html; charset=utf-8');
+  headers.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  return new Response(RATE_LIMITED_HTML, { status: 429, headers });
 }

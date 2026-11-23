@@ -1,7 +1,9 @@
 // The only file that calls `fetch`. Every method asks ti-api over the service binding for a PREVIEW:
-// the request carries no visitor header (no Cookie, no Authorization) and the query string is built here from
+// the request carries no visitor header (no Cookie, no Authorization; only a request id and a signed IP) and the query string is built here from
 // validated values, so the API's answer, and any caching of it, never varies on the visitor.
 import type { MePatch, SavedSearchCreate } from '@ti/core/account';
+import { CLIENT_IP_HEADER, CLIENT_SIG_HEADER, CLIENT_TS_HEADER, signClientIp } from '@ti/core/edge';
+import { REQUEST_ID_HEADER } from '@ti/core/log';
 import {
   GuardError,
   guardApiError,
@@ -17,6 +19,7 @@ import {
   guardWatchList,
 } from './guards';
 import type { DataMode } from './mode.server';
+import { guardOps } from './ops-guard';
 import type { AccountClient, SearchParams, SiteData, WorldQuery } from './types';
 import {
   guardBreachDetail,
@@ -74,6 +77,44 @@ export class NotFound extends Error {
   }
 }
 
+/** The API answered 429. `retryAfter` is its Retry-After in seconds (1 to 3600, default 60). */
+export class ApiRateLimited extends Error {
+  constructor(readonly retryAfter: number) {
+    super('rate limited');
+    this.name = 'ApiRateLimited';
+  }
+}
+
+/** What the API may know about the visitor's request: a request id and, when known, their IP (signed). */
+export interface ClientContext {
+  requestId: string;
+  ip: string | null;
+}
+
+export function parseRetryAfter(raw: string | null): number {
+  const n = Number(raw);
+  return raw !== null && Number.isInteger(n) && n >= 1 && n <= 3600 ? n : 60;
+}
+
+/**
+ * The only headers that identify the request to the API: the request id, and, when `secret` is set and the IP
+ * is known, the IP with an HMAC the API verifies. No Cookie, Authorization or other visitor header.
+ */
+export async function clientHeaders(
+  ctx: ClientContext,
+  secret: string | undefined,
+  now: Date = new Date(),
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { [REQUEST_ID_HEADER]: ctx.requestId };
+  if (secret && ctx.ip) {
+    const ts = Math.floor(now.getTime() / 1000);
+    headers[CLIENT_IP_HEADER] = ctx.ip;
+    headers[CLIENT_TS_HEADER] = String(ts);
+    headers[CLIENT_SIG_HEADER] = await signClientIp(secret, ctx.ip, ts, ctx.requestId);
+  }
+  return headers;
+}
+
 /** The query string for a search, built field by field in a fixed order. */
 export function searchQuery(params: SearchParams): string {
   const qs = new URLSearchParams();
@@ -125,13 +166,18 @@ async function readCapped(res: Response): Promise<string> {
   return new TextDecoder().decode(all);
 }
 
-export function createSiteData(api: Pick<Fetcher, 'fetch'>, mode: DataMode): SiteData {
+export function createSiteData(
+  api: Pick<Fetcher, 'fetch'>,
+  mode: DataMode,
+  client: ClientContext,
+  edgeSecret?: string,
+): SiteData {
   async function call(path: string, accept = 'application/json'): Promise<Response> {
     try {
       return await api.fetch(
         new Request(`${API_ORIGIN}${path}`, {
           method: 'GET',
-          headers: { Accept: accept },
+          headers: { Accept: accept, ...(await clientHeaders(client, edgeSecret)) },
           signal: AbortSignal.timeout(TIMEOUT_MS),
         }),
       );
@@ -148,6 +194,10 @@ export function createSiteData(api: Pick<Fetcher, 'fetch'>, mode: DataMode): Sit
         await res.body?.cancel();
         return null;
       }
+      if (res.status === 429) {
+        await res.body?.cancel();
+        throw new ApiRateLimited(parseRetryAfter(res.headers.get('retry-after')));
+      }
       if (res.status === 400) {
         let message = 'Bad request';
         try {
@@ -163,7 +213,8 @@ export function createSiteData(api: Pick<Fetcher, 'fetch'>, mode: DataMode): Sit
       }
       return guard(JSON.parse(await readCapped(res)));
     } catch (err) {
-      if (err instanceof ApiUnavailable || err instanceof ApiBadRequest) throw err;
+      if (err instanceof ApiUnavailable || err instanceof ApiBadRequest || err instanceof ApiRateLimited)
+        throw err;
       if (err instanceof GuardError || err instanceof SyntaxError)
         throw new ApiUnavailable(`ti-api sent an unusable body for ${path}`, { cause: err });
       throw new ApiUnavailable(`ti-api read failed for ${path}`, { cause: err });
@@ -207,9 +258,18 @@ export function createSiteData(api: Pick<Fetcher, 'fetch'>, mode: DataMode): Sit
  * The account calls: the only requests that carry a visitor's identity, and only as `Authorization: Bearer`.
  * No Cookie and no other visitor header is ever sent. Same timeout, size cap and guards as the public client.
  */
-export function createAccountClient(api: Pick<Fetcher, 'fetch'>, token: string): AccountClient {
+export function createAccountClient(
+  api: Pick<Fetcher, 'fetch'>,
+  token: string,
+  client: ClientContext,
+  edgeSecret?: string,
+): AccountClient {
   async function call(method: string, path: string, body?: unknown): Promise<Response> {
-    const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${token}` };
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...(await clientHeaders(client, edgeSecret)),
+    };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     try {
       return await api.fetch(
@@ -238,7 +298,7 @@ export function createAccountClient(api: Pick<Fetcher, 'fetch'>, token: string):
     method: string,
     path: string,
     guard: (v: unknown) => T,
-    options: { body?: unknown; notFound?: 'null' | 'throw'; ok?: number[] } = {},
+    options: { body?: unknown; notFound?: 'null' | 'throw'; ok?: number[]; forbidden?: 'null' } = {},
   ): Promise<T | null> {
     const res = await call(method, path, options.body);
     const ok = options.ok ?? [200];
@@ -247,10 +307,18 @@ export function createAccountClient(api: Pick<Fetcher, 'fetch'>, token: string):
         await res.body?.cancel();
         throw new SignInRequired();
       }
+      if (res.status === 403 && options.forbidden === 'null') {
+        await res.body?.cancel();
+        return null;
+      }
       if (res.status === 404) {
         await res.body?.cancel();
         if (options.notFound === 'throw') throw new NotFound();
         return null;
+      }
+      if (res.status === 429) {
+        await res.body?.cancel();
+        throw new ApiRateLimited(parseRetryAfter(res.headers.get('retry-after')));
       }
       if (res.status === 409) throw new ApiConflict(await errorText(res));
       if (res.status === 400) throw new ApiBadRequest(await errorText(res));
@@ -265,6 +333,7 @@ export function createAccountClient(api: Pick<Fetcher, 'fetch'>, token: string):
       if (
         err instanceof ApiUnavailable ||
         err instanceof ApiBadRequest ||
+        err instanceof ApiRateLimited ||
         err instanceof ApiConflict ||
         err instanceof SignInRequired ||
         err instanceof NotFound
@@ -310,5 +379,6 @@ export function createAccountClient(api: Pick<Fetcher, 'fetch'>, token: string):
       await run('DELETE', '/v1/me', guardOk, mutate);
     },
     entryFull: (id) => run('GET', `/v1/entries/${encodeURIComponent(id)}`, guardEntryFull),
+    adminOps: () => run('GET', '/v1/admin/ops', guardOps, { forbidden: 'null' }),
   };
 }

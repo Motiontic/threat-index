@@ -17,6 +17,7 @@ export const ERROR_TEXT: Record<string, string> = {
   sign_in_required: 'Your session ended. Sign in again.',
   bad_origin: 'The request was refused.',
   not_found: 'That record was not found.',
+  rate_limited: 'Too many requests. Wait a minute and try again.',
   unavailable: 'The service is not answering. Try again in a moment.',
   delete_sign_in_failed: 'Your data is deleted; removing the sign-in failed, try again.',
   confirmation_mismatch: 'Type the phrase exactly.',

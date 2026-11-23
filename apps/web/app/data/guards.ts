@@ -24,29 +24,29 @@ import type { EntryFullView } from './types';
 
 export class GuardError extends Error {}
 
-type Obj = Record<string, unknown>;
+export type Obj = Record<string, unknown>;
 
-function obj(value: unknown, what: string): Obj {
+export function obj(value: unknown, what: string): Obj {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new GuardError(`${what}: not an object`);
   return value as Obj;
 }
-function str(o: Obj, key: string, what: string): string {
+export function str(o: Obj, key: string, what: string): string {
   const v = o[key];
   if (typeof v !== 'string') throw new GuardError(`${what}.${key}: not a string`);
   return v;
 }
-function bool(o: Obj, key: string, what: string): boolean {
+export function bool(o: Obj, key: string, what: string): boolean {
   const v = o[key];
   if (typeof v !== 'boolean') throw new GuardError(`${what}.${key}: not a boolean`);
   return v;
 }
-function num(o: Obj, key: string, what: string): number {
+export function num(o: Obj, key: string, what: string): number {
   const v = o[key];
   if (typeof v !== 'number' || !Number.isFinite(v)) throw new GuardError(`${what}.${key}: not a number`);
   return v;
 }
-function optStr(o: Obj, key: string, what: string): string | undefined {
+export function optStr(o: Obj, key: string, what: string): string | undefined {
   const v = o[key];
   if (v === undefined || v === null) return undefined;
   if (typeof v !== 'string') throw new GuardError(`${what}.${key}: not a string`);
@@ -58,7 +58,7 @@ function optNum(o: Obj, key: string, what: string): number | undefined {
   if (typeof v !== 'number' || !Number.isFinite(v)) throw new GuardError(`${what}.${key}: not a number`);
   return v;
 }
-function arr(o: Obj, key: string, what: string): unknown[] {
+export function arr(o: Obj, key: string, what: string): unknown[] {
   const v = o[key];
   if (!Array.isArray(v)) throw new GuardError(`${what}.${key}: not an array`);
   return v;

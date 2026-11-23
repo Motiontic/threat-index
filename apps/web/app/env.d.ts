@@ -2,6 +2,12 @@
 declare namespace Cloudflare {
   interface Env {
     API: Fetcher;
+    /** Per-IP page limit; a missing binding fails open. */
+    RL_PAGES?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+    /** Worker secret shared with ti-api: signs the client IP forwarded to it. */
+    EDGE_HMAC_SECRET?: string;
+    /** Comma list of Clerk user ids who may see /ops (a var set at deploy). */
+    ADMIN_USER_IDS?: string;
     TI_ENV: string;
     DATA_SOURCE?: string;
     /** Clerk's public key (a var, set at deploy) and secret key (a Worker secret). */

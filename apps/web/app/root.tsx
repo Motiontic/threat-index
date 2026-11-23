@@ -100,12 +100,8 @@ export function ErrorBoundary() {
   const root = useRouteLoaderData<typeof loader>('root');
   const { pathname } = useLocation();
   const status = isRouteErrorResponse(error) ? error.status : 500;
-  const title =
-    status === 404
-      ? 'Page not found'
-      : status === 502
-        ? 'The index is not answering'
-        : 'Something went wrong';
+  const copy = errorCopy(status);
+  const title = copy.title;
   const entryId = pathname.startsWith('/e/') ? safeDecode(pathname.slice(3)) : null;
   const searchTo = entryId ? `/search?q=${encodeURIComponent(entryId.slice(0, 200))}` : '/search';
 
@@ -117,19 +113,9 @@ export function ErrorBoundary() {
         <h1>{title}</h1>
         <span className="error-code">{status}</span>
       </div>
-      <EmptyState
-        title={
-          status === 404
-            ? 'We have no page here'
-            : status === 502
-              ? 'Records are temporarily out of reach'
-              : 'The page failed to load'
-        }
-      >
+      <EmptyState title={copy.heading}>
         <p>
-          {status === 404
-            ? 'The address may be wrong, or the record is not in the index.'
-            : 'Try again in a moment.'}{' '}
+          {copy.body}{' '}
           <Link to={searchTo}>{entryId ? `Search for “${entryId.slice(0, 80)}”` : 'Search the index'}</Link>.
         </p>
         {import.meta.env.DEV && error instanceof Error ? <pre>{error.stack}</pre> : null}
@@ -143,6 +129,39 @@ export function ErrorBoundary() {
   ) : (
     page
   );
+}
+
+/** Error page copy by status. Anything unlisted gets the generic text. */
+function errorCopy(status: number): { title: string; heading: string; body: string } {
+  if (status === 404)
+    return {
+      title: 'Page not found',
+      heading: 'We have no page here',
+      body: 'The address may be wrong, or the record is not in the index.',
+    };
+  if (status === 429)
+    return {
+      title: 'Too many requests',
+      heading: 'Wait a minute and try again.',
+      body: 'You are going a little fast.',
+    };
+  if (status === 502)
+    return {
+      title: 'The index is not answering',
+      heading: 'Records are temporarily out of reach',
+      body: 'Try again in a moment.',
+    };
+  if (status === 500 || status === 503)
+    return {
+      title: 'Something went wrong on our side',
+      heading: 'The page failed to load',
+      body: 'Try again in a moment.',
+    };
+  return {
+    title: 'Something went wrong',
+    heading: 'The page failed to load',
+    body: 'Try again in a moment.',
+  };
 }
 
 function safeDecode(value: string): string {
