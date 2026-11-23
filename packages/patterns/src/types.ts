@@ -1,5 +1,5 @@
-import type { Cursor, Receipt } from '@ti/core';
-import type { PatternName, SourceConfig } from '@ti/sources';
+import type { Cursor, Receipt } from '@ti/core/types';
+import type { PatternName, SourceConfig } from '@ti/sources/registry';
 
 /**
  * Every source fits one of seven pull patterns. Each one first asks cheaply whether

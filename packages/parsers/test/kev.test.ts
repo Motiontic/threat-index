@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import sample from '../../../fixtures/cisa-kev/sample.json';
-import { parseKev } from './kev';
+import { parseKev } from '../src/kev';
 
 describe('CISA KEV parser', () => {
   it('turns each entry into an exploited-in-the-wild signal', () => {

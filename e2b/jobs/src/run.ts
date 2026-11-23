@@ -1,32 +1,25 @@
 /**
  * E2B job runner. See docs/IMPLEMENTATION_PLAN.md §6.
  * Usage (in a sandbox or locally): node run.ts '<job-json>'
+ * Each job kind lives in jobs/<kind>.ts and exports run(job, ctx). This file only dispatches.
  */
-type JobKind =
-  | 'first-load'
-  | 'epss-diff'
-  | 'big-file'
-  | 'nightly-fold'
-  | 'search-index'
-  | 'compaction'
-  | 'deep-query';
-
-interface Job {
-  id: string;
-  kind: JobKind;
-  sourceId?: string;
-  apiBase: string; // ti-api, for upload-urls and complete callbacks (HMAC-signed)
-  hmac: string; // per-job signature issued by the API; not a long-lived secret
-}
+import { JOB_KINDS, type Job, type JobContext, type JobKind } from './types.ts';
 
 const job = JSON.parse(process.argv[2] ?? process.env.JOB_JSON ?? '{}') as Job;
 
+const ctx: JobContext = {
+  log: (msg, extra) => console.log(JSON.stringify({ level: 'info', msg, id: job.id, ...extra })),
+};
+
 async function main(): Promise<void> {
   if (!job.id || !job.kind) throw new Error('missing job description');
-  console.log(JSON.stringify({ level: 'info', msg: 'job start', id: job.id, kind: job.kind }));
-  // TODO(M0/M1): per kind — download or read inputs (DuckDB httpfs, read-only R2 token),
-  // write Parquet to /tmp, request presigned URLs, upload to lake/ and inbox/, then call complete.
-  console.log(JSON.stringify({ level: 'info', msg: 'job done', id: job.id }));
+  if (!JOB_KINDS.includes(job.kind as JobKind)) throw new Error(`unknown job kind: ${job.kind}`);
+  ctx.log('job start', { kind: job.kind });
+  const { run } = (await import(`./jobs/${job.kind}.ts`)) as {
+    run: (j: Job, c: JobContext) => Promise<void>;
+  };
+  await run(job, ctx);
+  ctx.log('job done');
 }
 
 main().catch((err) => {

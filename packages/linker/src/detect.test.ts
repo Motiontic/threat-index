@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectChanges, epssBand, isHot } from './index';
+import { detectChanges, epssBand, isHot } from './detect';
 
 describe('hot set', () => {
   it('keeps recent, exploited, exploit-public and high-EPSS flaws hot', () => {

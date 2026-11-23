@@ -105,3 +105,12 @@ export interface ParseResult<T> {
   /** Fields we did not expect. Reported by the watchdog, never a crash. */
   unknownFields: string[];
 }
+
+/** Anything a parser can emit. Each record names the source it came from. */
+export type ParsedRecord =
+  | VulnRecord
+  | AdvisoryRecord
+  | SignalRecord
+  | NoticeRecord
+  | IncidentRecord
+  | TechniqueRecord;

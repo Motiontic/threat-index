@@ -14,18 +14,18 @@ It moves code. It adds no product behaviour.
 
 ## Current state (checked on main)
 
-| Area | Today |
-| ---- | ----- |
-| `apps/api/src/index.ts` (158 lines) | Health, Clerk webhook (Svix verify + `svix-id` dedupe), `clerkMiddleware`, `requireUser`, `GET /v1/entries/:id` (preview vs full), `/v1/me/watch` routes, `deleteUserData`, helpers `resolveKey`, `credits`, `PREVIEW_FIELDS`, `PREFIX_SOURCE`, all inline |
-| `apps/collector/src/index.ts` (64 lines) | `scheduled()` with `CADENCE_BY_CRON` and `dueSources()`, `queue()` with TODOs |
-| `apps/loader`, `apps/notify` | One `index.ts` each |
-| `packages/*/package.json` | `"main": "src/index.ts"`; `src/index.ts` is `export *` from each module |
-| `packages/sources/src/registry.ts` | `SourceConfig`, the `src()` helper and all 55 sources in one array |
-| `packages/patterns/src/index.ts` | Pattern types only; no pattern files |
-| `packages/parsers/src` | `kev.ts` + test; barrel |
-| `packages/db` | Hand-written SQL migrations `migrations/<db>/0001_init.sql` for six databases, `upsertNewerSql()`, `drizzle-orm` installed but no schema |
-| `e2b/jobs/src/run.ts` | One file, a `JobKind` union of 7 jobs, no per-job code |
-| Tests | Root `vitest.config.ts`, Node only. CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test` |
+| Area                                     | Today                                                                                                                                                                                                                                                      |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api/src/index.ts` (158 lines)      | Health, Clerk webhook (Svix verify + `svix-id` dedupe), `clerkMiddleware`, `requireUser`, `GET /v1/entries/:id` (preview vs full), `/v1/me/watch` routes, `deleteUserData`, helpers `resolveKey`, `credits`, `PREVIEW_FIELDS`, `PREFIX_SOURCE`, all inline |
+| `apps/collector/src/index.ts` (64 lines) | `scheduled()` with `CADENCE_BY_CRON` and `dueSources()`, `queue()` with TODOs                                                                                                                                                                              |
+| `apps/loader`, `apps/notify`             | One `index.ts` each                                                                                                                                                                                                                                        |
+| `packages/*/package.json`                | `"main": "src/index.ts"`; `src/index.ts` is `export *` from each module                                                                                                                                                                                    |
+| `packages/sources/src/registry.ts`       | `SourceConfig`, the `src()` helper and all 55 sources in one array                                                                                                                                                                                         |
+| `packages/patterns/src/index.ts`         | Pattern types only; no pattern files                                                                                                                                                                                                                       |
+| `packages/parsers/src`                   | `kev.ts` + test; barrel                                                                                                                                                                                                                                    |
+| `packages/db`                            | Hand-written SQL migrations `migrations/<db>/0001_init.sql` for six databases, `upsertNewerSql()`, `drizzle-orm` installed but no schema                                                                                                                   |
+| `e2b/jobs/src/run.ts`                    | One file, a `JobKind` union of 7 jobs, no per-job code                                                                                                                                                                                                     |
+| Tests                                    | Root `vitest.config.ts`, Node only. CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test`                                                                                                                                                                     |
 
 The `0001_init.sql` migrations are already applied to the staging databases. **Do not edit any file under
 `packages/db/migrations/`.**

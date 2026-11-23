@@ -1,18 +1,7 @@
 /**
- * D1 helpers. Tables use natural primary keys (WITHOUT ROWID) so one row costs one write.
- * Migrations live in ../migrations/<database>/ and are applied with `pnpm --filter @ti/db migrate:local`.
+ * Max statements we send per invocation. Kept at 40 to bound batch size and CPU time per step (the
+ * account is on Workers Paid, so this is not a plan limit).
  */
-export const DATABASES = [
-  'ti_control',
-  'ti_vulns',
-  'ti_advisories',
-  'ti_signals',
-  'ti_world',
-  'ti_users',
-] as const;
-export type DatabaseName = (typeof DATABASES)[number];
-
-/** Max statements we send per invocation (free plan allows 50 queries per Worker invocation). */
 export const MAX_STATEMENTS_PER_INVOCATION = 40;
 
 /**
