@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { displayType } from '../data/display';
 import type { Credit, EntryType, SearchHit } from '../data/types';
 import { formatDate, TYPE_LABELS } from '../lib/format';
+import { OpenSignUpButton } from './account-bits';
 
 export function TypeBadge({ type }: { type: EntryType }) {
   return <span className={`badge badge-${type}`}>{TYPE_LABELS[type]}</span>;
@@ -196,12 +197,8 @@ export function GateCard({ entryKey }: { entryKey: string }) {
           <li>Watch an entry and get an alert when it changes</li>
         </ul>
         <div className="gate-actions">
-          <Link to="/account" className="button button-primary">
-            Sign up free
-          </Link>
-          <Link to="/account" className="button">
-            Log in
-          </Link>
+          <OpenSignUpButton primary>Sign up free</OpenSignUpButton>
+          <OpenSignUpButton mode="in">Log in</OpenSignUpButton>
         </div>
       </section>
     </div>

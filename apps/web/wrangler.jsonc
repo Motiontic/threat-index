@@ -18,6 +18,11 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   "vars": { "TI_ENV": "production", "DATA_SOURCE": "api" },
+  // Clerk (sign-in). No key values live here:
+  //   CLERK_PUBLISHABLE_KEY  a plain var (public), set at deploy by scripts/deploy-web.mjs (`--var`).
+  //   CLERK_SECRET_KEY       a Worker secret: `wrangler secret put CLERK_SECRET_KEY --name ti-web[-staging]`.
+  // Without both, Clerk is off: every page renders signed out and sign-in says it is unavailable.
+  // Never add an AUTH_MODE var here: fake sign-in is for local fixtures runs only (deploy refuses it).
   // Loaders call ti-api through this binding (app/data/api.server.ts).
   "services": [{ "binding": "API", "service": "ti-api" }],
 

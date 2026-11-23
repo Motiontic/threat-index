@@ -1,9 +1,12 @@
 import { Form, Link } from 'react-router';
+import { errorText, useAccountFetcher } from '../components/account-bits';
 import { EmptyState, ResultCard } from '../components/ui';
 import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
 import type { EntryType, SearchHit } from '../data/types';
+import { useAuthState, useOpenSignUp } from '../lib/auth';
 import { TYPE_PLURALS } from '../lib/format';
+import { saveIntent } from '../lib/intent';
 import { API_TYPES, hasCriteria, paramsToQuery, parseSearchParams, SEVERITIES } from '../lib/search-params';
 import { buildMeta, pageTitle } from '../lib/seo';
 import type { Route } from './+types/search';
@@ -75,6 +78,7 @@ export default function Search({ loaderData }: Route.ComponentProps) {
             {total} {total === 1 ? 'result' : 'results'}
           </span>
         ) : null}
+        {hasCriteria(params) ? <SaveSearch qs={paramsToQuery(params, null)} /> : null}
       </div>
       <div className="search-layout">
         <Form method="get" action="/search" className="filters panel" aria-label="Filter results">
@@ -177,5 +181,32 @@ export default function Search({ loaderData }: Route.ComponentProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Signed in: saves this search. Signed out: remembers the intent and opens the sign-up modal. */
+function SaveSearch({ qs }: { qs: string }) {
+  const { isSignedIn, available } = useAuthState();
+  const open = useOpenSignUp();
+  const { submit, busy, result } = useAccountFetcher();
+  if (!available) return null;
+  return (
+    <span className="save-search">
+      <button
+        type="button"
+        className="button"
+        disabled={busy}
+        onClick={() => {
+          if (isSignedIn) return submit({ intent: 'save-search', qs });
+          saveIntent({ action: 'save-search', target: qs });
+          open({ fallbackRedirectUrl: window.location.href });
+        }}
+      >
+        Save search
+      </button>{' '}
+      <span className="muted" role="status">
+        {result ? (result.ok ? 'Search saved' : errorText(result.error)) : ''}
+      </span>
+    </span>
   );
 }

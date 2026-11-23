@@ -19,6 +19,57 @@ describe('nonce', () => {
   });
 });
 
+describe('Content-Security-Policy with Clerk', () => {
+  const clerk = { frontendApi: 'example.clerk.accounts.dev' };
+  const base = buildCsp('abc').split('; ');
+  const withClerk = buildCsp('abc', { clerk }).split('; ');
+  const directive = (list: string[], name: string) => list.find((d) => d.startsWith(`${name} `));
+
+  it('adds exactly the instance host, the bot challenge host, the avatar host and blob workers', () => {
+    expect(directive(withClerk, 'script-src')).toBe(
+      "script-src 'self' 'nonce-abc' https://example.clerk.accounts.dev https://challenges.cloudflare.com",
+    );
+    expect(directive(withClerk, 'connect-src')).toBe("connect-src 'self' https://example.clerk.accounts.dev");
+    expect(directive(withClerk, 'img-src')).toBe("img-src 'self' https://img.clerk.com");
+    expect(directive(withClerk, 'frame-src')).toBe('frame-src https://challenges.cloudflare.com');
+    expect(directive(withClerk, 'worker-src')).toBe("worker-src 'self' blob:");
+  });
+
+  it('changes nothing else and keeps frame-ancestors, style-src and form-action as they were', () => {
+    const changed = withClerk.filter((d) => !base.includes(d)).map((d) => d.split(' ')[0]);
+    expect(changed.sort()).toEqual(['connect-src', 'frame-src', 'img-src', 'script-src', 'worker-src']);
+    expect(withClerk).toContain("frame-ancestors 'none'");
+    expect(withClerk).toContain("style-src 'self'");
+    expect(withClerk).toContain("form-action 'self'");
+  });
+
+  it('has no wildcard, no unsafe source and no other remote host', () => {
+    const csp = withClerk.join('; ');
+    expect(csp).not.toMatch(/\*|unsafe-|data:/);
+    const hosts = [...csp.matchAll(/https:\/\/[^\s;]+/g)].map((m) => m[0]).sort();
+    expect(hosts).toEqual(
+      [
+        'https://challenges.cloudflare.com',
+        'https://challenges.cloudflare.com',
+        'https://example.clerk.accounts.dev',
+        'https://example.clerk.accounts.dev',
+        'https://img.clerk.com',
+      ].sort(),
+    );
+  });
+
+  it("is exactly today's policy without a config", () => {
+    expect(buildCsp('abc', { clerk: null })).toBe(buildCsp('abc'));
+    expect(buildCsp('abc', { clerk: undefined })).toBe(buildCsp('abc'));
+  });
+
+  it('applySecurityHeaders passes the config through', () => {
+    const h = new Headers();
+    applySecurityHeaders(h, { nonce: 'abc', clerk });
+    expect(h.get('Content-Security-Policy')).toContain('https://example.clerk.accounts.dev');
+  });
+});
+
 describe('Content-Security-Policy', () => {
   it('is exactly the production policy', () => {
     expect(buildCsp('abc')).toBe(

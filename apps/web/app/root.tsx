@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { rootAuthLoader } from '@clerk/react-router/server';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import { SOURCES } from '@ti/sources/registry';
@@ -16,9 +17,13 @@ import {
   useRouteLoaderData,
 } from 'react-router';
 import type { Route } from './+types/root';
+import { IntentRunner } from './components/intent-runner';
 import { Shell } from './components/shell';
 import { EmptyState } from './components/ui';
 import { currentMode } from './data/data.server';
+import { AuthProvider } from './lib/auth';
+import { authMiddleware, currentAuth } from './lib/auth.server';
+import { readFakeUser } from './lib/fake-auth.server';
 import { useNonce } from './lib/nonce';
 import { shouldNoindex } from './lib/security.server';
 import styles from './styles/app.css?url';
@@ -30,13 +35,24 @@ export const links: Route.LinksFunction = () => [
   { rel: 'stylesheet', href: styles },
 ];
 
-export async function loader() {
+export const middleware: Route.MiddlewareFunction[] = [authMiddleware];
+
+export async function loader(args: Route.LoaderArgs) {
   const mode = currentMode();
-  return {
+  const auth = currentAuth();
+  const fields = () => ({
     sourceCount: SOURCES.length,
     sample: mode === 'fixtures',
     noindex: shouldNoindex({ mode, tiEnv: env.TI_ENV, status: 200 }),
-  };
+    auth: {
+      kind: auth.kind,
+      fakeUser: auth.kind === 'fake' ? readFakeUser(args.request) : null,
+    },
+    clerk: auth.kind === 'clerk' ? auth.config : null,
+  });
+  // Clerk's root loader only works once its middleware has run, i.e. when Clerk is configured.
+  if (auth.kind === 'clerk') return rootAuthLoader(args, () => fields());
+  return fields();
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -62,11 +78,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { sourceCount, sample } = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
+  const { sourceCount, sample, auth } = data;
   return (
-    <Shell sample={sample} sourceCount={sourceCount} query={useQuery()}>
-      <Outlet />
-    </Shell>
+    <AuthProvider auth={auth} loaderData={data}>
+      <Shell sample={sample} sourceCount={sourceCount} query={useQuery()}>
+        <IntentRunner />
+        <Outlet />
+      </Shell>
+    </AuthProvider>
   );
 }
 
@@ -89,7 +109,7 @@ export function ErrorBoundary() {
   const entryId = pathname.startsWith('/e/') ? safeDecode(pathname.slice(3)) : null;
   const searchTo = entryId ? `/search?q=${encodeURIComponent(entryId.slice(0, 200))}` : '/search';
 
-  return (
+  const page = (
     <Shell sample={root?.sample ?? true} sourceCount={root?.sourceCount ?? null}>
       <title>{`${status === 404 ? 'Not found' : title} · Threat Index`}</title>
       {root?.noindex === false ? <meta name="robots" content="noindex" /> : null}
@@ -115,6 +135,13 @@ export function ErrorBoundary() {
         {import.meta.env.DEV && error instanceof Error ? <pre>{error.stack}</pre> : null}
       </EmptyState>
     </Shell>
+  );
+  return root ? (
+    <AuthProvider auth={root.auth} loaderData={root}>
+      {page}
+    </AuthProvider>
+  ) : (
+    page
   );
 }
 

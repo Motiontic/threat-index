@@ -9,6 +9,7 @@
       "!fixtures",
       "!worktrees",
       "!.loops",
+      "!.gstack",
       "!SPEC.md",
       "!**/wrangler.deploy.jsonc",
       "!**/wrangler.test.jsonc"

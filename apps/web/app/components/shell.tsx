@@ -1,6 +1,8 @@
 import { NVD_NOTICE } from '@ti/core/licence';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Form, Link, useLocation } from 'react-router';
+import { AccountButton, useAuthState } from '../lib/auth';
+import { SignInButtons } from './account-bits';
 
 const REPO = 'https://github.com/Motiontic/threat-index';
 
@@ -23,7 +25,10 @@ interface NavItem {
   count?: number;
 }
 
-function navSections(sourceCount: number | null): { title: string; items: NavItem[] }[] {
+function navSections(
+  sourceCount: number | null,
+  auth: { isSignedIn: boolean; available: boolean },
+): { title: string; items: NavItem[] }[] {
   const filter =
     (type: string): NavItem['current'] =>
     (p, s) =>
@@ -70,10 +75,14 @@ function navSections(sourceCount: number | null): { title: string; items: NavIte
     },
     {
       title: 'You',
-      items: [
-        { label: 'Sign up free', to: '/account', current: () => false },
-        { label: 'Log in', to: '/account', current: () => false },
-      ],
+      items: auth.isSignedIn
+        ? [{ label: 'Account', to: '/account', current: (p) => p === '/account' }]
+        : auth.available
+          ? [
+              { label: 'Sign up free', to: '/sign-up', current: (p) => p.startsWith('/sign-up') },
+              { label: 'Log in', to: '/sign-in', current: (p) => p.startsWith('/sign-in') },
+            ]
+          : [],
     },
   ];
 }
@@ -81,6 +90,7 @@ function navSections(sourceCount: number | null): { title: string; items: NavIte
 function Rail({ sourceCount, onNavigate }: { sourceCount: number | null; onNavigate: () => void }) {
   const location = useLocation();
   const search = new URLSearchParams(location.search);
+  const { isSignedIn, available } = useAuthState();
   return (
     <div className="rail" id="site-rail">
       <Link to="/" className="brand" onClick={onNavigate}>
@@ -92,26 +102,28 @@ function Rail({ sourceCount, onNavigate }: { sourceCount: number | null; onNavig
         </span>
       </Link>
       <nav aria-label="Main">
-        {navSections(sourceCount).map((section) => (
-          <div className="nav-section" key={section.title}>
-            <span className="label">{section.title}</span>
-            <ul>
-              {section.items.map((item) => (
-                <li key={item.label}>
-                  <Link
-                    to={item.to}
-                    className="nav-link"
-                    aria-current={item.current(location.pathname, search) ? 'page' : undefined}
-                    onClick={onNavigate}
-                  >
-                    {item.label}
-                    {item.count === undefined ? null : <span className="nav-count">{item.count}</span>}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        {navSections(sourceCount, { isSignedIn, available })
+          .filter((section) => section.items.length > 0)
+          .map((section) => (
+            <div className="nav-section" key={section.title}>
+              <span className="label">{section.title}</span>
+              <ul>
+                {section.items.map((item) => (
+                  <li key={item.label}>
+                    <Link
+                      to={item.to}
+                      className="nav-link"
+                      aria-current={item.current(location.pathname, search) ? 'page' : undefined}
+                      onClick={onNavigate}
+                    >
+                      {item.label}
+                      {item.count === undefined ? null : <span className="nav-count">{item.count}</span>}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
       </nav>
     </div>
   );
@@ -145,6 +157,12 @@ export function SearchForm({ defaultValue = '', large = false }: { defaultValue?
   );
 }
 
+function FooterAccountLink() {
+  const { isSignedIn, available } = useAuthState();
+  if (isSignedIn) return <Link to="/account">Account</Link>;
+  return available ? <Link to="/sign-in">Log in</Link> : null;
+}
+
 export function Footer({ sourceCount }: { sourceCount: number | null }) {
   return (
     <footer className="footer">
@@ -165,7 +183,7 @@ export function Footer({ sourceCount }: { sourceCount: number | null }) {
         <Link to="/index">Index A–Z</Link>
         <Link to="/search">Search everything</Link>
         <Link to="/sources">Sources</Link>
-        <Link to="/account">Log in</Link>
+        <FooterAccountLink />
       </nav>
     </footer>
   );
@@ -182,6 +200,7 @@ export function Shell({
   query?: string;
   children: ReactNode;
 }) {
+  const { isSignedIn } = useAuthState();
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const rail = useRef<HTMLDivElement>(null);
@@ -240,12 +259,16 @@ export function Shell({
               <SearchForm defaultValue={query} />
             </div>
             <div className="topbar-actions">
-              <Link to="/account" className="button">
-                Log in
-              </Link>
-              <Link to="/account" className="button button-primary">
-                Sign up free
-              </Link>
+              {isSignedIn ? (
+                <>
+                  <Link to="/account" className="button">
+                    Account
+                  </Link>
+                  <AccountButton />
+                </>
+              ) : (
+                <SignInButtons />
+              )}
             </div>
           </header>
           <main id="content" className="main">

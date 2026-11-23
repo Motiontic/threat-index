@@ -1,9 +1,9 @@
 // @ts-nocheck: uses node:fs, node:os and node:path, which this app's tsconfig has no types for.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { builtWebConfig } from '../scripts/deploy-web.mjs';
+import { builtWebConfig, webDeployArgs } from '../scripts/deploy-web.mjs';
 
 let dir: string;
 beforeEach(() => {
@@ -73,5 +73,67 @@ describe('builtWebConfig', () => {
 
   it('throws for an unknown target', () => {
     expect(() => builtWebConfig('preview', dir)).toThrow(/unknown target/);
+  });
+});
+
+describe('webDeployArgs', () => {
+  const TEST = `pk_test_${btoa('example.clerk.accounts.dev$')}`;
+  const LIVE = `pk_live_${btoa('clerk.example.com$')}`;
+  const path = () => join(dir, 'build', 'server', 'wrangler.json');
+
+  it('passes the staging key as a --var, read from the staging variable only', () => {
+    build(staging);
+    expect(webDeployArgs('staging', path(), { TI_CLERK_PUBLISHABLE_KEY_STAGING: TEST })).toEqual([
+      '--var',
+      `CLERK_PUBLISHABLE_KEY:${TEST}`,
+    ]);
+    expect(() => webDeployArgs('staging', path(), { TI_CLERK_PUBLISHABLE_KEY: TEST })).toThrow(
+      /TI_CLERK_PUBLISHABLE_KEY_STAGING is not set/,
+    );
+  });
+
+  it('passes the production key from TI_CLERK_PUBLISHABLE_KEY', () => {
+    build(prod);
+    expect(webDeployArgs('production', path(), { TI_CLERK_PUBLISHABLE_KEY: LIVE })).toEqual([
+      '--var',
+      `CLERK_PUBLISHABLE_KEY:${LIVE}`,
+    ]);
+  });
+
+  it('refuses a missing or empty key, and a value that is not a publishable key', () => {
+    build(staging);
+    expect(() => webDeployArgs('staging', path(), {})).toThrow(/not set/);
+    expect(() => webDeployArgs('staging', path(), { TI_CLERK_PUBLISHABLE_KEY_STAGING: '  ' })).toThrow(
+      /not set/,
+    );
+    expect(() =>
+      webDeployArgs('staging', path(), { TI_CLERK_PUBLISHABLE_KEY_STAGING: 'sk_test_secret' }),
+    ).toThrow(/not a Clerk publishable key/);
+  });
+
+  it('refuses a pk_test_ key for production', () => {
+    build(prod);
+    expect(() => webDeployArgs('production', path(), { TI_CLERK_PUBLISHABLE_KEY: TEST })).toThrow(/pk_live_/);
+  });
+
+  it('refuses a build whose config has an AUTH_MODE var, for any value', () => {
+    for (const value of ['fake', 'real', '']) {
+      build({ ...staging, vars: { DATA_SOURCE: 'api', AUTH_MODE: value } });
+      expect(() => webDeployArgs('staging', path(), { TI_CLERK_PUBLISHABLE_KEY_STAGING: TEST })).toThrow(
+        /AUTH_MODE/,
+      );
+    }
+  });
+});
+
+describe('scripts/deploy.mjs wiring', () => {
+  it('passes webDeployArgs to the ti-web wrangler deploy', () => {
+    const src = readFileSync(new URL('../../../scripts/deploy.mjs', import.meta.url), 'utf8');
+    expect(src).toMatch(
+      /import \{[^}]*webDeployArgs[^}]*\} from '\.\.\/apps\/web\/scripts\/deploy-web\.mjs'/,
+    );
+    expect(src).toMatch(
+      /wrangler\(\['deploy', '-c', builtConfig, \.\.\.webDeployArgs\(target, builtConfig\)\]\)/,
+    );
   });
 });

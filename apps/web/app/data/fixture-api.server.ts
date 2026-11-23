@@ -3,6 +3,7 @@
 
 import type {
   Credit,
+  EntryFull,
   EntryPreview,
   IndexLetterResponse,
   SearchHit,
@@ -12,6 +13,7 @@ import type {
 import { normaliseId } from '@ti/core/ids';
 import { NVD_NOTICE } from '@ti/core/licence';
 import { SOURCE_BY_ID, SOURCES } from '@ti/sources/registry';
+import { fakeUserOf, fixtureAccountApi, fixtureFullEntry } from './fixture-account.server';
 import { FIXTURE_ENTRIES, type FixtureEntry } from './fixtures.server';
 
 export const PAGE_SIZE = 20;
@@ -205,8 +207,9 @@ function sources(): Response {
 
 export async function fixtureApi(request: Request): Promise<Response> {
   const url = new URL(request.url);
-  if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
   const path = url.pathname;
+  if (path === '/v1/me' || path.startsWith('/v1/me/')) return fixtureAccountApi(request, path);
+  if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
   if (path === '/v1/search') return search(url);
   if (path === '/v1/sources') return sources();
   const entry = /^\/v1\/entries\/([^/]+)$/.exec(path)?.[1];
@@ -221,7 +224,12 @@ export async function fixtureApi(request: Request): Promise<Response> {
     const found = FIXTURE_ENTRIES.find(
       (e) => e.key === wanted || e.aliases.some((a) => normaliseId(a) === wanted),
     );
-    return found ? json({ access: 'preview', entry: toPreview(found) }) : json({ error: 'Not found' }, 404);
+    if (!found) return json({ error: 'Not found' }, 404);
+    // Only the fake bearer token gets the full view; the public client sends none.
+    if (fakeUserOf(request)) {
+      return json({ access: 'full', entry: fixtureFullEntry(found, { ...toPreview(found) } as EntryFull) });
+    }
+    return json({ access: 'preview', entry: toPreview(found) });
   }
   const letter = /^\/v1\/index\/([^/]+)$/.exec(path)?.[1];
   if (letter !== undefined) return indexLetter(decodeURIComponent(letter), url);

@@ -4,8 +4,15 @@ import { renderToReadableStream } from 'react-dom/server';
 import type { EntryContext, HandleDataRequestFunction } from 'react-router';
 import { ServerRouter } from 'react-router';
 import { currentMode } from './data/data.server';
+import { authMode } from './lib/fake-auth.server';
 import { NonceProvider } from './lib/nonce';
 import { applySecurityHeaders, makeNonce, shouldNoindex } from './lib/security.server';
+
+/** The Clerk instance host for the CSP, only when Clerk is configured and not replaced by fake auth. */
+function clerkHosts() {
+  const mode = authMode(env);
+  return mode.kind === 'clerk' ? { frontendApi: mode.config.frontendApi } : null;
+}
 
 const noindex = (status: number) => shouldNoindex({ mode: currentMode(), tiEnv: env.TI_ENV, status });
 
@@ -39,6 +46,7 @@ export default async function handleRequest(
     nonce,
     dev: import.meta.env.DEV,
     noindex: noindex(status),
+    clerk: clerkHosts(),
   });
   return new Response(body, { status, headers: responseHeaders });
 }

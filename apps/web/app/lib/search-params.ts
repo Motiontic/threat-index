@@ -45,3 +45,20 @@ export function paramsToQuery(p: SearchParams, cursor?: string | null): string {
   const text = qs.toString();
   return text ? `?${text}` : '';
 }
+
+/** The `/search?…` link that re-runs a saved search, rebuilt from its stored query and params. */
+export function savedSearchHref(s: {
+  query: string;
+  params: { type?: string[]; sig?: string[]; sev?: string[]; year?: string[]; sort?: string };
+}): string {
+  const qs = new URLSearchParams();
+  if (s.query) qs.set('q', s.query);
+  for (const t of s.params.type ?? []) qs.append('type', t);
+  for (const g of s.params.sig ?? []) qs.append('sig', g);
+  for (const v of s.params.sev ?? []) qs.append('sev', v);
+  for (const y of s.params.year ?? []) qs.append('year', y);
+  if (s.params.sort) qs.set('sort', s.params.sort);
+  // Re-validate on the way out: only values the search page accepts reach the link.
+  const clean = paramsToQuery(parseSearchParams(qs));
+  return `/search${clean}`;
+}

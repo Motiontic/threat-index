@@ -1,0 +1,4 @@
+# Copy to .dev.vars (gitignored) for local runs. Dummy values: replace with your Clerk dev instance's keys.
+# The publishable key is `pk_test_` + base64 of "<your-instance>.clerk.accounts.dev$".
+CLERK_PUBLISHABLE_KEY=pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk
+CLERK_SECRET_KEY=sk_test_dummydummydummydummydummydummy
