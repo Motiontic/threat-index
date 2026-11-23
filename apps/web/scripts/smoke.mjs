@@ -45,6 +45,13 @@ const PAGES = [
   ['/e/CVE-2025-3248', 'CVE-2025-3248: Langflow unauthenticated code execution'],
   ['/index', 'Index A–Z'],
   ['/index/l', 'Index: L'],
+  ['/breaches', 'Breach notices'],
+  ['/breach/domain%3Aexample.com%402025-03-04', 'Breach: Example Co.'],
+  ['/incidents?kind=ai', 'Incidents'],
+  ['/incident/avid/EXAMPLE-AVID-1', 'Invented sample: Example Co. assistant revealed hidden instructions'],
+  ['/techniques', 'Techniques and weaknesses'],
+  ['/technique/T1195', 'T1195: Supply Chain Compromise'],
+  ['/search?type=breach&q=example', 'Results for “example”'],
   ['/sources', 'Sources'],
   ['/sources?status=on', 'Sources'],
   ['/sign-in', 'Log in'],
@@ -55,7 +62,11 @@ const count = (html, re) => (html.match(re) ?? []).length;
 
 // Pages that carry a robots meta tag of their own (api mode sends no header for them).
 const META_NOINDEX = (path) =>
-  path.startsWith('/search') || path === '/sign-in' || path === '/sign-up' || path === '/account';
+  path.startsWith('/search') ||
+  /^\/(breaches|incidents|techniques)\?/.test(path) ||
+  path === '/sign-in' ||
+  path === '/sign-up' ||
+  path === '/account';
 
 function checkDocument(path, res, html, { title, status = 200 }) {
   if (res.status !== status) fail(path, `status ${res.status}, wanted ${status}`);
@@ -192,7 +203,7 @@ async function runChecks() {
     if (res.headers.get('x-content-type-options') !== 'nosniff') fail(from, 'redirect has no nosniff');
   }
 
-  for (const path of ['/e/CVE-1999-99999', '/no-such-page', '/index/ab']) {
+  for (const path of ['/e/CVE-1999-99999', '/no-such-page', '/index/ab', '/breach/no-such-breach']) {
     const { res, html } = await get(path);
     checkDocument(path, res, html, { title: 'Not found', status: 404 });
   }
