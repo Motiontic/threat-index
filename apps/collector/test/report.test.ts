@@ -20,7 +20,9 @@ describe('formatReport', () => {
       NOW,
     );
     expect(r.text.match(/^- s\d+:/gm)).toHaveLength(200);
-    expect(r.text).toContain('…and 30 more');
+    expect(r.text).toContain('...and 30 more');
+    expect(r.text).toContain('Late sources (230)');
+    expect([...r.text].every((c) => c.charCodeAt(0) < 128)).toBe(true);
   });
   it('keeps every line short and ASCII, one finding per line', () => {
     const r = formatReport(

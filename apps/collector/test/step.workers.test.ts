@@ -438,6 +438,100 @@ describe('runStep', () => {
     expect((await getRun(body.runId))?.status).toBe('skipped');
   });
 
+  it('not-configured from check() is skipped too', async () => {
+    const deps = mkDeps({
+      patternFor: () => ({
+        check: async () => {
+          throw Object.assign(new Error('no urls'), { code: 'not-configured', retryable: false });
+        },
+        fetch: async () => result(),
+      }),
+    });
+    const body = msgBody('cve-list');
+    expect(await runStep(body, 1, E, deps)).toEqual({ ack: true, status: 'skipped' });
+    expect((await getRun(body.runId))?.status).toBe('skipped');
+  });
+
+  it('pattern errors follow `retryable`: cancelled retries, http is permanent', async () => {
+    const failing = (code: string, retryable: boolean) =>
+      mkDeps({
+        patternFor: () => ({
+          check: async () => 'changed',
+          fetch: async () => {
+            throw Object.assign(new Error('x'), { code, retryable });
+          },
+        }),
+      });
+    const b1 = msgBody('cve-list');
+    expect(await runStep(b1, 1, E, failing('cancelled', true))).toMatchObject({ ack: false });
+    expect((await getRun(b1.runId))?.status).toBe('running');
+    const b2 = msgBody('cve-list');
+    expect(await runStep(b2, 1, E, failing('http', false))).toEqual({ ack: true, status: 'failed' });
+  });
+
+  it('null nextCursor: no cursor is written, the run is recorded with its counts', async () => {
+    const body = msgBody('cve-list');
+    const deps = mkDeps({
+      patternFor: () => ({ check: async () => 'changed', fetch: async () => result({ nextCursor: null }) }),
+      loadParser: async () => ({ parse: () => [] }),
+    });
+    expect(await runStep(body, 1, E, deps)).toMatchObject({ ack: true });
+    expect(await getCursor('cve-list')).toBeNull();
+    const run = await getRun(body.runId);
+    expect(run?.found).toBe(1);
+    expect(run?.finished_at).not.toBeNull();
+  });
+
+  it('null nextCursor keeps the stored cursor', async () => {
+    const stored = cursor('t0');
+    await seedCursor('cve-list', stored);
+    const body = msgBody('cve-list', { from: stored });
+    const deps = mkDeps({
+      patternFor: () => ({ check: async () => 'changed', fetch: async () => result({ nextCursor: null }) }),
+    });
+    await runStep(body, 1, E, deps);
+    expect(await getCursor('cve-list')).toMatchObject({ value: 't0' });
+    expect((await getRun(body.runId))?.status).toBe('ok');
+  });
+
+  it('null nextCursor with `more` fails permanently', async () => {
+    const body = msgBody('cve-list');
+    const deps = mkDeps({
+      patternFor: () => ({
+        check: async () => 'changed',
+        fetch: async () => result({ nextCursor: null, more: true }),
+      }),
+    });
+    expect(await runStep(body, 1, E, deps)).toEqual({ ack: true, status: 'failed' });
+  });
+
+  it('a first-run step (no stored cursor, from null) is not stale; a stored cursor with from null is', async () => {
+    await seedCursor('cve-list', cursor('t0'));
+    const body = msgBody('cve-list', { from: null });
+    expect(await runStep(body, 1, E, mkDeps())).toEqual({ ack: true, status: 'stale' });
+  });
+
+  it('heavy with a null cursor sends no cursor field', async () => {
+    const sent: Record<string, unknown>[] = [];
+    const body = msgBody('cve-list');
+    const deps = mkDeps({
+      patternFor: () => ({
+        check: async () => 'changed',
+        fetch: async () =>
+          result({
+            nextCursor: null,
+            heavy: { kind: 'big-file', sourceId: 'cve-list', reason: 'big', url: 'https://example.com/f' },
+          }),
+      }),
+      startJob: async (req) => {
+        sent.push(req as unknown as Record<string, unknown>);
+        return {};
+      },
+    });
+    expect(await runStep(body, 1, E, deps)).toEqual({ ack: true, status: 'heavy' });
+    expect(sent[0]).not.toHaveProperty('cursor');
+  });
+
   it('the pattern context carries only the github and nvd credentials', async () => {
     let ctx: PatternContext | undefined;
     const env = { ...E, GITHUB_TOKEN: 'gh', NVD_API_KEY: 'nv', JOB_HMAC_SECRET: 'hmac', USER_AGENT: 'ua/1' };

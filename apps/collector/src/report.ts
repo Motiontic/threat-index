@@ -35,16 +35,19 @@ export function formatReport(findings: readonly Finding[], now: Date): { subject
   const subject = `Threat Index watchdog ${day}: ${findings.length === 0 ? 'all clear' : `${findings.length} issues`}`;
   if (findings.length === 0) return { subject, text: 'All clear: nothing to report in the last 24 hours.\n' };
 
-  const shown = findings.slice(0, MAX_FINDINGS_IN_REPORT);
   const lines: string[] = [`${findings.length} issues in the last 24 hours.`, ''];
+  let room = MAX_FINDINGS_IN_REPORT;
   for (const kind of ORDER) {
-    const group = shown.filter((f) => f.kind === kind);
+    const group = findings.filter((f) => f.kind === kind);
     if (group.length === 0) continue;
+    // The heading counts every finding of the kind; the list is cut to what is left of the 200.
     lines.push(`${TITLES[kind]} (${group.length})`);
-    for (const f of group) lines.push(clean(`- ${f.subject}: ${f.detail}`));
+    for (const f of group.slice(0, room)) lines.push(clean(`- ${f.subject}: ${f.detail}`));
+    room = Math.max(0, room - group.length);
     lines.push('');
   }
-  if (findings.length > shown.length) lines.push(`…and ${findings.length - shown.length} more`);
+  const omitted = findings.length - MAX_FINDINGS_IN_REPORT;
+  if (omitted > 0) lines.push(`...and ${omitted} more`);
   return { subject, text: `${lines.join('\n')}\n` };
 }
 

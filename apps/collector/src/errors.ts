@@ -8,12 +8,14 @@ export class PermanentError extends Error {
   }
 }
 
-/** Stubs (so they don't burn retries), our own PermanentError and Zod validation errors. */
+/** Stubs (so they don't burn retries), our own PermanentError, Zod errors and pattern errors with `retryable: false`. */
 export function isPermanent(err: unknown): boolean {
   return (
     err instanceof PermanentError ||
     err instanceof NotImplementedError ||
-    (err instanceof Error && err.name === 'ZodError')
+    (err instanceof Error && err.name === 'ZodError') ||
+    // a pattern error that says retrying cannot help (`cancelled` and other retryable codes are retried)
+    (typeof err === 'object' && err !== null && (err as { retryable?: unknown }).retryable === false)
   );
 }
 

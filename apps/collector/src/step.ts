@@ -153,14 +153,13 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
   // 6.
   const pattern = deps.patternFor(source.pattern);
   const ctx = patternContext(source, msg, env, deps);
-  if (msg.step === 0 && (await pattern.check(ctx)) === 'unchanged') {
-    await finishRun(env, msg, deps, 'unchanged', null);
-    return { ack: true, status: 'unchanged' };
-  }
-
-  // 7.
   let result: PatternResult;
   try {
+    if (msg.step === 0 && (await pattern.check(ctx)) === 'unchanged') {
+      await finishRun(env, msg, deps, 'unchanged', null);
+      return { ack: true, status: 'unchanged' };
+    }
+    // 7.
     result = await pattern.fetch(ctx);
   } catch (err) {
     if (isNotConfigured(err)) {
@@ -171,6 +170,9 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
   }
   if (result.items.length > MAX_ITEMS_PER_STEP) {
     throw new PermanentError(`pattern returned ${result.items.length} items (max ${MAX_ITEMS_PER_STEP})`);
+  }
+  if (result.more && !result.nextCursor) {
+    throw new PermanentError('pattern has more pages but returned no cursor');
   }
   if (result.more && sameCursor(storedFromCursor(result.nextCursor), msg.from)) {
     throw new PermanentError('pattern has more pages but did not advance the cursor');
@@ -197,7 +199,7 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
     await deps.startJob({
       ...result.heavy,
       requestId: `${msg.runId}-${msg.step}`,
-      cursor: result.nextCursor,
+      ...(result.nextCursor ? { cursor: result.nextCursor } : {}),
     });
     await finishRun(env, msg, deps, 'heavy', null, { found: result.items.length, bytes });
     return { ack: true, status: 'heavy' };
@@ -300,7 +302,8 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
   return { ack: true, status: 'ok' };
 }
 
-function storedFromCursor(c: Cursor): StoredCursor {
+function storedFromCursor(c: Cursor | null): StoredCursor | null {
+  if (!c) return null;
   return { kind: c.kind, value: c.value, etag: c.etag ?? null };
 }
 
@@ -373,44 +376,50 @@ async function commitCursor(
   env: Env,
   sourceId: string,
   msg: JobMessage,
-  next: Cursor,
+  next: Cursor | null,
   deps: StepDeps,
   r: { found: number; written: number; bytes: number; last: boolean; warning: string | null },
 ): Promise<boolean> {
   const db = env.DB_CONTROL;
   const at = deps.now().toISOString();
   const from = msg.from;
-  const cursorStmt = from
-    ? db
-        .prepare(
-          `UPDATE cursors SET kind = ?1, value = ?2, etag = ?3, updated_at = ?4
+  const cursorStmt = !next
+    ? null
+    : from
+      ? db
+          .prepare(
+            `UPDATE cursors SET kind = ?1, value = ?2, etag = ?3, updated_at = ?4
            WHERE source_id = ?5 AND kind = ?6 AND value IS ?7 AND etag IS ?8`,
-        )
-        .bind(
-          next.kind,
-          next.value,
-          next.etag ?? null,
-          at,
-          sourceId,
-          from.kind,
-          from.value,
-          from.etag ?? null,
-        )
-    : db
-        .prepare(
-          `INSERT INTO cursors (source_id, kind, value, etag, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+          )
+          .bind(
+            next.kind,
+            next.value,
+            next.etag ?? null,
+            at,
+            sourceId,
+            from.kind,
+            from.value,
+            from.etag ?? null,
+          )
+      : db
+          .prepare(
+            `INSERT INTO cursors (source_id, kind, value, etag, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
            ON CONFLICT DO NOTHING`,
-        )
-        .bind(sourceId, next.kind, next.value, next.etag ?? null, at);
+          )
+          .bind(sourceId, next.kind, next.value, next.etag ?? null, at);
   const runStmt = db
     .prepare(
       `UPDATE runs SET found = found + ?1, written = written + ?2, bytes = bytes + ?3,
          status = CASE WHEN ?4 = 1 THEN 'ok' ELSE status END,
          finished_at = CASE WHEN ?4 = 1 THEN ?5 ELSE finished_at END,
          error = COALESCE(?6, CASE WHEN error LIKE 'parse failed%' THEN error END)
-       WHERE id = ?7 AND status = 'running' AND changes() > 0`,
+       WHERE id = ?7 AND status = 'running' AND (?8 = 0 OR changes() > 0)`,
     )
-    .bind(r.found, r.written, r.bytes, r.last ? 1 : 0, at, r.warning, msg.runId);
+    .bind(r.found, r.written, r.bytes, r.last ? 1 : 0, at, r.warning, msg.runId, cursorStmt ? 1 : 0);
+  if (!cursorStmt) {
+    // Nothing to commit: the stored cursor stays. The run is still recorded, once (it must be `running`).
+    return ((await runStmt.run()).meta.changes ?? 0) > 0;
+  }
   const [cursorRes] = await db.batch([cursorStmt, runStmt]);
   return (cursorRes?.meta.changes ?? 0) > 0;
 }
