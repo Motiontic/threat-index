@@ -68,13 +68,18 @@ export default function Entry({ loaderData }: Route.ComponentProps) {
         </header>
 
         <ul className="tabs" aria-label="Record sections">
-          <li className="tab" aria-current="page">
-            Overview
+          <li>
+            <Link className="tab" to={`/e/${encodeURIComponent(entry.key)}`} aria-current="page">
+              Overview
+            </Link>
           </li>
           {tabs.map((t) => (
-            <li key={t} className="tab">
-              {t}
-              <small>free account</small>
+            <li key={t}>
+              <button type="button" className="tab tab-locked" disabled>
+                {t}
+                <small aria-hidden="true">free account</small>
+                <span className="visually-hidden"> (needs a free account)</span>
+              </button>
             </li>
           ))}
         </ul>

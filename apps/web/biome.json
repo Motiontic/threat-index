@@ -2,6 +2,6 @@
   "root": false,
   "extends": "//",
   "files": {
-    "includes": ["**", "!build", "!.react-router"]
+    "includes": ["**", "!build", "!.react-router", "!.wrangler"]
   }
 }

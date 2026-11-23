@@ -649,9 +649,20 @@ a.pill:hover {
   border-bottom: 1px solid var(--line);
 }
 .tab {
+  display: inline-block;
+  background: none;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  font: inherit;
+  text-decoration: none;
   padding: var(--space-3) var(--space-5);
   border-bottom: 2px solid transparent;
   color: var(--ink-3);
+}
+.tab-locked {
+  cursor: not-allowed;
+  opacity: 0.75;
 }
 .tab[aria-current="page"] {
   color: var(--ink);
