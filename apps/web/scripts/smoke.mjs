@@ -27,6 +27,11 @@ const PORT = Number(process.env.PORT ?? (API_MODE ? 8711 : 8710));
 const BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = resolve(WEB_DIR, '..', '..');
 const BAND = 'Preview with sample data.';
+// Dummy Clerk test keys for api mode (no network): the CSP must name this host and nothing wider.
+// Fixtures mode runs with Clerk off.
+const CLERK_HOST = 'smoke.clerk.accounts.dev';
+const CLERK_KEY = `pk_test_${Buffer.from(`${CLERK_HOST}$`).toString('base64')}`;
+const CLERK_SECRET = 'sk_test_smokesmokesmokesmoke';
 const NVD = 'This product uses the NVD API but is not endorsed or certified by the NVD.';
 const failures = [];
 const fail = (where, what) => failures.push(`${where}: ${what}`);
@@ -42,13 +47,15 @@ const PAGES = [
   ['/index/l', 'Index: L'],
   ['/sources', 'Sources'],
   ['/sources?status=on', 'Sources'],
-  ['/account', 'Account'],
+  ['/sign-in', 'Log in'],
+  ['/sign-up', 'Sign up'],
 ];
 
 const count = (html, re) => (html.match(re) ?? []).length;
 
 // Pages that carry a robots meta tag of their own (api mode sends no header for them).
-const META_NOINDEX = (path) => path.startsWith('/search') || path === '/account';
+const META_NOINDEX = (path) =>
+  path.startsWith('/search') || path === '/sign-in' || path === '/sign-up' || path === '/account';
 
 function checkDocument(path, res, html, { title, status = 200 }) {
   if (res.status !== status) fail(path, `status ${res.status}, wanted ${status}`);
@@ -87,6 +94,65 @@ async function get(path, init) {
   return { res, html: await res.text() };
 }
 
+async function checkAccounts() {
+  // Signed out, /account sends the visitor to sign in and back.
+  {
+    const { res } = await get('/account');
+    const loc = res.headers.get('location') ?? '';
+    if (res.status !== 302) fail('/account', `status ${res.status}, wanted 302 when signed out`);
+    if (!loc.endsWith('/sign-in?redirect_url=%2Faccount')) fail('/account', `redirects to "${loc}"`);
+    if (!res.headers.get('content-security-policy')?.includes("'nonce-")) fail('/account', 'redirect has no CSP');
+  }
+  // The account action refuses GET, and a POST from another origin, before it does anything.
+  {
+    const { res } = await get('/account/do');
+    if (res.status !== 405) fail('/account/do', `GET status ${res.status}, wanted 405`);
+    const post = await get('/account/do', {
+      method: 'POST',
+      headers: { Origin: 'https://evil.example', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'intent=watch&id=CVE-2025-3248',
+    });
+    if (post.res.status !== 403) fail('/account/do', `foreign-origin POST status ${post.res.status}, wanted 403`);
+    const none = await get('/account/do', {
+      method: 'POST',
+      headers: { Origin: BASE, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'intent=watch&id=CVE-2025-3248',
+    });
+    if (none.res.status !== 401) fail('/account/do', `signed-out POST status ${none.res.status}, wanted 401`);
+  }
+  // Fake sign-in does not exist here.
+  for (const path of ['/__fake/sign-in?as=bob', '/__fake/sign-out']) {
+    const { res } = await get(path);
+    if (res.status !== 404) fail(path, `status ${res.status}, wanted 404 outside fake mode`);
+  }
+  for (const path of ['/sign-in', '/sign-up']) {
+    const { res, html } = await get(path);
+    const unavailable = html.includes('Sign-in is unavailable');
+    if (API_MODE && unavailable) fail(path, 'says sign-in is unavailable although Clerk is configured');
+    if (!API_MODE && !unavailable) fail(path, 'does not say sign-in is unavailable with Clerk off');
+    if (/<input[^>]*type="password"/i.test(html)) fail(path, 'password input');
+    if (!/<meta[^>]*name="robots"[^>]*content="noindex"/.test(html)) fail(path, 'no robots noindex meta');
+    const csp = res.headers.get('content-security-policy') ?? '';
+    const hosts = [...csp.matchAll(/https:\/\/[^\s;]+/g)].map((m) => m[0]);
+    if (csp.includes('*')) fail(path, 'CSP has a wildcard');
+    if (API_MODE) {
+      const allowed = new Set([
+        `https://${CLERK_HOST}`,
+        'https://challenges.cloudflare.com',
+        'https://img.clerk.com',
+      ]);
+      for (const h of hosts) if (!allowed.has(h)) fail(path, `CSP names ${h}`);
+      const dir = (name) => csp.split('; ').find((d) => d.startsWith(`${name} `)) ?? '';
+      for (const name of ['script-src', 'connect-src'])
+        if (!dir(name).includes(`https://${CLERK_HOST}`)) fail(path, `${name} lacks the Clerk host`);
+      if (!dir('frame-src').includes('https://challenges.cloudflare.com')) fail(path, 'no frame-src');
+      if (!dir('frame-ancestors').includes("'none'")) fail(path, 'frame-ancestors changed');
+    } else if (hosts.length > 0) {
+      fail(path, `CSP names ${hosts.join(', ')} with Clerk off`);
+    }
+  }
+}
+
 async function runChecks() {
   let stylesheet;
   for (const [path, title] of PAGES) {
@@ -109,6 +175,8 @@ async function runChecks() {
     if (!html.includes('Exploited in the wild')) fail(path, '"Exploited in the wild" missing');
     if (!html.includes('application/ld+json')) fail(path, 'JSON-LD missing');
   }
+
+  await checkAccounts();
 
   for (const from of ['/e/cve-2025-3248', '/e/GHSA-c995-4fw3-j39m']) {
     const { res } = await get(from);
@@ -195,8 +263,11 @@ function stop(child) {
 async function main() {
   const config = builtWebConfig('production');
   const args = ['dev', '-c', config];
-  if (API_MODE) args.push('-c', join(WEB_DIR, 'scripts', 'stub-api', 'wrangler.jsonc'));
-  else args.push('--var', 'DATA_SOURCE:fixtures');
+  if (API_MODE) {
+    args.push('-c', join(WEB_DIR, 'scripts', 'stub-api', 'wrangler.jsonc'));
+    // Dummy keys, no network: they only switch Clerk on so the CSP and routes can be checked.
+    args.push('--var', `CLERK_PUBLISHABLE_KEY:${CLERK_KEY}`, '--var', `CLERK_SECRET_KEY:${CLERK_SECRET}`);
+  } else args.push('--var', 'DATA_SOURCE:fixtures');
   args.push('--ip', '127.0.0.1', '--port', String(PORT));
   const child = spawn(join(ROOT, 'node_modules', '.bin', 'wrangler'), args, {
     cwd: ROOT,
@@ -223,7 +294,7 @@ async function main() {
     for (const f of failures) console.error(`  ✗ ${f}`);
     process.exit(1);
   }
-  console.log(`✓ smoke (${MODE}): ${PAGES.length + 7} routes and the build checks passed`);
+  console.log(`✓ smoke (${MODE}): ${PAGES.length + 12} routes and the build checks passed`);
 }
 
 async function both() {
