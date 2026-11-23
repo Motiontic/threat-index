@@ -4,7 +4,7 @@
 
 ## How it was tested
 
-- [ ] `pnpm lint && pnpm typecheck && pnpm test` pass
+- [ ] `pnpm build` passes (and `pnpm test:workers` if you touched Worker code)
 - [ ] New or changed parsers have a fixture and a test
 
 ## Sources and licences (if this touches a source)
