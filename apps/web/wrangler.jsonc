@@ -1,0 +1,31 @@
+// ti-web: the public site, React Router 8 server-rendered on Workers.
+//
+// Top level = production. `env.staging` = staging (worker ti-web-staging).
+//
+// The environment is chosen AT BUILD TIME, not at deploy time: `@cloudflare/vite-plugin` reads this file
+// during `react-router build` and writes a flattened config for one environment to
+// build/server/wrangler.json, plus a redirect to it in .wrangler/deploy/config.json.
+//   pnpm --filter @ti/web build                          -> ti-web (production)
+//   CLOUDFLARE_ENV=staging pnpm --filter @ti/web build   -> ti-web-staging
+// Deploy with `wrangler deploy -c <that built config>`. Never pass `--env` to wrangler for this app;
+// scripts/deploy.mjs and apps/web/scripts/deploy-web.mjs do this and refuse a build for the wrong environment.
+// This file has no placeholder values, so scripts/wrangler-config.mjs has nothing to fill.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ti-web",
+  "main": "./workers/app.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": { "TI_ENV": "production" },
+  // For later: loaders will call ti-api through this binding. Nothing uses it yet.
+  "services": [{ "binding": "API", "service": "ti-api" }],
+
+  "env": {
+    "staging": {
+      "name": "ti-web-staging",
+      "vars": { "TI_ENV": "staging" },
+      "services": [{ "binding": "API", "service": "ti-api-staging" }]
+    }
+  }
+}
