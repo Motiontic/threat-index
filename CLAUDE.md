@@ -27,16 +27,24 @@ conversationally. For headless runs use `gloop run <slug> --mode <interactive|by
 
 The plan is `docs/IMPLEMENTATION_PLAN.md`; how to add a source is `docs/adding-a-source.md`.
 
-**Test on staging, not on the laptop.**
+**Where code runs.** Build loops run in E2B sandboxes, one sandbox per loop, never on the laptop.
+Check `TI_LOOP_SANDBOX`: it is `1` inside a loop sandbox and unset on a laptop.
 
-- Never run `wrangler dev`, `pnpm dev`, Miniflare or any local server or database. Run loops with
-  `gloop run <slug> --mode <m> --no-servers`; the `dev` command in `loops.json` refuses on purpose.
-- To exercise running code, run `pnpm preview`. It uploads this branch's API as a preview version of
+- Run loops with `gloop run <slug> --mode <m> --no-servers`. gloop never starts dev servers in this
+  repo; the `dev` command in `loops.json` refuses on purpose.
+- **In a loop sandbox** (`TI_LOOP_SANDBOX=1`): you may run `wrangler dev`, Miniflare and the Workers
+  test pool. Each loop has its own sandbox, so local D1, R2, KV and queues are private to it. Apply
+  migrations with `wrangler d1 migrations apply <db> --local`. Use ports from 8700 up, one per app, and
+  stop every server you start before your stage ends. The sandbox holds no Cloudflare or GitHub
+  credentials: `pnpm preview`, deploys and `git push` fail there by design. Branches leave the sandbox
+  as a git bundle and are pushed after review.
+- **On a laptop**: never run `wrangler dev`, `pnpm dev`, Miniflare or any local server or database.
+  To exercise running code, run `pnpm preview`. It uploads this branch's API as a preview version of
   the staging Worker and prints its URL (`https://<branch>-ti-api-staging.<subdomain>.workers.dev`).
-  QA tests that URL. The preview uses the staging D1, R2, KV and queues; it gets no cron or queue events.
-- If the branch adds a migration, run `pnpm preview --migrate` once to apply it to the staging databases.
-- The local gate is `pnpm build` (Biome, `tsc`, Vitest unit tests). Keep unit tests pure; anything that
-  needs the Workers runtime runs in CI.
+  The preview uses the staging D1, R2, KV and queues and gets no cron or queue events. If the branch
+  adds a migration, `pnpm preview --migrate` applies it to the staging databases once.
+- The quick gate is `pnpm build` (Biome, `tsc`, pure unit tests); it must stay light enough for a
+  laptop. Tests that need the Workers runtime run in loop sandboxes and CI, not in `pnpm build`.
 - In a new worktree, run `pnpm install --frozen-lockfile` first. pnpm links from its shared store, so
   this is cheap.
 

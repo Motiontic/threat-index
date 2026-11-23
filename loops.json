@@ -11,7 +11,7 @@
       "dev": [
         "node",
         "-e",
-        "console.error('No local dev servers in this repo. Run `pnpm preview` and test the staging URL it prints.'); process.exit(1)"
+        "console.error('gloop does not start servers in this repo. In a loop sandbox, start wrangler dev yourself (see CLAUDE.md). On a laptop, run pnpm preview and test the staging URL it prints.'); process.exit(1)"
       ],
       "env": {}
     }

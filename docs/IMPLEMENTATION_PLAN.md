@@ -554,7 +554,8 @@ Cloudflare AI Search can replace this later.
 
 | Env        | How                                                                                                                                                              |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local      | Lint, typecheck and unit tests only (`pnpm build`). No local servers: running code is tested on staging                                                          |
+| Local      | Lint, typecheck and unit tests only (`pnpm build`). No local servers: running code is tested in a loop sandbox or on staging                                     |
+| Loop       | One E2B sandbox per build loop. Local `wrangler dev`, Miniflare and Workers-runtime tests are fine here; no Cloudflare or GitHub credentials, branches leave as a git bundle |
 | Staging    | Resources suffixed `_staging` / `-staging`; deployed after CI passes on `main`; each branch can upload a preview of the API with `pnpm preview` and test its URL |
 | Production | Deployed on a `v*` tag or a manual run, after a reviewer approves the `production` GitHub environment; D1 migrations applied with `--remote` before Workers      |
 
