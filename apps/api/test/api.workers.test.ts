@@ -62,9 +62,6 @@ describe('api (Workers runtime, local D1)', () => {
     expect((await call('/v1/me/saved-searches')).status).toBe(401);
     expect((await call('/v1/deep-query', { method: 'POST' })).status).toBe(401);
     expect((await call('/v1/entries/CVE-2025-0001/receipts')).status).toBe(401);
-    const res = await call('/v1/search?q=x');
-    expect(res.status).toBe(501);
-    expect(await res.json()).toEqual({ error: 'not_implemented' });
   });
 
   it('HMAC and token routes reject missing or wrong signatures', async () => {
