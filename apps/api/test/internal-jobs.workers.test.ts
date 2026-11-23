@@ -303,7 +303,7 @@ describe('POST /internal/jobs (start)', () => {
     expect(
       (await ops(call, 'POST', '/internal/jobs', { kind: 'echo', reason: 'x'.repeat(201) })).status,
     ).toBe(400);
-    const fl = { requestId: ULID(11), kind: 'first-load', sourceId: 'cisa-kev', reason: 'r' };
+    const fl = { requestId: ULID(11), kind: 'big-file', sourceId: 'cisa-kev', reason: 'r' };
     const res = await ops(call, 'POST', '/internal/jobs', fl);
     expect(res.status).toBe(501);
     expect(await res.json()).toEqual({ error: 'job_kind_not_ready' });

@@ -90,7 +90,10 @@ const globalSchema = z.object({
   day: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .refine((d) => new Date(`${d}T00:00:00Z`).toISOString().startsWith(d))
+    .refine((d) => {
+      const ms = Date.parse(`${d}T00:00:00Z`);
+      return !Number.isNaN(ms) && new Date(ms).toISOString().startsWith(d);
+    })
     .optional(),
 });
 const startSchema = z.union([jobRequestSchema, echoSchema, globalSchema]);
