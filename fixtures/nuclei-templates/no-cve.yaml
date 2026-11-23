@@ -1,0 +1,17 @@
+id: example-exposed-panel
+
+info:
+  name: Example Panel - Detect
+  author: example-author
+  severity: info
+  description: Hand-written template without a classification block.
+  tags: panel,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/login"
+    matchers:
+      - type: word
+        words:
+          - "Example Panel"
