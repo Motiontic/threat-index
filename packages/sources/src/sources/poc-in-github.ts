@@ -7,4 +7,8 @@ export default src(
   'git',
   '3h',
   'on',
+  {
+    parser: 'poc-in-github',
+    pull: { git: { repo: 'nomi-sec/PoC-in-GitHub', branch: 'master', include: ['*/CVE-*.json'] } },
+  },
 );
