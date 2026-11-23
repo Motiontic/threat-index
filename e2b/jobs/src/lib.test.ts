@@ -65,7 +65,7 @@ describe('download', () => {
     expect(await readFile(join(dir, 'out'), 'utf8')).toBe('a,b\n1,2\n');
     expect(got.bytes).toBe(8);
     expect(calls[1]?.url).toBe('https://example.com/real/file.csv.gz');
-    expect((calls[0]?.init?.headers as Record<string, string>)['user-agent']).toBe(USER_AGENT);
+    expect(((calls[0]?.init?.headers ?? {}) as Record<string, string>)['user-agent']).toBe(USER_AGENT);
   });
   it('refuses a redirect to http and more than five redirects', async () => {
     const toHttp = fetchSeq(
