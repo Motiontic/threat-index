@@ -1,28 +1,86 @@
 /**
  * E2B job runner. See docs/IMPLEMENTATION_PLAN.md §6.
- * Usage (in a sandbox or locally): node run.ts '<job-json>'
- * Each job kind lives in jobs/<kind>.ts and exports run(job, ctx). This file only dispatches.
+ * Usage (in a sandbox or locally): node run.mjs '<job-json>'  (or JOB_JSON in the environment)
+ * Each job kind lives in jobs/<kind>.ts and exports run(job, ctx). This file only dispatches, then tells
+ * ti-api how it went: `complete({ ok: true })`, or `complete({ ok: false, error })` and exit 1.
  */
-import { JOB_KINDS, type Job, type JobContext, type JobKind } from './types.ts';
+import { pathToFileURL } from 'node:url';
+import { type ClientDeps, createJobApi, type JobApi } from './client.ts';
+import { JOB_KINDS, type Job, type JobContext, type JobKind, type RunJob } from './types.ts';
 
-const job = JSON.parse(process.argv[2] ?? process.env.JOB_JSON ?? '{}') as Job;
-
-const ctx: JobContext = {
-  log: (msg, extra) => console.log(JSON.stringify({ level: 'info', msg, id: job.id, ...extra })),
+// A map, not a computed import, so the bundler sees every job.
+const JOBS: Record<JobKind, () => Promise<{ run: RunJob }>> = {
+  'first-load': () => import('./jobs/first-load.ts'),
+  'epss-diff': () => import('./jobs/epss-diff.ts'),
+  'big-file': () => import('./jobs/big-file.ts'),
+  'nightly-fold': () => import('./jobs/nightly-fold.ts'),
+  'search-index': () => import('./jobs/search-index.ts'),
+  compaction: () => import('./jobs/compaction.ts'),
+  'deep-query': () => import('./jobs/deep-query.ts'),
+  echo: () => import('./jobs/echo.ts'),
 };
 
-async function main(): Promise<void> {
-  if (!job.id || !job.kind) throw new Error('missing job description');
-  if (!JOB_KINDS.includes(job.kind as JobKind)) throw new Error(`unknown job kind: ${job.kind}`);
-  ctx.log('job start', { kind: job.kind });
-  const { run } = (await import(`./jobs/${job.kind}.ts`)) as {
-    run: (j: Job, c: JobContext) => Promise<void>;
-  };
-  await run(job, ctx);
-  ctx.log('job done');
+export interface MainDeps {
+  api?: JobApi;
+  client?: ClientDeps;
+  log?: (line: string) => void;
 }
 
-main().catch((err) => {
-  console.error(JSON.stringify({ level: 'error', msg: String(err), id: job.id }));
-  process.exit(1);
-});
+/** Runs one job and reports to the API. Returns the process exit code. */
+export async function main(job: Job, deps: MainDeps = {}): Promise<number> {
+  const out = deps.log ?? ((line: string) => console.log(line));
+  const api = deps.api ?? createJobApi(job, deps.client);
+  const ctx: JobContext = {
+    api,
+    log: (msg, extra) => out(JSON.stringify({ level: 'info', msg, id: job.id, ...extra })),
+  };
+  try {
+    ctx.log('job start', { kind: job.kind });
+    const { run } = await JOBS[job.kind]();
+    await run(job, ctx);
+    await api.complete({ ok: true });
+    ctx.log('job done');
+    return 0;
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    out(JSON.stringify({ level: 'error', msg: error, id: job.id }));
+    try {
+      await api.complete({ ok: false, error });
+    } catch {
+      out(JSON.stringify({ level: 'error', msg: 'could not report failure', id: job.id }));
+    }
+    return 1;
+  }
+}
+
+/** Parses the job description. Throws a clear error for anything unusable. */
+export function parseJob(text: string | undefined): Job {
+  if (!text) throw new Error('no job description: pass JSON as argv[2] or JOB_JSON');
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('job description is not valid JSON');
+  }
+  const j = data as Partial<Job> | null;
+  if (!j || typeof j !== 'object') throw new Error('job description is not an object');
+  if (typeof j.id !== 'string' || !j.id) throw new Error('job description has no id');
+  if (typeof j.kind !== 'string' || !JOB_KINDS.includes(j.kind as JobKind))
+    throw new Error(`unknown job kind: ${String(j.kind)}`);
+  if (typeof j.apiBase !== 'string' || !j.apiBase) throw new Error('job description has no apiBase');
+  if (typeof j.hmac !== 'string' || !j.hmac) throw new Error('job description has no hmac');
+  return j as Job;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let job: Job;
+  try {
+    job = parseJob(process.argv[2] ?? process.env.JOB_JSON);
+  } catch (err) {
+    console.error(JSON.stringify({ level: 'error', msg: err instanceof Error ? err.message : String(err) }));
+    process.exit(1);
+  }
+  // Child processes (DuckDB, shells) must not inherit the job key.
+  delete process.env.JOB_JSON;
+  process.exit(await main(job));
+}
