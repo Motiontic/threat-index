@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { appFiles } from './read-app';
 
+// Built from pieces so a repo-wide search for the forbidden markup finds only real uses.
+const FORBIDDEN_FORM_ATTRS = new RegExp(
+  ['type="pass' + 'word"', '-pass' + 'word"', 'method="po' + 'st"'].join('|'),
+  'i',
+);
+
 const entries = appFiles();
 const notTokens = entries.filter(([path]) => path !== 'app/styles/tokens.css');
 
@@ -42,9 +48,7 @@ describe('style rules', () => {
   });
 
   it('collects no passwords and posts no forms', () => {
-    const offenders = entries
-      .filter(([, text]) => /type="password"|-password"|method="post"/i.test(text))
-      .map(([p]) => p);
+    const offenders = entries.filter(([, text]) => FORBIDDEN_FORM_ATTRS.test(text)).map(([p]) => p);
     expect(offenders).toEqual([]);
   });
 });

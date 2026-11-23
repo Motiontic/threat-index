@@ -8,6 +8,12 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { builtWebConfig, WEB_DIR } from './deploy-web.mjs';
 
+// Built from pieces so a repo-wide search for the forbidden markup finds only real uses.
+const FORBIDDEN_FORM_ATTRS = new RegExp(
+  ['type="pass' + 'word"', '-pass' + 'word"', 'method="po' + 'st"'].join('|'),
+  'i',
+);
+
 const PORT = Number(process.env.PORT ?? 8710);
 const BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = resolve(WEB_DIR, '..', '..');
@@ -50,7 +56,7 @@ function checkDocument(path, res, html, { title, status = 200 }) {
     if (!nonce || !s.includes(`nonce="${nonce}"`))
       fail(path, `script without the CSP nonce: ${s.slice(0, 80)}`);
   }
-  if (/type="password"|-password"|method="post"/i.test(html)) fail(path, 'password field or POST form');
+  if (FORBIDDEN_FORM_ATTRS.test(html)) fail(path, 'password field or POST form');
   if (/\sstyle="/.test(html)) fail(path, 'style attribute (blocked by the CSP)');
 }
 
