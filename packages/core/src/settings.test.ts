@@ -1,10 +1,5 @@
 import { expect, it } from 'vitest';
-import {
-  parseSourceSettings,
-  readSourceSettings,
-  sourceSettingsKey,
-  unknownFieldsKey,
-} from './settings';
+import { parseSourceSettings, readSourceSettings, sourceSettingsKey, unknownFieldsKey } from './settings';
 
 it('builds keys', () => {
   expect(sourceSettingsKey('nvd')).toBe('source:nvd');

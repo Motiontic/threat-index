@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: the tests are about ${VAR} placeholders
 import { expect, it } from 'vitest';
 // @ts-expect-error plain .mjs script without types
 import { fillConfig } from '../scripts/wrangler-config.mjs';
