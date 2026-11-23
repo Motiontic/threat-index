@@ -114,3 +114,6 @@ export type ParsedRecord =
   | NoticeRecord
   | IncidentRecord
   | TechniqueRecord;
+
+/** A credential a source's pattern may use. The collector fills these from its optional secrets. */
+export type CredentialName = 'github' | 'nvd';

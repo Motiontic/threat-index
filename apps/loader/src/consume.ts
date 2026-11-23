@@ -1,16 +1,10 @@
 import { reserveWrites, secondsUntilUtcMidnight } from '@ti/core/budget';
+import type { LoadMessage } from '@ti/core/inbox';
 
 /** ti-loader. See docs/IMPLEMENTATION_PLAN.md §7. One message = one inbox chunk (≤ 500 rows). */
 export interface Env {
   DB_CONTROL: D1Database;
   BUCKET: R2Bucket;
-}
-
-export interface LoadMessage {
-  jobId: string;
-  chunkKey: string; // inbox/<job>/<n>.ndjson.gz
-  rows: number;
-  priority: 'steady' | 'first-load';
 }
 
 const MAX_QUEUE_DELAY_SECONDS = 12 * 60 * 60; // verify current Queues limit
