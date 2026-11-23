@@ -7,7 +7,7 @@ import { SIGNATURE_HEADER, signRequest, TIMESTAMP_HEADER } from '@ti/core/sign';
 
 export const MAX_URLS_PER_CALL = 50;
 export const MAX_OBJECT_BYTES = 50 * 1024 * 1024;
-export const ROWS_PAGE = 500;
+export const ROWS_PAGE = 1000;
 const RETRIES = 3;
 
 export type RowTable = 'vulns' | 'advisories' | 'signals';

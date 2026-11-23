@@ -123,7 +123,7 @@ describe('list', () => {
 });
 
 describe('rows', () => {
-  it('passes after and limit, and allRows follows next in pages of 500', async () => {
+  it('passes after and limit, and allRows follows next in pages of 1,000', async () => {
     const { api, seen } = await setup((s) => {
       const after = s.url.searchParams.get('after');
       return Response.json(
@@ -135,7 +135,7 @@ describe('rows', () => {
     const keys: unknown[] = [];
     for await (const r of api.allRows('signals')) keys.push(r.key);
     expect(keys).toEqual(['a', 'b']);
-    expect(seen[1]?.url.searchParams.get('limit')).toBe('500');
+    expect(seen[1]?.url.searchParams.get('limit')).toBe('1000');
     expect(seen[2]?.url.searchParams.get('after')).toBe('n1');
   });
 });
