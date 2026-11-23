@@ -225,3 +225,12 @@ continuing a backlog within the same run; the 7-day soak test.
   else `all`; digests use scope `digest`. The List-Unsubscribe header and the footer link both use these tokens.
 - The account is on Workers Paid (1,000 subrequests per invocation), but keep the 40-sends-per-run limit
   anyway; it spaces mail out.
+
+## Changes from the first build of this branch
+
+The coordination section wins over section 1 and acceptance criterion 2. `@ti/core/email` defines no token
+format and exports no `signUnsubscribeToken`, `readUnsubscribeToken` or `unsubscribeUrl`. Use
+`signUnsubscribeToken(secret, { userId, scope, item, issuedAt })` and `UNSUBSCRIBE_PATH` from
+`@ti/core/unsubscribe` on main, with scope `watch` (with the item) for one-entry instant mail, else `all`, and
+`digest` for digests. Build the URL as `<API_BASE><UNSUBSCRIBE_PATH>?t=<token>`. Add a test that a token from
+the notify worker passes `verifyUnsubscribeToken`. Re-run every acceptance check.
