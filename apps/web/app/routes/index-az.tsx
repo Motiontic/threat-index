@@ -7,14 +7,13 @@ import type { Route } from './+types/index-az';
 export async function loader({ request, params }: Route.LoaderArgs) {
   const letter = params.letter ?? null;
   if (letter !== null && !/^[a-z0]$/.test(letter)) throw data(null, { status: 404 });
-  const all = getData(request).index(null);
-  const shown = letter === null ? all : getData(request).index(letter);
-  return {
-    origin: new URL(request.url).origin,
-    letter,
-    counts: Object.fromEntries(all.buckets.map((b) => [b.letter, b.count])),
-    buckets: shown.buckets.filter((b) => b.count > 0),
-  };
+  const base = { origin: new URL(request.url).origin, letter };
+  if (letter === null)
+    return { ...base, items: [], next: null as string | null, cursor: null as string | null };
+  const raw = new URL(request.url).searchParams.get('cursor');
+  const cursor = raw && /^[A-Za-z0-9_-]{1,200}$/.test(raw) ? raw : null;
+  const res = await getData(request).index(letter, cursor ?? undefined);
+  return { ...base, items: res?.items ?? [], next: res?.cursor ?? null, cursor };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -24,36 +23,40 @@ export function meta({ loaderData }: Route.MetaArgs) {
   return buildMeta({
     title: pageTitle(name),
     description: 'Every entry in the Threat Index, listed alphabetically by ID.',
+    noindex: loaderData.letter !== null && loaderData.items.length === 0,
     path: letter === null ? '/index' : `/index/${letter}`,
     origin,
   });
 }
 
 export default function IndexAz({ loaderData }: Route.ComponentProps) {
-  const { letter, counts, buckets } = loaderData;
+  const { letter, items, next, cursor } = loaderData;
   return (
     <div>
       <div className="page-head">
         <h1>{letter === null ? 'Index A–Z' : `Index: ${letter === '0' ? '0–9' : letter.toUpperCase()}`}</h1>
         {letter === null ? null : <Link to="/index">Show all</Link>}
       </div>
-      <LetterBar counts={counts} current={letter} />
-      {buckets.length === 0 ? (
+      <LetterBar current={letter} />
+      {letter === null ? (
+        <p className="muted">Pick a letter to list the entries whose ID starts with it.</p>
+      ) : items.length === 0 ? (
         <EmptyState title="Nothing under this letter yet" />
       ) : (
-        buckets.map((b) => (
-          <section key={b.letter} className="index-group" aria-labelledby={`g-${b.letter}`}>
-            <h2 id={`g-${b.letter}`}>
-              {b.letter === '0' ? '0–9' : b.letter} <span className="muted">{b.count}</span>
-            </h2>
-            <ul className="panel">
-              {b.entries.map((e) => (
-                <CompactRow key={e.key} entry={e} />
-              ))}
-            </ul>
-          </section>
-        ))
+        <section className="index-group" aria-label="Entries">
+          <ul className="panel">
+            {items.map((e) => (
+              <CompactRow key={e.key} item={e} />
+            ))}
+          </ul>
+        </section>
       )}
+      {letter !== null && (next || cursor) ? (
+        <nav className="pager" aria-label="Pages">
+          {cursor ? <Link to={`/index/${letter}`}>First page</Link> : null}
+          {next ? <Link to={`/index/${letter}?cursor=${encodeURIComponent(next)}`}>Next page</Link> : null}
+        </nav>
+      ) : null}
     </div>
   );
 }

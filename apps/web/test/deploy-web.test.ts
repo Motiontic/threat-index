@@ -22,8 +22,16 @@ function build(config: unknown, { redirect = true } = {}) {
     );
   }
 }
-const prod = { name: 'ti-web', services: [{ binding: 'API', service: 'ti-api' }] };
-const staging = { name: 'ti-web-staging', services: [{ binding: 'API', service: 'ti-api-staging' }] };
+const prod = {
+  name: 'ti-web',
+  vars: { DATA_SOURCE: 'api' },
+  services: [{ binding: 'API', service: 'ti-api' }],
+};
+const staging = {
+  name: 'ti-web-staging',
+  vars: { DATA_SOURCE: 'api' },
+  services: [{ binding: 'API', service: 'ti-api-staging' }],
+};
 
 describe('builtWebConfig', () => {
   it('follows the redirect and returns the built config for a matching build', () => {
@@ -41,12 +49,21 @@ describe('builtWebConfig', () => {
   });
 
   it('throws when the API binding targets the wrong worker', () => {
-    build({ name: 'ti-web', services: [{ binding: 'API', service: 'ti-api-staging' }] });
+    build({ ...prod, services: [{ binding: 'API', service: 'ti-api-staging' }] });
     expect(() => builtWebConfig('production', dir)).toThrow(/API binding targets "ti-api-staging"/);
-    build({ name: 'ti-web-staging', services: [{ binding: 'API', service: 'ti-api' }] });
+    build({ ...staging, services: [{ binding: 'API', service: 'ti-api' }] });
     expect(() => builtWebConfig('staging', dir)).toThrow(/API binding targets "ti-api"/);
-    build({ name: 'ti-web', services: [] });
+    build({ ...prod, services: [] });
     expect(() => builtWebConfig('production', dir)).toThrow(/API binding/);
+  });
+
+  it('throws when DATA_SOURCE is not "api"', () => {
+    for (const vars of [{ DATA_SOURCE: 'fixtures' }, {}, undefined]) {
+      build({ ...prod, vars });
+      expect(() => builtWebConfig('production', dir)).toThrow(/DATA_SOURCE is .* needs "api"/);
+      build({ ...staging, vars });
+      expect(() => builtWebConfig('staging', dir)).toThrow(/needs "api"/);
+    }
   });
 
   it('throws when there is no redirect file', () => {

@@ -1,0 +1,7 @@
+// A stand-in ti-api for the api-mode smoke run: it answers with the in-process fixture API.
+{
+  "name": "ti-api",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"]
+}

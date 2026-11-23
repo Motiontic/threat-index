@@ -8,5 +8,5 @@ breach, AI incident and malicious-package record is invented: its ID starts with
 `sources` on each entry lists registry ids (`@ti/sources/registry`) and may only name sources whose licence
 status is `on` or `ask`.
 
-They are read only through `app/data/fixtures.server.ts` and `app/data/data.server.ts`. When the site is wired to
-`ti-api`, delete this folder.
+They are read only through `app/data/fixtures.server.ts` and served by `app/data/fixture-api.server.ts`, an in-process
+fake of ti-api's public routes used for tests and for local runs with `DATA_SOURCE=fixtures`.

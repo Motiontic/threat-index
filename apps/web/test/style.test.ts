@@ -42,8 +42,15 @@ describe('style rules', () => {
     expect(uses[0]?.[1].match(/dangerouslySetInnerHTML=/g)).toHaveLength(1);
   });
 
-  it('never fetches or calls the API from app code yet', () => {
-    const offenders = entries.filter(([, text]) => /\bfetch\(|env\.API/.test(text)).map(([p]) => p);
+  it('calls fetch only in api.server.ts and env.API only in data.server.ts', () => {
+    const fetchers = entries.filter(([, text]) => /\bfetch\(/.test(text)).map(([p]) => p);
+    expect(fetchers).toEqual(['app/data/api.server.ts']);
+    const bindings = entries.filter(([, text]) => /env\.API/.test(text)).map(([p]) => p);
+    expect(bindings).toEqual(['app/data/data.server.ts']);
+  });
+
+  it('has no sample-data constant or changes fixture', () => {
+    const offenders = entries.filter(([, text]) => /SAMPLE_DATA|changes\.json/.test(text)).map(([p]) => p);
     expect(offenders).toEqual([]);
   });
 

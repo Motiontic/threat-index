@@ -64,12 +64,16 @@ describe('response headers', () => {
 });
 
 describe('noindex rule', () => {
-  it('applies to sample data and to staging', () => {
-    expect(shouldNoindex(true, 'production')).toBe(true);
-    expect(shouldNoindex(false, 'staging')).toBe(true);
-    expect(shouldNoindex(true, undefined)).toBe(true);
-    expect(shouldNoindex(false, 'production')).toBe(false);
-    expect(shouldNoindex(false, undefined)).toBe(false);
+  it('is true for fixtures mode, staging and any status of 400 or more', () => {
+    for (const mode of ['api', 'fixtures'] as const) {
+      for (const tiEnv of ['production', 'staging', undefined]) {
+        for (const status of [200, 301, 399, 400, 404, 502]) {
+          const expected = mode === 'fixtures' || tiEnv === 'staging' || status >= 400;
+          expect(shouldNoindex({ mode, tiEnv, status }), `${mode} ${tiEnv} ${status}`).toBe(expected);
+        }
+      }
+    }
+    expect(shouldNoindex({ mode: 'api', tiEnv: 'production', status: 200 })).toBe(false);
   });
 });
 

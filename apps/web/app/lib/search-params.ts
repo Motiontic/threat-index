@@ -1,0 +1,47 @@
+// Validation of the visitor's search query string. Unknown values are dropped; nothing else is forwarded.
+import type { EntryType, SearchParams, SearchSort, Severity } from '../data/types';
+
+export const MAX_QUERY = 200;
+export const SEARCH_TYPES: EntryType[] = ['vuln', 'breach', 'ai', 'mal', 'tech', 'term'];
+/** The types the API holds today. The rest get the "not in the index yet" empty state. */
+export const API_TYPES: EntryType[] = ['vuln', 'mal'];
+export const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low'];
+
+export function parseSearchParams(qs: URLSearchParams): SearchParams {
+  const out: SearchParams = {};
+  const q = (qs.get('q') ?? '').trim();
+  if (q && q.length <= MAX_QUERY) out.q = q;
+  else if (q) out.q = q.slice(0, MAX_QUERY).trim();
+  const type = SEARCH_TYPES.filter((t) => qs.getAll('type').includes(t));
+  if (type.length > 0) out.type = type;
+  if (qs.getAll('sig').includes('kev')) out.sig = ['kev'];
+  const sev = qs.get('sev');
+  const found = SEVERITIES.find((s) => s === sev);
+  if (found) out.sev = found;
+  const year = qs.get('year');
+  if (year && /^(19|20)\d{2}$/.test(year)) out.year = year;
+  const sort = qs.get('sort');
+  if (sort === 'rel' || sort === 'new') out.sort = sort satisfies SearchSort;
+  const cursor = qs.get('cursor');
+  if (cursor && /^[A-Za-z0-9_-]{1,200}$/.test(cursor)) out.cursor = cursor;
+  return out;
+}
+
+export function hasCriteria(p: SearchParams): boolean {
+  return Boolean(p.q || p.type || p.sig || p.sev || p.year);
+}
+
+/** The same params as a query string, with an optional replacement cursor. */
+export function paramsToQuery(p: SearchParams, cursor?: string | null): string {
+  const qs = new URLSearchParams();
+  if (p.q) qs.set('q', p.q);
+  for (const t of p.type ?? []) qs.append('type', t);
+  for (const s of p.sig ?? []) qs.append('sig', s);
+  if (p.sev) qs.set('sev', p.sev);
+  if (p.year) qs.set('year', p.year);
+  if (p.sort) qs.set('sort', p.sort);
+  const c = cursor === undefined ? p.cursor : cursor;
+  if (c) qs.set('cursor', c);
+  const text = qs.toString();
+  return text ? `?${text}` : '';
+}

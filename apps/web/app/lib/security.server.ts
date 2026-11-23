@@ -41,9 +41,16 @@ export const BASE_HEADERS: Readonly<Record<string, string>> = {
   'Cache-Control': 'private, no-cache',
 };
 
-/** Search engines must not index sample data or the staging site. */
-export function shouldNoindex(sampleData: boolean, tiEnv: string | undefined): boolean {
-  return sampleData || tiEnv === 'staging';
+/**
+ * Search engines must not index fixture data, the staging site (it must never compete with production in
+ * results), or any error response (status 400 and up).
+ */
+export function shouldNoindex(input: {
+  mode: 'api' | 'fixtures';
+  tiEnv: string | undefined;
+  status: number;
+}): boolean {
+  return input.mode === 'fixtures' || input.tiEnv === 'staging' || input.status >= 400;
 }
 
 export function applySecurityHeaders(

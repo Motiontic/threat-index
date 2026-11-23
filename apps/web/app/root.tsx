@@ -18,7 +18,7 @@ import {
 import type { Route } from './+types/root';
 import { Shell } from './components/shell';
 import { EmptyState } from './components/ui';
-import { SAMPLE_DATA } from './data/data.server';
+import { currentMode } from './data/data.server';
 import { useNonce } from './lib/nonce';
 import { shouldNoindex } from './lib/security.server';
 import styles from './styles/app.css?url';
@@ -31,10 +31,11 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export async function loader() {
+  const mode = currentMode();
   return {
     sourceCount: SOURCES.length,
-    sample: SAMPLE_DATA,
-    noindex: shouldNoindex(SAMPLE_DATA, env.TI_ENV),
+    sample: mode === 'fixtures',
+    noindex: shouldNoindex({ mode, tiEnv: env.TI_ENV, status: 200 }),
   };
 }
 
@@ -79,17 +80,32 @@ export function ErrorBoundary() {
   const root = useRouteLoaderData<typeof loader>('root');
   const { pathname } = useLocation();
   const status = isRouteErrorResponse(error) ? error.status : 500;
+  const title =
+    status === 404
+      ? 'Page not found'
+      : status === 502
+        ? 'The index is not answering'
+        : 'Something went wrong';
   const entryId = pathname.startsWith('/e/') ? safeDecode(pathname.slice(3)) : null;
   const searchTo = entryId ? `/search?q=${encodeURIComponent(entryId.slice(0, 200))}` : '/search';
 
   return (
     <Shell sample={root?.sample ?? true} sourceCount={root?.sourceCount ?? null}>
-      <title>{status === 404 ? 'Not found · Threat Index' : 'Something went wrong · Threat Index'}</title>
+      <title>{`${status === 404 ? 'Not found' : title} · Threat Index`}</title>
+      {root?.noindex === false ? <meta name="robots" content="noindex" /> : null}
       <div className="page-head">
-        <h1>{status === 404 ? 'Page not found' : 'Something went wrong'}</h1>
+        <h1>{title}</h1>
         <span className="error-code">{status}</span>
       </div>
-      <EmptyState title={status === 404 ? 'We have no page here' : 'The page failed to load'}>
+      <EmptyState
+        title={
+          status === 404
+            ? 'We have no page here'
+            : status === 502
+              ? 'Records are temporarily out of reach'
+              : 'The page failed to load'
+        }
+      >
         <p>
           {status === 404
             ? 'The address may be wrong, or the record is not in the index.'
