@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>CISA Cybersecurity Advisories</title>
+    <link>https://www.cisa.gov/news-events/cybersecurity-advisories</link>
+    <description>Hand-written for tests; the real feed was not reachable from the build sandbox.</description>
+    <item>
+      <title>Acme Controls PLC-9 Series</title>
+      <link>https://www.cisa.gov/news-events/ics-advisories/icsa-26-323-03</link>
+      <description>&lt;h2&gt;Summary&lt;/h2&gt;&lt;p&gt;Successful exploitation of CVE-2026-31001 could let an attacker read device configuration. ZEBRA-HARBOR-SUMMARY.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written fille</description>
+      <pubDate>Thu, 19 Nov 26 12:00:00 +0000</pubDate>
+      <guid isPermaLink="false">/node/26001</guid>
+      <dc:creator>CISA</dc:creator>
+    </item>
+    <item>
+      <title>Orbit Industrial Gateway OG-4</title>
+      <link>https://www.cisa.gov/news-events/ics-advisories/icsa-26-321-01</link>
+      <description>&lt;h2&gt;Vulnerabilities&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;CVE-2026-32001&lt;/li&gt;&lt;li&gt;CVE-2026-32002&lt;/li&gt;&lt;li&gt;CVE-2026-32003&lt;/li&gt;&lt;li&gt;CVE-2026-32004&lt;/li&gt;&lt;li&gt;CVE-2026-32005&lt;/li&gt;&lt;li&gt;CVE-2026-32006&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Repeated mention of cve-2026-32001 in lower case. QUARTZ-MEADOW-TEXT.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Ha</description>
+      <pubDate>Tue, 17 Nov 26 12:00:00 +0000</pubDate>
+      <guid isPermaLink="false">/node/25990</guid>
+      <dc:creator>CISA</dc:creator>
+    </item>
+    <item>
+      <title>Critical Java Vulnerability Requires Immediate Patching</title>
+      <link>https://www.cisa.gov/news-events/alerts/2026/11/17/critical-java-vulnerability-requires-immediate-patching</link>
+      <description>&lt;p&gt;CISA urges users to patch CVE-2026-33333 in the Java runtime. LANTERN-FJORD-ALERT.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the long advisory body that CISA publishes.&lt;/p&gt;&lt;p&gt;Hand-written filler paragraph standing in for the lo</description>
+      <pubDate>Tue, 17 Nov 26 15:30:00 +0000</pubDate>
+      <guid isPermaLink="false">/node/25817</guid>
+      <dc:creator>CISA</dc:creator>
+    </item>
+    <item>
+      <title>CISA Adds Two Known Exploited Vulnerabilities to Catalog</title>
+      <link>https://www.cisa.gov/news-events/alerts/2026/11/16/cisa-adds-two-known-exploited-vulnerabilities-catalog</link>
+      <description>&lt;p&gt;CISA added CVE-2026-34001 and CVE-2026-34002 to the KEV catalog.&lt;/p&gt;</description>
+      <pubDate>Mon, 16 Nov 26 16:00:00 +0000</pubDate>
+      <guid isPermaLink="false">/node/25800</guid>
+      <dc:creator>CISA</dc:creator>
+    </item>
+    <item>
+      <title>Choosing a Secure Router: a Buyer Guide</title>
+      <link>https://www.cisa.gov/resources-tools/resources/choosing-secure-router-buyer-guide</link>
+      <description>&lt;p&gt;General guidance with no vulnerability identifiers.&lt;/p&gt;</description>
+      <pubDate>Fri, 13 Nov 26 14:00:00 +0000</pubDate>
+      <guid isPermaLink="false">/node/25700</guid>
+      <dc:creator>CISA</dc:creator>
+    </item>
+  </channel>
+</rss>
