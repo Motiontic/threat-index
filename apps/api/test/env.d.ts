@@ -6,8 +6,3 @@ declare global {
     interface Env extends Bindings {}
   }
 }
-
-declare module '*.sql?raw' {
-  const sql: string;
-  export default sql;
-}
