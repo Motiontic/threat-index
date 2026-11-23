@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@ti/core": "workspace:*",
-    "drizzle-orm": "^0.44.0"
+    "drizzle-orm": "^0.45.4"
   },
   "scripts": {
     "migrate:local": "for d in ti_control ti_vulns ti_advisories ti_signals ti_world ti_users; do wrangler d1 migrations apply $d --local -c ../../apps/api/wrangler.jsonc; done",
