@@ -1,5 +1,6 @@
 // ti-collector: cron planner + ti-jobs consumer (pull patterns, linker, watchdog).
-// Replace every <fill-after-create> with the IDs printed by `wrangler d1 create` / `wrangler kv namespace create`.
+// D1, R2 and Queues are found by name, so no IDs are needed. Only the KV id must be filled in before deploying
+// (`wrangler kv namespace list`).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "ti-collector",
@@ -12,11 +13,11 @@
     "crons": ["0 */3 * * *", "45 14 * * *", "30 2 * * *", "0 5 * * 1"]
   },
   "d1_databases": [
-    { "binding": "DB_CONTROL", "database_name": "ti_control", "database_id": "<fill-after-create>" },
-    { "binding": "DB_VULNS", "database_name": "ti_vulns", "database_id": "<fill-after-create>" },
-    { "binding": "DB_ADVISORIES", "database_name": "ti_advisories", "database_id": "<fill-after-create>" },
-    { "binding": "DB_SIGNALS", "database_name": "ti_signals", "database_id": "<fill-after-create>" },
-    { "binding": "DB_WORLD", "database_name": "ti_world", "database_id": "<fill-after-create>" }
+    { "binding": "DB_CONTROL", "database_name": "ti_control" },
+    { "binding": "DB_VULNS", "database_name": "ti_vulns" },
+    { "binding": "DB_ADVISORIES", "database_name": "ti_advisories" },
+    { "binding": "DB_SIGNALS", "database_name": "ti_signals" },
+    { "binding": "DB_WORLD", "database_name": "ti_world" }
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
   "kv_namespaces": [{ "binding": "SETTINGS", "id": "<fill-after-create>" }],

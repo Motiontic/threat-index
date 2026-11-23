@@ -6,8 +6,8 @@
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
   "d1_databases": [
-    { "binding": "DB_SIGNALS", "database_name": "ti_signals", "database_id": "<fill-after-create>" },
-    { "binding": "DB_USERS", "database_name": "ti_users", "database_id": "<fill-after-create>" }
+    { "binding": "DB_SIGNALS", "database_name": "ti_signals" },
+    { "binding": "DB_USERS", "database_name": "ti_users" }
   ],
   "queues": {
     "consumers": [{ "queue": "ti-notify", "max_batch_size": 1, "max_retries": 5 }]

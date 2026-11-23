@@ -12,37 +12,31 @@
     {
       "binding": "DB_CONTROL",
       "database_name": "ti_control",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/control"
     },
     {
       "binding": "DB_VULNS",
       "database_name": "ti_vulns",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/vulns"
     },
     {
       "binding": "DB_ADVISORIES",
       "database_name": "ti_advisories",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/advisories"
     },
     {
       "binding": "DB_SIGNALS",
       "database_name": "ti_signals",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/signals"
     },
     {
       "binding": "DB_WORLD",
       "database_name": "ti_world",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/world"
     },
     {
       "binding": "DB_USERS",
       "database_name": "ti_users",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/users"
     }
   ],

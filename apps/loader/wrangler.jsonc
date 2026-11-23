@@ -6,11 +6,11 @@
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
   "d1_databases": [
-    { "binding": "DB_CONTROL", "database_name": "ti_control", "database_id": "<fill-after-create>" },
-    { "binding": "DB_VULNS", "database_name": "ti_vulns", "database_id": "<fill-after-create>" },
-    { "binding": "DB_ADVISORIES", "database_name": "ti_advisories", "database_id": "<fill-after-create>" },
-    { "binding": "DB_SIGNALS", "database_name": "ti_signals", "database_id": "<fill-after-create>" },
-    { "binding": "DB_WORLD", "database_name": "ti_world", "database_id": "<fill-after-create>" }
+    { "binding": "DB_CONTROL", "database_name": "ti_control" },
+    { "binding": "DB_VULNS", "database_name": "ti_vulns" },
+    { "binding": "DB_ADVISORIES", "database_name": "ti_advisories" },
+    { "binding": "DB_SIGNALS", "database_name": "ti_signals" },
+    { "binding": "DB_WORLD", "database_name": "ti_world" }
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
   "queues": {
