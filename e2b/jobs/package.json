@@ -5,7 +5,9 @@
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
-    "job": "node --experimental-strip-types src/run.ts"
+    "job": "node --experimental-strip-types src/run.ts",
+    "bundle": "node build.mjs",
+    "round-trip": "node --experimental-strip-types src/round-trip.ts"
   },
   "dependencies": {
     "@ti/core": "workspace:*",

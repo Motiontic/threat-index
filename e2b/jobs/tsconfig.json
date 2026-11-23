@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "types": ["node"], "allowImportingTsExtensions": true, "lib": ["ES2022", "DOM"] },
+  "compilerOptions": { "types": ["node", "@cloudflare/workers-types"], "allowImportingTsExtensions": true, "lib": ["ES2022", "DOM"] },
   "include": ["src"]
 }
