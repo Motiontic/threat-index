@@ -27,6 +27,7 @@ import {
   parseApiBase,
 } from '../lib/e2b';
 import type { AppEnv, Bindings } from '../lib/env';
+import { allow, limited } from '../lib/rate-limit';
 import { searchCredits } from '../lib/search-credits';
 import { JOB_ID } from './internal-jobs';
 
@@ -122,6 +123,7 @@ export function createDeepQueryRoute(deps: DeepQueryDeps = {}) {
     c.header('cache-control', 'no-store');
     const secret = c.env.JOB_HMAC_SECRET;
     if (!secret) return c.json({ error: 'e2b_not_configured' }, 503);
+    if (!(await allow(c.env.RL_DEEP, `u:${c.get('userId')}`))) return limited(c);
     const text = await readBody(c);
     if (text instanceof Response) return text;
     let data: unknown;

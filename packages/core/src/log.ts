@@ -24,7 +24,11 @@ export function safeFields(f: Record<string, unknown>): Record<string, string | 
   return out;
 }
 
-export function logEvent(level: 'info' | 'warn' | 'error', event: string, f: Record<string, unknown> = {}): void {
+export function logEvent(
+  level: 'info' | 'warn' | 'error',
+  event: string,
+  f: Record<string, unknown> = {},
+): void {
   const line = JSON.stringify({ level, event, ...safeFields(f) });
   if (level === 'error') console.error(line);
   else if (level === 'warn') console.warn(line);

@@ -8,3 +8,5 @@ R2_ACCOUNT_ID=00000000000000000000000000000000
 R2_ACCESS_KEY_ID=xxx
 R2_SECRET_ACCESS_KEY=xxx
 E2B_API_KEY=e2b_xxx
+# Shared with ti-web: verifies the client IP it forwards for rate limits. Same value in both.
+EDGE_HMAC_SECRET=change-me

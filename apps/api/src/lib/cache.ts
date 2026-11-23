@@ -1,4 +1,5 @@
 import { getAuth } from '@hono/clerk-auth';
+import { logEvent } from '@ti/core/log';
 import type { Context } from 'hono';
 import type { AppEnv } from './env';
 
@@ -42,8 +43,12 @@ export async function guarded(
 ): Promise<Response> {
   try {
     return await fn();
-  } catch {
-    console.error(`public-api: ${route} failed`);
+  } catch (err) {
+    logEvent('error', 'guarded_failed', {
+      requestId: c.get('requestId'),
+      route,
+      name: err instanceof Error ? err.name : 'unknown',
+    });
     return c.json({ error: 'internal' }, 500);
   }
 }

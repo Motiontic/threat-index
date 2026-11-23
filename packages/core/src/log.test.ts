@@ -6,7 +6,15 @@ describe('requestIdFrom', () => {
     expect(requestIdFrom('abcd1234-ef')).toBe('abcd1234-ef');
   });
   it('replaces missing, short, long and odd ids', () => {
-    for (const bad of [null, '', 'short', 'x'.repeat(65), 'has space 1234', 'a\nb-12345678', 'ünï-12345678']) {
+    for (const bad of [
+      null,
+      '',
+      'short',
+      'x'.repeat(65),
+      'has space 1234',
+      'a\nb-12345678',
+      'ünï-12345678',
+    ]) {
       const id = requestIdFrom(bad);
       expect(id).not.toBe(bad);
       expect(id).toMatch(/^[0-9a-f-]{36}$/);
@@ -52,7 +60,11 @@ describe('logEvent', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     logEvent('info', 'request', { status: 200, email: 'x@y.zz' });
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(spy.mock.calls[0]?.[0] as string)).toEqual({ level: 'info', event: 'request', status: 200 });
+    expect(JSON.parse(spy.mock.calls[0]?.[0] as string)).toEqual({
+      level: 'info',
+      event: 'request',
+      status: 200,
+    });
   });
   it('uses console.error for errors', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});

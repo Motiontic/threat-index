@@ -1,5 +1,8 @@
 import type { LoadMessage } from '@ti/core/inbox';
 
+/** Cloudflare's rate limiting binding. */
+export type RateLimiter = { limit(options: { key: string }): Promise<{ success: boolean }> };
+
 export type Bindings = {
   DB_CONTROL: D1Database;
   DB_VULNS: D1Database;
@@ -7,6 +10,20 @@ export type Bindings = {
   DB_USERS: D1Database;
   BUCKET: R2Bucket;
   LOAD: Queue<LoadMessage>;
+  DB_WORLD: D1Database;
+  DB_SIGNALS: D1Database;
+  SETTINGS: KVNamespace;
+  /** Producers used only for `metrics()` on the /ops page. */
+  JOBS: Queue | undefined;
+  JOBS_DLQ: Queue | undefined;
+  /** Rate limit bindings; a missing one fails open. */
+  RL_PUBLIC: RateLimiter | undefined;
+  RL_USER: RateLimiter | undefined;
+  RL_DEEP: RateLimiter | undefined;
+  /** Shared with ti-web: verifies the client IP it forwards. Unset: forwarded IPs are ignored. */
+  EDGE_HMAC_SECRET: string | undefined;
+  /** Comma list of Clerk user ids allowed to read /v1/admin/ops. */
+  ADMIN_USER_IDS: string | undefined;
   CLERK_SECRET_KEY: string;
   CLERK_PUBLISHABLE_KEY: string;
   CLERK_WEBHOOK_SIGNING_SECRET: string;
@@ -22,5 +39,5 @@ export type Bindings = {
   R2_ACCESS_KEY_ID: string | undefined;
   R2_SECRET_ACCESS_KEY: string | undefined;
 };
-export type Variables = { userId: string };
+export type Variables = { userId: string; requestId: string; limited?: boolean };
 export type AppEnv = { Bindings: Bindings; Variables: Variables };

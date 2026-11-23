@@ -25,12 +25,18 @@
   // Never add an AUTH_MODE var here: fake sign-in is for local fixtures runs only (deploy refuses it).
   // Loaders call ti-api through this binding (app/data/api.server.ts).
   "services": [{ "binding": "API", "service": "ti-api" }],
+  // Page rate limit (per Cloudflare location, approximate). Not inherited by env.staging.
+  "ratelimits": [{ "name": "RL_PAGES", "namespace_id": "7104", "simple": { "limit": 120, "period": 60 } }],
+  // More secrets and vars:
+  //   EDGE_HMAC_SECRET  a Worker secret, the same value as ti-api's: `wrangler secret put EDGE_HMAC_SECRET --name ti-web[-staging]`.
+  //   ADMIN_USER_IDS    a plain var set at deploy by scripts/deploy-web.mjs (`--var`, from TI_ADMIN_USER_IDS).
 
   "env": {
     "staging": {
       "name": "ti-web-staging",
       "vars": { "TI_ENV": "staging", "DATA_SOURCE": "api" },
-      "services": [{ "binding": "API", "service": "ti-api-staging" }]
+      "services": [{ "binding": "API", "service": "ti-api-staging" }],
+      "ratelimits": [{ "name": "RL_PAGES", "namespace_id": "7204", "simple": { "limit": 120, "period": 60 } }]
     }
   }
 }
