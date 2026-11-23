@@ -45,3 +45,18 @@ export function vulnShard(vulnKey: string): string {
 export function lookupVulnKey(vulnKey: string): string {
   return `lookup/vuln/${vulnShard(vulnKey)}.json`;
 }
+
+/** lookup/index/<letter>.json, an `IndexLetterResponse`. Letter is `a`–`z`, or `0` for digits. */
+export function indexLetterKey(letter: string): string {
+  return `lookup/index/${letter}.json`;
+}
+
+/** lake/<table>/<source>/<year>/part-<part>.parquet */
+export function lakeKey(table: string, sourceId: string, year: number, part: number): string {
+  return `lake/${table}/${sourceId}/${year}/part-${part}.parquet`;
+}
+
+/** sitemap.xml */
+export function sitemapKey(): string {
+  return 'sitemap.xml';
+}
