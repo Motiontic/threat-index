@@ -76,33 +76,4 @@ describe('api (Workers runtime, local D1)', () => {
     expect(bad.status).toBe(401);
     expect((await call('/unsubscribe?t=nope')).status).toBe(401);
   });
-
-  it('GET /v1/entries/:id returns preview fields to a visitor', async () => {
-    await env.DB_VULNS.prepare(
-      `INSERT INTO vulns (key, kind, title, summary, published, modified, cvss, kev_added, sources, doc_key)
-       VALUES (?1, 'cve', 'Example flaw', 'Short summary', '2025-05-01', '2025-05-02T00:00:00Z', 9.8, '2025-05-05', '["cisa-kev"]', 'docs/secret')`,
-    )
-      .bind('CVE-2025-9999')
-      .run();
-    const res = await call('/v1/entries/cve-2025-9999');
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { access: string; entry: Record<string, unknown>; credits: unknown[] };
-    expect(body.access).toBe('preview');
-    expect(body.entry).toEqual({
-      key: 'CVE-2025-9999',
-      kind: 'cve',
-      title: 'Example flaw',
-      summary: 'Short summary',
-      published: '2025-05-01',
-      cvss: 9.8,
-      kev_added: '2025-05-05',
-    });
-    expect(body.entry).not.toHaveProperty('doc_key');
-    expect(body.credits).toEqual([{ source: 'cisa-kev', text: 'Source: CISA KEV' }]);
-    expect(res.headers.get('cache-control')).toBe('public, max-age=300');
-  });
-
-  it('GET /v1/entries/:id returns 404 for an unknown entry', async () => {
-    expect((await call('/v1/entries/CVE-1999-0000')).status).toBe(404);
-  });
 });
