@@ -212,3 +212,12 @@ current docs (record the URLs and the date checked in the fixture folder's `SOUR
 6. Proof saved: `pnpm build` and `pnpm test:workers` output; the `curl` checks from section 5; the
    `link()` result for CVE-2024-3400 (rows by table); and the PR states which fixtures are real and which
    hand-written, and every endpoint check that failed.
+
+## Changes from the first build of this branch
+
+The parsers and source config are done, but `pnpm test:workers` fails two tests in
+`apps/collector/test/step.workers.test.ts` ("no parser" and "null nextCursor"): they used `cve-list` as an
+example of a source with no parser, and it now has one. You may edit that test file for this only: make those
+two tests use a source that still has no parser (pick one from the registry and assert it has none, so the
+test fails loudly if that changes), or a test-only source config. Change nothing else under `apps/collector`.
+Re-run every acceptance check.
