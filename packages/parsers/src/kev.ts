@@ -1,5 +1,5 @@
-import type { ParseResult, SignalRecord } from '@ti/core';
-import { normaliseId } from '@ti/core';
+import { normaliseId } from '@ti/core/ids';
+import type { ParseResult, SignalRecord } from '@ti/core/types';
 import { z } from 'zod';
 
 /** CISA Known Exploited Vulnerabilities catalogue (JSON feed). CC0. */
@@ -48,3 +48,6 @@ export function parseKev(json: unknown): ParseResult<SignalRecord> & { catalogVe
 
   return { records, unknownFields: [...unknown], catalogVersion: catalog.catalogVersion };
 }
+
+/** The parser-module contract: `@ti/parsers/<name>` exports `parse`. */
+export const parse = parseKev;

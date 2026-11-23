@@ -44,8 +44,21 @@ function fill(value, missing) {
   return value;
 }
 
+/**
+ * Writes apps/<app>/wrangler.test.jsonc for the Workers tests: the staging section with every ${VAR}
+ * placeholder replaced by a dummy value, so no real ids are needed. Never use it to deploy.
+ */
+export function writeTestConfig(app) {
+  const src = join(ROOT, 'apps', app, 'wrangler.jsonc');
+  const text = readFileSync(src, 'utf8');
+  for (const [, name] of text.matchAll(PLACEHOLDER)) {
+    process.env[name] ??= name.includes('URL') ? 'http://localhost' : `test-${name.toLowerCase()}`;
+  }
+  return writeDeployConfig(app, 'staging', 'wrangler.test.jsonc');
+}
+
 /** Fills one app's config for a target and returns the generated file's path. */
-export function writeDeployConfig(app, target) {
+export function writeDeployConfig(app, target, fileName = 'wrangler.deploy.jsonc') {
   const src = join(ROOT, 'apps', app, 'wrangler.jsonc');
   const { config, error } = ts.parseConfigFileTextToJson(src, readFileSync(src, 'utf8'));
   if (error) throw new Error(`${src}: ${ts.flattenDiagnosticMessageText(error.messageText, '\n')}`);
@@ -60,7 +73,7 @@ export function writeDeployConfig(app, target) {
     );
   }
 
-  const dest = join(ROOT, 'apps', app, 'wrangler.deploy.jsonc');
+  const dest = join(ROOT, 'apps', app, fileName);
   const out = fill(config, new Set());
   writeFileSync(
     dest,
