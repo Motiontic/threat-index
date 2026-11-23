@@ -1,16 +1,22 @@
-import { rmSync, writeFileSync } from 'node:fs';
-import { afterAll, describe, expect, it } from 'vitest';
-import { loadParser } from '../packages/parsers/src/load';
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-const dir = new URL('../packages/parsers/src/', import.meta.url);
-const made: URL[] = [];
+// loadParser imports `./<name>.ts` next to itself. To avoid writing temporary modules into
+// packages/parsers/src (which other test files read in parallel), run an exact copy of load.ts from a
+// unique temp folder that no other test touches, and put the temporary parsers beside that copy.
+const dir = mkdtempSync(join(tmpdir(), 'ti-load-errors-'));
+let loadParser: (name: string) => Promise<unknown>;
 function tmp(name: string, code: string) {
-  const f = new URL(`${name}.ts`, dir);
-  writeFileSync(f, code);
-  made.push(f);
+  writeFileSync(join(dir, `${name}.ts`), code);
 }
+beforeAll(async () => {
+  copyFileSync(new URL('../packages/parsers/src/load.ts', import.meta.url), join(dir, 'load.ts'));
+  ({ loadParser } = await import(/* @vite-ignore */ join(dir, 'load.ts')));
+});
 afterAll(() => {
-  for (const f of made) rmSync(f, { force: true });
+  rmSync(dir, { recursive: true, force: true });
 });
 
 describe('loadParser errors', () => {

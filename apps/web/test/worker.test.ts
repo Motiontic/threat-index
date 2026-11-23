@@ -30,7 +30,7 @@ describe('Worker fetch handler', () => {
     for (const name of Object.keys(BASE_HEADERS))
       expect(res.headers.get(name), name).toBe(BASE_HEADERS[name]);
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
-    expect(res.headers.get('Content-Security-Policy')).toMatch(/script-src 'self' 'nonce-[\w-]+/);
+    expect(res.headers.get('Content-Security-Policy')).toMatch(/script-src 'self' 'nonce-[A-Za-z0-9+/=_-]+'/);
   });
 
   it('has no noindex on a redirect in api mode in production, but has it on staging', async () => {
