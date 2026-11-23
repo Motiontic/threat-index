@@ -147,7 +147,8 @@ async function watchRoute(request: Request, s: UserState, id: string): Promise<R
   }
   if (request.method === 'DELETE') {
     const entry = findEntry(id);
-    if (!entry || !s.watch.delete(entry.key)) return error(404, 'not_found');
+    // Like the real route, deleting something that is not watched (or unknown) is still 200.
+    if (entry) s.watch.delete(entry.key);
     return json({ ok: true });
   }
   return error(405, 'method_not_allowed');

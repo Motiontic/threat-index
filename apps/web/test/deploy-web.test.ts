@@ -1,5 +1,5 @@
 // @ts-nocheck: uses node:fs, node:os and node:path, which this app's tsconfig has no types for.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -123,5 +123,17 @@ describe('webDeployArgs', () => {
         /AUTH_MODE/,
       );
     }
+  });
+});
+
+describe('scripts/deploy.mjs wiring', () => {
+  it('passes webDeployArgs to the ti-web wrangler deploy', () => {
+    const src = readFileSync(new URL('../../../scripts/deploy.mjs', import.meta.url), 'utf8');
+    expect(src).toMatch(
+      /import \{[^}]*webDeployArgs[^}]*\} from '\.\.\/apps\/web\/scripts\/deploy-web\.mjs'/,
+    );
+    expect(src).toMatch(
+      /wrangler\(\['deploy', '-c', builtConfig, \.\.\.webDeployArgs\(target, builtConfig\)\]\)/,
+    );
   });
 });

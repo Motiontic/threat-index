@@ -6,7 +6,7 @@
 //   node scripts/deploy.mjs <staging|production>
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { buildWeb, builtWebConfig, checkWeb } from '../apps/web/scripts/deploy-web.mjs';
+import { buildWeb, builtWebConfig, checkWeb, webDeployArgs } from '../apps/web/scripts/deploy-web.mjs';
 import { APPS, loadDotEnv, ROOT, TARGETS, writeDeployConfig } from './wrangler-config.mjs';
 
 export const DATABASES = ['ti_control', 'ti_vulns', 'ti_advisories', 'ti_signals', 'ti_world', 'ti_users'];
@@ -76,7 +76,9 @@ async function main() {
     if (app === 'web') {
       // The environment is fixed at build time; never pass --env for this app.
       buildWeb(target);
-      const out = wrangler(['deploy', '-c', builtWebConfig(target)]);
+      // Refuses a missing/pk_test production Clerk key or an AUTH_MODE build, and supplies the key as a var.
+      const builtConfig = builtWebConfig(target);
+      const out = wrangler(['deploy', '-c', builtConfig, ...webDeployArgs(target, builtConfig)]);
       process.stdout.write(out);
       webUrl = out.match(/https:\/\/[^\s]+\.workers\.dev/)?.[0];
       continue;
