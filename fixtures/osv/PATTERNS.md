@@ -6,3 +6,7 @@ the OSV schema 1.6. OSV data is CC-BY 4.0 / CC0 per record; the text here is inv
 
 - `pattern-modified_id.csv`: 20 lines, newest first; lines 3 and 4 share a time (tie broken by ref).
 - `pattern-record.json`: one record.
+
+## Parser fixtures
+
+See `SOURCE.md`.
