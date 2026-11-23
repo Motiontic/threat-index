@@ -278,3 +278,19 @@ top of the existing commits and don't redo work that already matches the spec.
 
 `PROOF.md` must describe the whole branch, not only these fixes, because it becomes the PR body. Re-run every
 check in the acceptance criteria.
+
+## Changes from the second build of this branch
+
+QA passed in the second build, but the final `pnpm build` failed: the web build leaves
+`apps/web/.wrangler/deploy/config.json` behind, and Biome lints it. Fix that and two review nits, on top of the
+existing commits.
+
+1. Biome ignores `apps/web/.wrangler/` (in `apps/web/biome.json`, next to `build` and `.react-router`), so
+   `pnpm build` passes after `pnpm test:workers` or a web build in the same checkout. Prove it by running
+   `pnpm test:workers` and then `pnpm build` in the same worktree.
+2. The redirect test goes through the Worker's `fetch` handler (`workers/app.ts`), so it fails if the handler
+   stops applying the headers, not only if `secureRedirect` changes.
+3. The entry page's tab strip: put `aria-current="page"` on the current tab's link, not on its `<li>`, and
+   render locked tabs as visibly disabled elements with an accessible name that says they need an account.
+
+`PROOF.md` must describe the whole branch. Re-run every check in the acceptance criteria, including QA.
