@@ -43,6 +43,7 @@ jobs:
       TI_SETTINGS_KV_ID_STAGING: ${{ secrets.TI_SETTINGS_KV_ID_STAGING }}
       TI_API_URL_STAGING: ${{ vars.TI_API_URL_STAGING }}
       TI_APP_URL_STAGING: ${{ vars.TI_APP_URL_STAGING }}
+      TI_CLERK_PUBLISHABLE_KEY_STAGING: ${{ vars.TI_CLERK_PUBLISHABLE_KEY_STAGING }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -74,6 +75,7 @@ jobs:
       TI_OPS_EMAIL: ${{ vars.TI_OPS_EMAIL }}
       TI_OPS_EMAIL_FROM: ${{ vars.TI_OPS_EMAIL_FROM }}
       TI_APP_URL: ${{ vars.TI_APP_URL }}
+      TI_CLERK_PUBLISHABLE_KEY: ${{ vars.TI_CLERK_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
