@@ -18,6 +18,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) return [{ title: pageTitle('Not found') }];
   const { letter, origin } = loaderData;
   const name = letter === null ? 'Index A–Z' : `Index: ${letter === '0' ? '0–9' : letter.toUpperCase()}`;
   return buildMeta({

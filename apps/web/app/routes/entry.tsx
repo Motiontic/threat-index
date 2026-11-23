@@ -17,6 +17,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) return [{ title: pageTitle('Not found') }];
   const { entry, origin } = loaderData;
   return buildMeta({
     title: pageTitle(`${entry.key}: ${entry.title}`),

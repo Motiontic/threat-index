@@ -25,6 +25,7 @@ function heading(q: string, type: string[]): string {
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) return [{ title: pageTitle('Not found') }];
   const { params, origin } = loaderData;
   return buildMeta({
     title: pageTitle(heading(params.q, params.type)),

@@ -7,6 +7,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) return [{ title: pageTitle('Not found') }];
   return buildMeta({
     title: pageTitle('Account'),
     description: 'Accounts are not open yet. Search and previews stay free.',

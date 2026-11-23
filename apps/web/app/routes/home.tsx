@@ -11,6 +11,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) return [{ title: pageTitle('Not found') }];
   return buildMeta({
     title: pageTitle('Every vulnerability, exploit, breach and AI incident'),
     description:
