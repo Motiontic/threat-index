@@ -87,6 +87,29 @@ describe('page (Workers)', () => {
     expect(String(r.receipt?.body)).not.toContain('<table');
   });
 
+  it.each([
+    'javascript:alert(1)',
+    'JaVaScRiPt:alert(1)',
+    'data:text/html,hi',
+    'vbscript:msgbox(1)',
+    'file:///etc/passwd',
+    'ftp://example.test/x',
+  ])('drops a %s link, logs only the source id, keeps http(s) and relative ones', async (bad) => {
+    const doc = `<table>
+      <tr class="advisory"><td class="id">B-1</td><td class="title"><a href="${bad}">bad</a></td><td class="date">d</td></tr>
+      <tr class="advisory"><td class="id">B-2</td><td class="title"><a href="/ok">ok</a></td><td class="date">d</td></tr>
+      <tr class="advisory"><td class="id">B-3</td><td class="title"><a href="http://example.test/p">ok</a></td><td class="date">d</td></tr></table>`;
+    const h = makeCtx({ source, routes: [route(URL_, page(doc))] });
+    const r = await fetch(h.ctx);
+    const links = Object.fromEntries(r.items.map((i) => [i.id, (i.body as { link?: string }).link]));
+    expect(links['B-1']).toBeUndefined();
+    expect(links['B-2']).toBe('https://www.cert-in.org.in/ok');
+    expect(links['B-3']).toBe('http://example.test/p');
+    const dropped = h.logs.filter((l) => l.msg.includes('dropped a link'));
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]?.extra).toEqual({ source: 'cert-in' });
+  });
+
   it('with heavy, a change is a job hand-off', async () => {
     const heavy = { ...source, heavy: true };
     const r = await fetch(

@@ -65,10 +65,15 @@ async function scan(ctx: PatternContext, cursor: Pair | null): Promise<Scan> {
   const cursorMs = cursor ? Date.parse(cursor[0]) : Number.NEGATIVE_INFINITY;
   const out: Scan = { fresh: [], newest: null, validator: null, skipped: 0, complete: false };
   let carry = '';
+  // One streaming decoder for every range: a character split across a boundary stays whole.
+  const decoder = new TextDecoder();
   for (let i = 0; i < MAX_RANGE_READS; i++) {
     let res: Awaited<ReturnType<typeof request>>;
     try {
-      res = await request(ctx, cfg.listUrl, { range: { start: i * size, end: (i + 1) * size - 1 } });
+      res = await request(ctx, cfg.listUrl, {
+        range: { start: i * size, end: (i + 1) * size - 1 },
+        decoder,
+      });
     } catch (err) {
       // Past the end of the list.
       if (err instanceof PatternError && err.status === 416) {
@@ -116,13 +121,13 @@ async function scan(ctx: PatternContext, cursor: Pair | null): Promise<Scan> {
 
 /** Whether a ranged read got the last byte of the list. */
 function reachedEnd(
-  res: { status: number; truncated: boolean; text: string; headers: Headers },
+  res: { status: number; truncated: boolean; bytes: number; headers: Headers },
   size: number,
 ): boolean {
   if (res.status === 200) return !res.truncated;
   const m = /bytes (\d+)-(\d+)\/(\d+)/.exec(res.headers.get('content-range') ?? '');
   if (m) return Number(m[2]) + 1 >= Number(m[3]);
-  return new TextEncoder().encode(res.text).length < size;
+  return res.bytes < size;
 }
 
 const pairCursor = (l: Pair | Line, etag?: string | null): Cursor => {

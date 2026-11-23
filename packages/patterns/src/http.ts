@@ -22,6 +22,8 @@ export interface RequestOptions {
   auth?: { credential: CredentialName; header: string; scheme?: string };
   maxBytes?: number;
   timeoutMs?: number;
+  /** Decodes the body; pass one `TextDecoder` across ranged reads so split characters stay whole. */
+  decoder?: TextDecoder;
 }
 
 export interface HttpResult {
@@ -32,6 +34,8 @@ export interface HttpResult {
   text: string;
   validator: string | null;
   truncated: boolean;
+  /** Bytes read from the body. */
+  bytes: number;
 }
 
 /** The ETag, else `lm:<Last-Modified>`, else null. */
@@ -165,6 +169,13 @@ async function once(
     if (ctx.signal.aborted) controller.abort();
     else ctx.signal.addEventListener('abort', onAbort, { once: true });
   }
+  // The caller's signal wins over our own timer: a cancelled step is not a slow server.
+  const abortOrNetwork = (cause: unknown): PatternError => {
+    if (ctx.signal?.aborted) return new PatternError('request cancelled', 'cancelled', { cause });
+    if (timedOut || controller.signal.aborted)
+      return new PatternError('request timed out', 'timeout', { cause });
+    return new PatternError('network error', 'network', { cause });
+  };
   const t0 = ctx.now().getTime();
   let url = startUrl;
   let status = 0;
@@ -195,9 +206,7 @@ async function once(
           signal: controller.signal,
         });
       } catch (cause) {
-        if (timedOut || controller.signal.aborted)
-          throw new PatternError('request timed out', 'timeout', { cause });
-        throw new PatternError('network error', 'network', { cause });
+        throw abortOrNetwork(cause);
       }
       status = res.status;
 
@@ -228,6 +237,7 @@ async function once(
           text: '',
           validator: validatorOf(res.headers) ?? opts.validator ?? null,
           truncated: false,
+          bytes: 0,
         };
       }
       if (status < 200 || status >= 300) {
@@ -250,7 +260,7 @@ async function once(
       let text = '';
       let truncated = false;
       if (opts.method !== 'HEAD' && res.body) {
-        const read = await readBody(res.body, readLimit, ignoredRange);
+        const read = await readBody(res.body, readLimit, ignoredRange, opts.decoder);
         text = read.text;
         bytes = read.bytes;
         truncated = read.truncated;
@@ -264,13 +274,12 @@ async function once(
         text,
         validator: validatorOf(res.headers),
         truncated,
+        bytes,
       };
     }
   } catch (err) {
     if (err instanceof PatternError) throw err;
-    if (timedOut || controller.signal.aborted)
-      throw new PatternError('request timed out', 'timeout', { cause: err });
-    throw new PatternError('network error', 'network', { cause: err });
+    throw abortOrNetwork(err);
   } finally {
     clearTimeout(timer);
     ctx.signal?.removeEventListener('abort', onAbort);
@@ -283,6 +292,7 @@ async function readBody(
   body: ReadableStream<Uint8Array>,
   limit: number,
   stopAtLimit: boolean,
+  decoder?: TextDecoder,
 ): Promise<{ text: string; bytes: number; truncated: boolean; overflow: boolean }> {
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
@@ -312,5 +322,10 @@ async function readBody(
     all.set(c, at);
     at += c.byteLength;
   }
-  return { text: new TextDecoder().decode(all), bytes: total, truncated, overflow };
+  return {
+    text: decoder ? decoder.decode(all, { stream: true }) : new TextDecoder().decode(all),
+    bytes: total,
+    truncated,
+    overflow,
+  };
 }

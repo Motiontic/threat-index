@@ -2,6 +2,7 @@ export type PatternErrorCode =
   // retryable
   | 'rate-limited'
   | 'timeout'
+  | 'cancelled'
   | 'network'
   | 'server'
   // permanent
@@ -12,7 +13,13 @@ export type PatternErrorCode =
   | 'request-budget'
   | 'runtime';
 
-const RETRYABLE: ReadonlySet<PatternErrorCode> = new Set(['rate-limited', 'timeout', 'network', 'server']);
+const RETRYABLE: ReadonlySet<PatternErrorCode> = new Set([
+  'rate-limited',
+  'timeout',
+  'cancelled',
+  'network',
+  'server',
+]);
 
 /** Longest `Retry-After` we pass on. */
 export const MAX_RETRY_AFTER_SECONDS = 3600;

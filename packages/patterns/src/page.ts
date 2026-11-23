@@ -3,7 +3,7 @@ import { PatternError } from './errors';
 import { request } from './http';
 import { buildReceipt } from './receipt';
 import { MAX_ITEMS_PER_STEP, type PatternContext, type PatternResult, type RawItem } from './types';
-import { heavyResult, jobKind, pickNew, pullBlock, reasonOf, unchanged } from './util';
+import { heavyResult, httpUrl, jobKind, pickNew, pullBlock, reasonOf, unchanged } from './util';
 
 type Row = Record<string, string>;
 
@@ -14,6 +14,7 @@ const URL_ATTRS = new Set(['href', 'src', 'action', 'cite', 'poster', 'data']);
 export async function parseRows(
   html: string,
   cfg: NonNullable<PatternContext['source']['pull']>['page'] & object,
+  onDroppedLink?: () => void,
 ): Promise<Row[]> {
   const Rewriter = (globalThis as { HTMLRewriter?: typeof HTMLRewriter }).HTMLRewriter;
   if (!Rewriter) throw new PatternError('HTMLRewriter is not available in this runtime', 'runtime');
@@ -40,7 +41,12 @@ export async function parseRows(
           const v = el.getAttribute(attr);
           if (v === null) return;
           const value = decodeEntities(v);
-          target[name] = URL_ATTRS.has(attr.toLowerCase()) ? resolve(value, cfg.url) : value.trim();
+          if (URL_ATTRS.has(attr.toLowerCase())) {
+            // Only absolute http(s) links survive; javascript:, data: and the like are dropped.
+            const href = httpUrl(value, cfg.url);
+            if (href === null) onDroppedLink?.();
+            else target[name] = href;
+          } else target[name] = value.trim();
           return;
         }
         capturing = target;
@@ -73,20 +79,12 @@ export function decodeEntities(text: string): string {
   });
 }
 
-function resolve(value: string, base: string): string {
-  try {
-    return new URL(value.trim(), base).href;
-  } catch {
-    return value.trim();
-  }
-}
-
 export async function check(ctx: PatternContext): Promise<'unchanged' | 'changed'> {
   const cfg = pullBlock(ctx, 'page', { allowLinkOnly: true });
   if (!ctx.cursor?.etag) return 'changed';
   const res = await request(ctx, cfg.url, { validator: ctx.cursor.etag, accept: 'text/html' });
   if (res.notModified) return 'unchanged';
-  const rows = await parseRows(res.text, cfg);
+  const rows = await parseRows(res.text, cfg, droppedLink(ctx));
   const order = cfg.order ?? 'newest-first';
   const newest = order === 'newest-first' ? rows[0] : rows[rows.length - 1];
   return newest && newest[cfg.key] === ctx.cursor.value ? 'unchanged' : 'changed';
@@ -97,7 +95,10 @@ export async function fetch(ctx: PatternContext): Promise<PatternResult> {
   const res = await request(ctx, cfg.url, { validator: ctx.cursor?.etag ?? null, accept: 'text/html' });
   if (res.notModified) return unchanged(ctx);
 
-  const rows = (await parseRows(res.text, cfg)).map((r) => ({ key: r[cfg.key] as string, row: r }));
+  const rows = (await parseRows(res.text, cfg, droppedLink(ctx))).map((r) => ({
+    key: r[cfg.key] as string,
+    row: r,
+  }));
   const picked = pickNew(rows, cfg.order ?? 'newest-first', ctx.cursor?.value ?? null, MAX_ITEMS_PER_STEP);
   if (picked.gap)
     ctx.log('page: the cursor key is not on the page, rows may have been missed', { source: ctx.source.id });
@@ -151,3 +152,7 @@ const cursorOf = (key: string, etag: string | null): Cursor => ({
   value: key,
   ...(etag ? { etag } : {}),
 });
+
+/** Logs a dropped link with the source id only, never the value. */
+const droppedLink = (ctx: PatternContext) => () =>
+  ctx.log('page: dropped a link that is not http(s)', { source: ctx.source.id });

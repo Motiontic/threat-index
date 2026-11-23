@@ -167,7 +167,7 @@ describe('request', () => {
     });
   });
 
-  it('honours the caller signal', async () => {
+  it('reports an abort from the caller signal as cancelled, not timeout', async () => {
     const ac = new AbortController();
     const h = makeCtx({
       source,
@@ -183,7 +183,7 @@ describe('request', () => {
       ],
     });
     h.ctx.signal = ac.signal;
-    expect((await failure(request(h.ctx, URL1))).code).toBe('timeout');
+    expect(await failure(request(h.ctx, URL1))).toMatchObject({ code: 'cancelled', retryable: true });
   });
 
   it('rejects a body over maxBytes, by Content-Length and while streaming', async () => {

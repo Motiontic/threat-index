@@ -173,4 +173,23 @@ describe('changelist', () => {
     expect(r.heavy?.kind).toBe('big-file');
     expect(h.requests.every((q) => q.url === LIST)).toBe(true);
   });
+
+  it('keeps a multi-byte character whole when a range boundary falls inside it', async () => {
+    const text = '2025-05-20T23:00:00Z,npm/caf\u00e9-1\n2025-04-01T00:00:00Z,npm/old\n';
+    const bytes = new TextEncoder().encode(text);
+    const at1 = bytes.indexOf(0xc3); // first byte of the two-byte é
+    const small = {
+      ...source,
+      pull: { changelist: { ...EXAMPLES.osv.changelist, rangeBytes: at1 + 1 } },
+    } as typeof source;
+    const h = makeCtx({
+      source: small,
+      cursor: at('2025-05-01T00:00:00Z', 'npm/x', VALIDATOR),
+      routes: [route(LIST, ranged(text)), route(ITEMS, reply('{}'))],
+    });
+    const r = await fetch(h.ctx);
+    expect(r.items.map((i) => i.id)).toEqual(['npm/caf\u00e9-1']);
+    expect(JSON.stringify(r)).not.toContain('\ufffd');
+    expect(h.requests.filter((q) => q.headers.range).length).toBeGreaterThan(1);
+  });
 });

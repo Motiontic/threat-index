@@ -257,3 +257,16 @@ export function pickNew<T extends { key: string }>(
   const oldestFirst = [...candidates].reverse();
   return { fresh: oldestFirst.slice(0, take), more: oldestFirst.length > take, gap, newestKey };
 }
+
+/**
+ * An item link is kept only as an absolute `http:` or `https:` URL (later pages render it).
+ * `base` resolves relative values; without it the value must already be absolute.
+ */
+export function httpUrl(value: string, base?: string): string | null {
+  try {
+    const u = base ? new URL(value.trim(), base) : new URL(value.trim());
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+  } catch {
+    return null;
+  }
+}

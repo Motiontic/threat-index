@@ -4,7 +4,16 @@ import { PatternError } from './errors';
 import { request } from './http';
 import { buildReceipt } from './receipt';
 import { MAX_ITEMS_PER_STEP, type PatternContext, type PatternResult, type RawItem } from './types';
-import { heavyResult, jobKind, pickNew, pullBlock, reasonOf, rejectXmlEntities, unchanged } from './util';
+import {
+  heavyResult,
+  httpUrl,
+  jobKind,
+  pickNew,
+  pullBlock,
+  reasonOf,
+  rejectXmlEntities,
+  unchanged,
+} from './util';
 
 /** What a link-only source keeps of an entry. */
 export interface LinkOnlyItem {
@@ -73,10 +82,17 @@ export function parseFeed(xml: string): Node[] {
   throw new PatternError('not an RSS, RDF or Atom feed', 'format');
 }
 
-export function linkOnly(item: Node, id: string): LinkOnlyItem {
+export function linkOnly(item: Node, id: string, onDroppedLink?: () => void): LinkOnlyItem {
+  const raw = linkOf(item);
+  let link = '';
+  if (raw) {
+    // Only absolute http(s) links survive; javascript:, data: and the like are dropped.
+    link = httpUrl(raw) ?? '';
+    if (!link) onDroppedLink?.();
+  }
   const date =
     textOf(item.pubDate) || textOf(item.updated) || textOf(item.published) || textOf(item['dc:date']);
-  return { id, title: textOf(item.title), date, link: linkOf(item) };
+  return { id, title: textOf(item.title), date, link };
 }
 
 export async function check(ctx: PatternContext): Promise<'unchanged' | 'changed'> {
@@ -122,7 +138,11 @@ export async function fetch(ctx: PatternContext): Promise<PatternResult> {
   const isLink = ctx.source.licence === 'link';
   const items: RawItem[] = picked.fresh.map((e) => ({
     id: e.key,
-    body: isLink ? linkOnly(e.item, e.key) : e.item,
+    body: isLink
+      ? linkOnly(e.item, e.key, () =>
+          ctx.log('feed: dropped a link that is not http(s)', { source: ctx.source.id }),
+        )
+      : e.item,
   }));
   const receipt = buildReceipt(
     ctx,

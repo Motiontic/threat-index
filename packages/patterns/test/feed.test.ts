@@ -170,6 +170,51 @@ describe('feed', () => {
     });
   });
 
+  it.each([
+    ['javascript', 'javascript:alert(1)'],
+    ['data', 'data:text/html,<script>alert(1)</script>'],
+    ['vbscript', 'vbscript:msgbox(1)'],
+    ['file', 'file:///etc/passwd'],
+    ['ftp', 'ftp://example.test/x'],
+    ['relative', '/advisories/1'],
+  ])(
+    'a link-only %s: link is dropped from the item and the drop is logged without the value',
+    async (_n, bad) => {
+      const zdi = {
+        ...(SOURCE_BY_ID.get('zdi') as NonNullable<ReturnType<typeof SOURCE_BY_ID.get>>),
+        pull: { feed: { url: 'https://www.zerodayinitiative.com/rss/published/' } },
+      };
+      const doc = `<rss><channel><item><title>T</title><link>${bad.replace(/</g, '&lt;')}</link><guid>G-1</guid></item></channel></rss>`;
+      const h = makeCtx({
+        source: zdi,
+        routes: [route('https://www.zerodayinitiative.com/rss/published/', feedReply(doc))],
+      });
+      const r = await fetch(h.ctx);
+      expect(r.items[0]?.body).toMatchObject({ id: 'G-1', link: '' });
+      expect(String(r.receipt?.body)).not.toContain(bad.slice(0, 8));
+      const dropped = h.logs.filter((l) => l.msg.includes('dropped a link'));
+      expect(dropped).toHaveLength(1);
+      expect(JSON.stringify(dropped)).not.toContain(bad.slice(0, 8));
+      expect(dropped[0]?.extra).toEqual({ source: 'zdi' });
+    },
+  );
+
+  it('an Atom link with a javascript: href is dropped too, and https stays', async () => {
+    const zdi = {
+      ...(SOURCE_BY_ID.get('zdi') as NonNullable<ReturnType<typeof SOURCE_BY_ID.get>>),
+      pull: { feed: { url: 'https://www.zerodayinitiative.com/rss/published/' } },
+    };
+    const doc = `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>a1</id><title>A</title><link href="javascript:void(0)"/></entry>
+      <entry><id>a2</id><title>B</title><link href="https://example.test/b"/></entry></feed>`;
+    const h = makeCtx({
+      source: zdi,
+      routes: [route('https://www.zerodayinitiative.com/rss/published/', feedReply(doc))],
+    });
+    const r = await fetch(h.ctx);
+    const links = Object.fromEntries(r.items.map((i) => [i.id, (i.body as LinkOnlyItem).link]));
+    expect(links).toEqual({ a1: '', a2: 'https://example.test/b' });
+  });
+
   it('with heavy, a change is a job hand-off with no items', async () => {
     const heavy = { ...source, heavy: true };
     const h = makeCtx({ source: heavy, cursor: at(key(3), '"f0"'), routes: [route(URL_, feedReply(xml))] });
