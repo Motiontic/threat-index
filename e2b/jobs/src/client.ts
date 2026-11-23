@@ -1,5 +1,5 @@
 /** The sandbox's side of the API: signed calls to `upload-urls` and `complete`, and PUTs to presigned R2 URLs. */
-import { signRequest, SIGNATURE_HEADER, TIMESTAMP_HEADER } from '@ti/core/sign';
+import { SIGNATURE_HEADER, signRequest, TIMESTAMP_HEADER } from '@ti/core/sign';
 
 export const MAX_URLS_PER_CALL = 50;
 const RETRIES = 3;

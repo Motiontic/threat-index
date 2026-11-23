@@ -1,6 +1,6 @@
+import type { JobRequest } from '@ti/core/control';
 import type { LoadMessage } from '@ti/core/inbox';
 import { inboxManifestKey } from '@ti/core/inbox';
-import type { JobRequest } from '@ti/core/control';
 import { canIngest } from '@ti/core/licence';
 import { jobPrefix } from '@ti/core/r2-keys';
 import { deriveJobKey, SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyRequest } from '@ti/core/sign';
@@ -89,7 +89,10 @@ export interface InternalJobsDeps {
 
 type Ctx = Context<AppEnv>;
 
-function log(msg: string, fields: { jobId: string; kind?: string; status?: string; sandboxId?: string | null }) {
+function log(
+  msg: string,
+  fields: { jobId: string; kind?: string; status?: string; sandboxId?: string | null },
+) {
   console.log(JSON.stringify({ msg, ...fields }));
 }
 
@@ -134,25 +137,31 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
     const len = c.req.header('content-length');
     if (len !== undefined && Number(len) > MAX_BODY_BYTES) return c.json({ error: 'body_too_large' }, 413);
     const text = await c.req.text();
-    if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) return c.json({ error: 'body_too_large' }, 413);
+    if (new TextEncoder().encode(text).length > MAX_BODY_BYTES)
+      return c.json({ error: 'body_too_large' }, 413);
     return text;
   }
 
   async function signed(c: Ctx, key: string | undefined, body: string): Promise<boolean> {
-    return verifyRequest(key, {
-      method: c.req.method,
-      path: new URL(c.req.url).pathname,
-      timestamp: c.req.header(TIMESTAMP_HEADER) ?? null,
-      signature: c.req.header(SIGNATURE_HEADER) ?? null,
-      body,
-    });
+    return verifyRequest(
+      key,
+      {
+        method: c.req.method,
+        path: new URL(c.req.url).pathname,
+        timestamp: c.req.header(TIMESTAMP_HEADER) ?? null,
+        signature: c.req.header(SIGNATURE_HEADER) ?? null,
+        body,
+      },
+      now(),
+    );
   }
 
   /** Ops/collector key: size check, then signature. Returns the body text or a Response. */
   async function opsAuth(c: Ctx): Promise<string | Response> {
     const body = await readBody(c);
     if (body instanceof Response) return body;
-    if (!(await signed(c, c.env.JOB_HMAC_SECRET || undefined, body))) return c.json({ error: 'invalid_signature' }, 401);
+    if (!(await signed(c, c.env.JOB_HMAC_SECRET || undefined, body)))
+      return c.json({ error: 'invalid_signature' }, 401);
     return body;
   }
 
@@ -240,7 +249,9 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
       const again = await getRow(c, id);
       if (again) return existing(again);
       const active = await db
-        .prepare(`SELECT id, status FROM jobs WHERE kind = ?1 AND source_id IS ?2 AND status IN ${ACTIVE} LIMIT 1`)
+        .prepare(
+          `SELECT id, status FROM jobs WHERE kind = ?1 AND source_id IS ?2 AND status IN ${ACTIVE} LIMIT 1`,
+        )
         .bind(req.kind, sourceId)
         .first<{ id: string; status: string }>();
       if (active) return existing(active);
@@ -263,7 +274,10 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
 
     let sandboxId: string | undefined;
     try {
-      const sandbox = await launcher.create({ timeoutMs: JOB_TIMEOUT_MS, metadata: { jobId: id, kind: req.kind } });
+      const sandbox = await launcher.create({
+        timeoutMs: JOB_TIMEOUT_MS,
+        metadata: { jobId: id, kind: req.kind },
+      });
       sandboxId = sandbox.sandboxId;
       const up = await db
         .prepare(`UPDATE jobs SET status='running', sandbox_id=?2 WHERE id=?1 AND status='starting'`)
@@ -357,11 +371,9 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
 
     // Priority comes from the job's kind, never from the manifest.
     const priority = row.kind === 'first-load' ? 'first-load' : 'steady';
-    const messages = parsed.manifest.chunks.map(
-      (ch): { body: LoadMessage } => ({
-        body: { jobId: id, chunkKey: ch.key, rows: ch.rows, priority },
-      }),
-    );
+    const messages = parsed.manifest.chunks.map((ch): { body: LoadMessage } => ({
+      body: { jobId: id, chunkKey: ch.key, rows: ch.rows, priority },
+    }));
     try {
       for (let i = 0; i < messages.length; i += SEND_BATCH)
         await c.env.LOAD.sendBatch(messages.slice(i, i + SEND_BATCH));

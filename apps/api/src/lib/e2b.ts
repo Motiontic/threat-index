@@ -9,9 +9,10 @@
  *    `timeoutMs: 0` disables the command timeout.
  * The REST path was not built.
  */
+
+import type { JobRequest } from '@ti/core/control';
 import type { InboxManifest } from '@ti/core/inbox';
 import { inboxChunkKey, MAX_ROWS_PER_CHUNK } from '@ti/core/inbox';
-import type { JobRequest } from '@ti/core/control';
 import type { Bindings } from './env';
 
 export const JOB_TIMEOUT_MS = 50 * 60 * 1000; // hard limit; E2B Hobby sandboxes live at most 1 h
@@ -66,7 +67,10 @@ export function describeE2bError(err: unknown, secrets: (string | undefined)[] =
   const name = typeof e?.name === 'string' ? e.name : 'Error';
   let msg = typeof e?.message === 'string' ? e.message : String(err);
   for (const s of secrets) if (s) msg = msg.split(s).join('[redacted]');
-  msg = msg.replace(/e2b_[A-Za-z0-9]+/g, '[redacted]').replace(/\s+/g, ' ').slice(0, 200);
+  msg = msg
+    .replace(/e2b_[A-Za-z0-9]+/g, '[redacted]')
+    .replace(/\s+/g, ' ')
+    .slice(0, 200);
   const status = typeof e?.status === 'number' ? ` ${e.status}` : '';
   return `${name}${status}: ${msg}`;
 }
@@ -149,7 +153,8 @@ export function parseManifest(
   } catch {
     return { error: 'manifest is not JSON' };
   }
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) return { error: 'manifest is not an object' };
+  if (typeof data !== 'object' || data === null || Array.isArray(data))
+    return { error: 'manifest is not an object' };
   const m = data as Record<string, unknown>;
   if (m.jobId !== jobId) return { error: 'jobId does not match' };
   if (typeof m.createdAt !== 'string') return { error: 'createdAt missing' };
@@ -160,7 +165,8 @@ export function parseManifest(
   for (let n = 0; n < m.chunks.length; n++) {
     const c = m.chunks[n] as Record<string, unknown> | null;
     if (typeof c !== 'object' || c === null) return { error: `chunk ${n} is not an object` };
-    if (typeof c.key !== 'string' || c.key !== inboxChunkKey(jobId, n)) return { error: `chunk ${n} has a bad key` };
+    if (typeof c.key !== 'string' || c.key !== inboxChunkKey(jobId, n))
+      return { error: `chunk ${n} has a bad key` };
     if (seen.has(c.key)) return { error: `chunk ${n} repeats a key` };
     seen.add(c.key);
     if (!Number.isInteger(c.rows) || (c.rows as number) < 1 || (c.rows as number) > MAX_ROWS_PER_CHUNK)

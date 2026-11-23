@@ -18,7 +18,12 @@ const ACCOUNT_RE = /^[0-9a-f]{32}$/;
 const BUCKET_RE = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 
 export function r2SigningConfig(env: Bindings): R2SigningConfig | null {
-  const { R2_ACCOUNT_ID: accountId, R2_BUCKET_NAME: bucket, R2_ACCESS_KEY_ID: id, R2_SECRET_ACCESS_KEY: secret } = env;
+  const {
+    R2_ACCOUNT_ID: accountId,
+    R2_BUCKET_NAME: bucket,
+    R2_ACCESS_KEY_ID: id,
+    R2_SECRET_ACCESS_KEY: secret,
+  } = env;
   if (!accountId || !ACCOUNT_RE.test(accountId)) return null;
   if (!bucket || !BUCKET_RE.test(bucket)) return null;
   if (!id || !/^\S+$/.test(id) || !secret || !/^\S+$/.test(secret)) return null;

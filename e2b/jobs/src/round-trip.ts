@@ -36,7 +36,11 @@ export async function roundTrip(api: string, secret: string, deps: RoundTripDeps
     });
   };
 
-  const start = await send('POST', '/internal/jobs', JSON.stringify({ kind: 'echo', reason: 'round-trip check' }));
+  const start = await send(
+    'POST',
+    '/internal/jobs',
+    JSON.stringify({ kind: 'echo', reason: 'round-trip check' }),
+  );
   if (start.status !== 200 && start.status !== 201) {
     print(`start failed: status ${start.status}`);
     return 1;

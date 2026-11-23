@@ -5,7 +5,7 @@
  * ti-api how it went: `complete({ ok: true })`, or `complete({ ok: false, error })` and exit 1.
  */
 import { pathToFileURL } from 'node:url';
-import { createJobApi, type ClientDeps, type JobApi } from './client.ts';
+import { type ClientDeps, createJobApi, type JobApi } from './client.ts';
 import { JOB_KINDS, type Job, type JobContext, type JobKind, type RunJob } from './types.ts';
 
 // A map, not a computed import, so the bundler sees every job.
