@@ -1,5 +1,6 @@
 import { data, Link } from 'react-router';
 import { CompactRow, EmptyState, LetterBar } from '../components/ui';
+import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
 import { buildMeta, pageTitle } from '../lib/seo';
 import type { Route } from './+types/index-az';
@@ -12,8 +13,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     return { ...base, items: [], next: null as string | null, cursor: null as string | null };
   const raw = new URL(request.url).searchParams.get('cursor');
   const cursor = raw && /^[A-Za-z0-9_-]{1,200}$/.test(raw) ? raw : null;
-  const res = await getData(request).index(letter, cursor ?? undefined);
-  return { ...base, items: res?.items ?? [], next: res?.cursor ?? null, cursor };
+  try {
+    const res = await getData(request).index(letter, cursor ?? undefined);
+    return { ...base, items: res?.items ?? [], next: res?.cursor ?? null, cursor };
+  } catch (err) {
+    // A well-formed but invalid or expired cursor: show the empty state, with a "First page" link.
+    if (err instanceof ApiBadRequest) return { ...base, items: [], next: null as string | null, cursor };
+    throw err;
+  }
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
