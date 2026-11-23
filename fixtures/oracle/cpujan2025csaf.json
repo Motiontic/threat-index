@@ -1,0 +1,276 @@
+{
+  "document": {
+    "category": "csaf_security_advisory",
+    "csaf_version": "2.0",
+    "distribution": {
+      "text": "Copyright © Oracle. All rights reserved.",
+      "tlp": {
+        "label": "WHITE",
+        "url": "https://www.first.org/tlp"
+      }
+    },
+    "publisher": {
+      "category": "vendor",
+      "name": "Oracle",
+      "namespace": "https://www.oracle.com"
+    },
+    "references": [
+      {
+        "summary": "URL to html version of Advisory",
+        "url": "https://www.oracle.com/security-alerts/cpujan2025.html"
+      },
+      {
+        "category": "self",
+        "summary": "URL to CSAF version of Advisory",
+        "url": "https://www.oracle.com/docs/tech/security-alerts/cpujan2025csaf.json"
+      }
+    ],
+    "title": "Oracle Critical Patch Update Advisory - January 2025 - Oracle CSAF",
+    "tracking": {
+      "current_release_date": "2025-02-11T15:00:00-07:00",
+      "id": "CPUJan2025csaf",
+      "initial_release_date": "2025-01-21T13:00:00-07:00",
+      "revision_history": [
+        {
+          "date": "2025-01-21T13:00:00-07:00",
+          "number": "1",
+          "summary": "Initial Release"
+        },
+        {
+          "date": "2025-02-11T15:00:00-07:00",
+          "number": "2",
+          "summary": "Rev 2. Updated version information for CVE-2024-35195 and CVE-2024-49766."
+        }
+      ],
+      "status": "final",
+      "version": "2"
+    }
+  },
+  "product_tree": {
+    "branches": [
+      {
+        "branches": [
+          {
+            "branches": [
+              {
+                "branches": [
+                  {
+                    "category": "product_version",
+                    "name": "Oracle BI Publisher Version 7.0.0.0.0",
+                    "product": {
+                      "name": "Oracle BI Publisher Version 7.0.0.0.0",
+                      "product_id": "P-1479V-7.0.0.0.0",
+                      "product_identification_helper": {
+                        "cpe": "cpe:2.3:a:oracle:bi_publisher:7.0.0.0.0:*:*:*:*:*:*:*"
+                      }
+                    }
+                  },
+                  {
+                    "category": "product_version",
+                    "name": "Oracle BI Publisher Version 7.6.0.0.0",
+                    "product": {
+                      "name": "Oracle BI Publisher Version 7.6.0.0.0",
+                      "product_id": "P-1479V-7.6.0.0.0",
+                      "product_identification_helper": {
+                        "cpe": "cpe:2.3:a:oracle:bi_publisher:7.6.0.0.0:*:*:*:*:*:*:*"
+                      }
+                    }
+                  }
+                ],
+                "category": "product_name",
+                "name": "Oracle BI Publisher"
+              }
+            ],
+            "category": "product_family",
+            "name": "Oracle Analytics"
+          },
+          {
+            "branches": [
+              {
+                "branches": [
+                  {
+                    "category": "product_version",
+                    "name": "Oracle Business Process Management Suite Version 12.2.1.4.0",
+                    "product": {
+                      "name": "Oracle Business Process Management Suite Version 12.2.1.4.0",
+                      "product_id": "P-5325V-12.2.1.4.0",
+                      "product_identification_helper": {
+                        "cpe": "cpe:2.3:a:oracle:business_process_management_suite:12.2.1.4.0:*:*:*:*:*:*:*"
+                      }
+                    }
+                  }
+                ],
+                "category": "product_name",
+                "name": "Oracle Business Process Management Suite"
+              }
+            ],
+            "category": "product_family",
+            "name": "Oracle Fusion Middleware"
+          },
+          {
+            "branches": [
+              {
+                "branches": [
+                  {
+                    "category": "product_version_range",
+                    "name": "Siebel CRM End User Version 24.11 and prior",
+                    "product": {
+                      "name": "Siebel CRM End User Version 24.11 and prior",
+                      "product_id": "P-9011V-24.11 and prior",
+                      "product_identification_helper": {
+                        "cpe": "cpe:2.3:a:oracle:siebel_crm_end_user:24.11_and_prior:*:*:*:*:*:*:*"
+                      }
+                    }
+                  }
+                ],
+                "category": "product_name",
+                "name": "Siebel CRM End User"
+              }
+            ],
+            "category": "product_family",
+            "name": "Oracle Siebel CRM"
+          }
+        ],
+        "category": "vendor",
+        "name": "Oracle"
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "cve": "CVE-2016-1000027",
+      "ids": [
+        {
+          "system_name": "Oracle Bug ID of Oracle BI Publisher",
+          "text": "37243652"
+        }
+      ],
+      "notes": [
+        {
+          "category": "description",
+          "text": "Vulnerability in the Oracle BI Publisher product of Oracle Analytics (component: Development Operations (Spring Framework)).  Supported versions that are affected are 7.0.0.0.0 and  7.6.0.0.0. Easily exploitable vulnerability allows unauthenticated attacker with network access via HTTP to compromise Oracle BI Publisher.  Successful attacks of this vulnerability can result in takeover of Oracle BI Publisher. CVSS 3.1 Base Score 9.8 (Confidentiality, Integrity and Availability impacts).  CVSS Vector: (CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H).",
+          "title": "Vulnerability Description"
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "P-1479V-7.0.0.0.0",
+          "P-1479V-7.6.0.0.0"
+        ]
+      },
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Oracle customers with valid support contracts",
+          "product_ids": [
+            "P-1479V-7.0.0.0.0",
+            "P-1479V-7.6.0.0.0"
+          ],
+          "url": "https://support.oracle.com/rs?type=doc&amp;id=3064266.2"
+        }
+      ],
+      "scores": [
+        {
+          "cvss_v3": {
+            "baseScore": 9.8,
+            "baseSeverity": "CRITICAL",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "version": "3.1"
+          },
+          "products": [
+            "P-1479V-7.0.0.0.0",
+            "P-1479V-7.6.0.0.0"
+          ]
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2019-11065",
+      "ids": [
+        {
+          "system_name": "Oracle Bug ID of Siebel CRM End User",
+          "text": "37281899"
+        }
+      ],
+      "notes": [
+        {
+          "category": "description",
+          "text": "Vulnerability in the Siebel CRM End User product of Oracle Siebel CRM (component: Open UI (Gradle)).  Supported versions that are affected are 24.11 and prior. Easily exploitable vulnerability allows low privileged attacker with logon to the infrastructure where Siebel CRM End User executes to compromise Siebel CRM End User.  While the vulnerability is in Siebel CRM End User, attacks may significantly impact additional products (scope change).  Successful attacks of this vulnerability can result in  unauthorized access to critical data or complete access to all Siebel CRM End User accessible data. CVSS 3.1 Base Score 6.5 (Confidentiality impacts).  CVSS Vector: (CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N).",
+          "title": "Vulnerability Description"
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "P-9011V-24.11 and prior"
+        ]
+      },
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Oracle customers with valid support contracts",
+          "product_ids": [
+            "P-9011V-24.11 and prior"
+          ],
+          "url": "https://support.oracle.com/rs?type=doc&amp;id=3065150.1"
+        }
+      ],
+      "scores": [
+        {
+          "cvss_v3": {
+            "baseScore": 6.5,
+            "baseSeverity": "MEDIUM",
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N",
+            "version": "3.1"
+          },
+          "products": [
+            "P-9011V-24.11 and prior"
+          ]
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2019-12415",
+      "ids": [
+        {
+          "system_name": "Oracle Bug ID of Oracle Business Process Management Suite",
+          "text": "30765549"
+        }
+      ],
+      "notes": [
+        {
+          "category": "description",
+          "text": "Vulnerability in the Oracle Business Process Management Suite product of Oracle Fusion Middleware (component: Runtime Engine (Apache POI)).   The supported version that is affected is 12.2.1.4.0. Easily exploitable vulnerability allows low privileged attacker with logon to the infrastructure where Oracle Business Process Management Suite executes to compromise Oracle Business Process Management Suite.  Successful attacks of this vulnerability can result in  unauthorized access to critical data or complete access to all Oracle Business Process Management Suite accessible data. CVSS 3.1 Base Score 5.5 (Confidentiality impacts).  CVSS Vector: (CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N).",
+          "title": "Vulnerability Description"
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "P-5325V-12.2.1.4.0"
+        ]
+      },
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Oracle customers with valid support contracts",
+          "product_ids": [
+            "P-5325V-12.2.1.4.0"
+          ],
+          "url": "https://support.oracle.com/rs?type=doc&amp;id=3064245.2"
+        }
+      ],
+      "scores": [
+        {
+          "cvss_v3": {
+            "baseScore": 5.5,
+            "baseSeverity": "MEDIUM",
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+            "version": "3.1"
+          },
+          "products": [
+            "P-5325V-12.2.1.4.0"
+          ]
+        }
+      ]
+    }
+  ]
+}

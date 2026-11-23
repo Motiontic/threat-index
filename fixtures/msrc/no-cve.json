@@ -1,0 +1,33 @@
+{
+  "document": {
+    "category": "csaf_security_advisory",
+    "csaf_version": "2.0",
+    "publisher": {
+      "category": "vendor",
+      "contact_details": "secure@microsoft.com",
+      "name": "Microsoft Security Response Center",
+      "namespace": "https://msrc.microsoft.com"
+    },
+    "title": ".NET and Visual Studio Remote Code Execution Vulnerability",
+    "tracking": {
+      "id": "msrc_nocve",
+      "status": "final",
+      "initial_release_date": "2026-11-01T08:00:00.000Z",
+      "current_release_date": "2026-11-02T08:00:00.000Z",
+      "version": "1",
+      "revision_history": []
+    },
+    "x_unexpected": "hand-written unknown field"
+  },
+  "vulnerabilities": [
+    {
+      "title": "A vulnerability without a CVE",
+      "ids": [
+        {
+          "system_name": "MSRC",
+          "text": "ADV-0001"
+        }
+      ]
+    }
+  ]
+}
