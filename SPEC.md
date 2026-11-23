@@ -263,3 +263,18 @@ included) and, minus the CSP, to `.data` responses through `handleDataRequest`.
    (plus root `biome.json` only if section 9 needed it).
 9. Proof saved: output for criteria 1–5, `node --version`, the screenshots and the `scripts/deploy.mjs` diff. Deploys
    can't run in the sandbox; the `builtWebConfig` tests stand in for them.
+
+## Changes from the first build of this branch
+
+This branch already implements the spec above, and its code review converged. Two things are left; fix them on
+top of the existing commits and don't redo work that already matches the spec.
+
+1. The `301` redirects from `/e/:id` (an alias or a different-case ID) never reach `handleRequest`, so they go
+   out without the security headers and without `X-Robots-Tag: noindex`. Every document response, redirects
+   included, carries the same headers. Add a test that a redirect has them.
+2. QA did not run: the browser skill wasn't allowed in the loop session. It is now. Run the full QA this spec
+   asks for: every route at desktop and 390 px width, light and dark, the navigation drawer, keyboard focus
+   states, and the sample-data band, with screenshots saved as proof.
+
+`PROOF.md` must describe the whole branch, not only these fixes, because it becomes the PR body. Re-run every
+check in the acceptance criteria.
