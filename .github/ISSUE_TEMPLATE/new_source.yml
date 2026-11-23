@@ -14,6 +14,20 @@ body:
       label: What does it give us that existing sources don't?
     validations:
       required: true
+  - type: dropdown
+    id: pattern
+    attributes:
+      label: Which pull pattern is likely to fit?
+      description: See docs/adding-a-source.md, step 2.
+      options:
+        - git (a git repo)
+        - changelist (its own list of changed records)
+        - since (an API with a "modified since" filter)
+        - fingerprint (one small file with an ETag or version)
+        - feed (RSS or Atom)
+        - page (only a web page)
+        - heavy (a big file or rarely changing data)
+        - not sure
   - type: textarea
     id: access
     attributes:
@@ -26,3 +40,31 @@ body:
       description: Link the terms. Does it allow commercial use? Is attribution required?
     validations:
       required: true
+  - type: dropdown
+    id: commercial
+    attributes:
+      label: Can the data be used commercially?
+      options:
+        - Yes, with attribution
+        - No, or it needs permission
+        - No terms found
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: terms_url
+    attributes:
+      label: Terms URL
+      description: A link to the licence or terms of use, if there is one.
+  - type: input
+    id: attribution
+    attributes:
+      label: Attribution text the source asks for
+      description: Leave empty if it asks for none.
+  - type: checkboxes
+    id: no_exploit_code
+    attributes:
+      label: Exploit code
+      options:
+        - label: I am not asking to fetch or store exploit code
+          required: true

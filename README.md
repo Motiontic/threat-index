@@ -4,7 +4,7 @@ An open-source system that keeps **one record of every public vulnerability, exp
 
 It runs on **Cloudflare's free plan** (Workers, D1, R2, Queues, KV). Heavy jobs, such as big files, the first load and deep history, run in **E2B sandboxes**. Accounts use **Clerk** (single-user, no organisations), and alert emails go through **Resend**.
 
-> **Status: pre-alpha (milestone M0).** The design and plan are complete; the code is a scaffold. See [the implementation plan](docs/IMPLEMENTATION_PLAN.md).
+> **Status:** the collector, loader, notify and API Workers, the web app, the source registry and the parsers are in this repository and tested. Not every source is wired to a parser yet. See [the implementation plan](docs/IMPLEMENTATION_PLAN.md) for the design and [the architecture overview](docs/architecture.md) for how it fits together.
 
 ## What it does
 
@@ -50,18 +50,19 @@ web (React Router SSR) ─► api (Hono, Clerk auth) ─► D1 + R2
 | `e2b/`              | E2B sandbox template and heavy jobs                             |
 | `docs/`             | Implementation plan, decisions (ADRs), guides                   |
 
-## Quick start (local)
+## Quick start
 
-Prerequisites: Node 22, pnpm 10, a Cloudflare account. E2B, Clerk and Resend accounts are only needed for the parts that use them.
+Prerequisites: Node 22 and pnpm 10. You do not need a Cloudflare account to build or test.
 
 ```bash
-pnpm install
-cp apps/api/.dev.vars.example apps/api/.dev.vars    # fill in your own keys
-pnpm --filter @ti/db migrate:local                   # create local D1 tables
-pnpm dev                                              # run the Workers locally
+pnpm install --frozen-lockfile
+pnpm build           # Biome, tsc and the Node unit tests
+pnpm test:workers    # tests that need the Workers runtime
 ```
 
-To deploy your own copy, create the resources listed in [the plan, section 2](docs/IMPLEMENTATION_PLAN.md#2-cloudflare-resources). Then put their IDs into each app's `wrangler.jsonc`, set secrets with `wrangler secret put`, and run `pnpm deploy`.
+**Running your own copy.** Bring your own Cloudflare account, and optionally E2B, Clerk and Resend accounts for the parts that use them. Copy `apps/api/.dev.vars.example` to `apps/api/.dev.vars` and fill in your keys. Account-specific values in each app's `wrangler.jsonc` are `${VAR}` placeholders that `scripts/wrangler-config.mjs` fills from the environment or a gitignored `.env`. See sections 2 and 13 of [the plan](docs/IMPLEMENTATION_PLAN.md) for the resources and the deployment steps.
+
+More: [architecture overview](docs/architecture.md), [adding a source](docs/adding-a-source.md).
 
 ## Data and licences
 
@@ -71,7 +72,7 @@ Eight sources ship switched off or link-only until their owners give written per
 
 ## Contributing
 
-Adding a source is the most useful contribution. It takes a registry entry, a parser, a recorded fixture and a test; see [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md).
+Adding a source is the most useful contribution. It takes a source file, a parser, a recorded fixture and a test; see [CONTRIBUTING.md](CONTRIBUTING.md) and [the guide](docs/adding-a-source.md). Please read the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## Licence
 

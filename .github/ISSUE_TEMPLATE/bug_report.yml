@@ -9,6 +9,20 @@ body:
       description: Include the entry ID or URL if it's about a specific record.
     validations:
       required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Data on an entry page
+        - Search
+        - API
+        - Alerts or email
+        - Collector or pipeline
+        - Docs
+        - Other
+    validations:
+      required: true
   - type: textarea
     id: expected
     attributes:
@@ -21,6 +35,9 @@ body:
     id: version
     attributes:
       label: Commit or version
+  - type: markdown
+    attributes:
+      value: "**Do not paste API keys, tokens or personal data** (emails, user IDs) into this issue."
   - type: markdown
     attributes:
       value: "**Security issue?** Don't file it here. See SECURITY.md."
