@@ -1,0 +1,10 @@
+{
+  "url": "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip",
+  "status": 200,
+  "headers": {
+    "etag": "\"2f3a-62a1c0\"",
+    "last-modified": "Thu, 08 May 2025 12:00:00 GMT",
+    "content-length": "1858222",
+    "content-type": "application/zip"
+  }
+}

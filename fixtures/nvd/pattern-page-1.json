@@ -1,0 +1,25 @@
+{
+  "resultsPerPage": 2,
+  "startIndex": 2,
+  "totalResults": 3,
+  "format": "NVD_CVE",
+  "version": "2.0",
+  "timestamp": "2025-05-11T00:00:00.000",
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2025-5002",
+        "sourceIdentifier": "nvd@nist.gov",
+        "published": "2025-05-01T10:00:00.000",
+        "lastModified": "2025-05-10T10:00:00.000",
+        "vulnStatus": "Analyzed",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "Hand-written for tests."
+          }
+        ]
+      }
+    }
+  ]
+}
