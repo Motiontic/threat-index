@@ -198,3 +198,10 @@ notice is never re-matched, rerunning the same batch emits no rows.
    `PRAGMA table_info(breach_notices)` shows `name_key` and `PRAGMA index_list(breach_notices)` shows
    `notices_by_name`. Save the output.
 8. The PR lists which CIKs in the test set were checked on EDGAR and how.
+
+## Changes from the first build of this branch
+
+The new `notices_by_name` index adds 1 to the loader's write cost for a `breach_notices` row, so three tests in
+`apps/loader/test/consume.workers.test.ts` that expect 15 and 90015 now see 16 and 90016. That is correct. You
+may update only those expected numbers in that file, with a comment naming the index. Re-run every acceptance
+check.
