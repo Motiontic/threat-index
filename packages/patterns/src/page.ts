@@ -39,13 +39,14 @@ export async function parseRows(
         if (attr) {
           const v = el.getAttribute(attr);
           if (v === null) return;
-          target[name] = URL_ATTRS.has(attr.toLowerCase()) ? resolve(v, cfg.url) : v.trim();
+          const value = decodeEntities(v);
+          target[name] = URL_ATTRS.has(attr.toLowerCase()) ? resolve(value, cfg.url) : value.trim();
           return;
         }
         capturing = target;
         buffer = '';
         el.onEndTag(() => {
-          if (capturing) capturing[name] = buffer.replace(/\s+/g, ' ').trim();
+          if (capturing) capturing[name] = decodeEntities(buffer).replace(/\s+/g, ' ').trim();
           capturing = null;
         });
       },
@@ -59,6 +60,17 @@ export async function parseRows(
   const out = rows.filter((r) => (r[cfg.key] ?? '') !== '');
   for (const r of out) for (const k of Object.keys(r)) if (r[k] === '') delete r[k];
   return out;
+}
+
+const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+/** HTMLRewriter hands over text and attributes as written, so `&amp;` is still encoded. */
+export function decodeEntities(text: string): string {
+  return text.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]+));/g, (m, dec, hex, name) => {
+    if (name) return NAMED[name] ?? m;
+    const code = dec ? Number(dec) : Number.parseInt(hex, 16);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+  });
 }
 
 function resolve(value: string, base: string): string {

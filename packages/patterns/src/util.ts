@@ -231,7 +231,7 @@ export async function mapUntilTooLarge<T, R>(
   const done: R[] = [];
   for (let i = 0; i < settled.length; i++) {
     const s = settled[i];
-    if (!s || !s.ok) return { done, big: i };
+    if (!s?.ok) return { done, big: i };
     done.push(s.value);
   }
   return { done, big: null };
