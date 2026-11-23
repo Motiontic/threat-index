@@ -55,7 +55,7 @@ describe('TABLES', () => {
     expect(TABLES.get('vulns')?.versionColumn).toBe('modified');
   });
   it('knows keys and indexes', () => {
-    expect(TABLES.get('advisories')?.primaryKey.sort()).toEqual(['source', 'source_id']);
+    expect([...(TABLES.get('advisories')?.primaryKey ?? [])].sort()).toEqual(['source', 'source_id']);
     expect(TABLES.get('advisories')?.secondaryIndexes).toBe(1);
     expect(TABLES.get('vulns')?.secondaryIndexes).toBe(0);
     expect(TABLES.get('vulns')?.columns.get('cvss')?.type).toBe('real');
