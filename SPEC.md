@@ -126,7 +126,8 @@ The `0001_init.sql` migrations are already applied to the staging databases. **D
   - api: health 200; unsigned Clerk webhook 400; `/v1/me/watch` without a session 401; an
     `/v1/entries/:id` row inserted into local D1 returns preview fields to a visitor.
   - collector: `scheduled()` with `0 */3 * * *` sends one job per due source to the local queue, and no
-    source whose licence status is `wait` or `link` (looked up in `SOURCE_BY_ID`) is sent.
+    source whose licence status is `wait` (looked up in `SOURCE_BY_ID`) is sent. `link` sources are still
+    collected (they keep only ID, title, date and link), as `canIngest()` decides today.
   - db: the Drizzle-matches-SQL test above.
 - CI (`.github/workflows/ci.yml`) runs `pnpm test:workers` after `pnpm test`. This is a sensitive path, so
   the loop stops for review anyway.
@@ -173,7 +174,7 @@ them on top of the existing commits; don't redo work that already matches the sp
 3. `loadParser` maps only a missing parser module to `unknown parser`, and rethrows other load errors with
    the cause (section 3).
 4. The collector test checks real licence statuses through `SOURCE_BY_ID`, not the made-up id
-   `hhs-ocr-wait` (section 7).
+   `hhs-ocr-wait`: no `wait` source is sent (section 7).
 5. The collector comment says `watchdog.ts` is an unwired stub (section 5).
 
 `PROOF.md` must describe the whole branch, not only these fixes, because it becomes the PR body. Re-run
