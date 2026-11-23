@@ -333,7 +333,10 @@ export function guardEntryFull(value: unknown): EntryFullView | null {
   });
   const changes = arr(e, 'changes', 'entry').map((raw) => {
     const c = obj(raw, 'change');
-    const out: EntryFullView['changes'][number] = { kind: str(c, 'kind', 'change'), at: str(c, 'at', 'change') };
+    const out: EntryFullView['changes'][number] = {
+      kind: str(c, 'kind', 'change'),
+      at: str(c, 'at', 'change'),
+    };
     put(out, 'old', optStr(c, 'old', 'change'));
     put(out, 'new', optStr(c, 'new', 'change'));
     put(out, 'source', optStr(c, 'source', 'change'));

@@ -1,18 +1,19 @@
 // The one place loaders get data from. In api mode it calls ti-api through the `API` service binding; in
 // fixtures mode it calls an in-process fake of the same routes. Only `api.server.ts` calls `fetch`.
 import { env } from 'cloudflare:workers';
-import { data } from 'react-router';
-import { ApiUnavailable, createSiteData } from './api.server';
+import { type ActionFunctionArgs, data, type LoaderFunctionArgs } from 'react-router';
+import { getSession, type Session } from '../lib/auth.server';
+import { ApiUnavailable, createAccountClient, createSiteData } from './api.server';
 import { fixtureApi } from './fixture-api.server';
 import { type DataMode, dataMode } from './mode.server';
-import type { SiteData } from './types';
+import type { AccountClient, SiteData } from './types';
 
 export function currentMode(): DataMode {
   return dataMode(env);
 }
 
 /** An unavailable API becomes a 502 the root error boundary renders (and hydrates with the same status). */
-async function bridge<T>(run: () => Promise<T>): Promise<T> {
+export async function bridge<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (err) {
@@ -39,3 +40,16 @@ export function getData(_request: Request): SiteData {
 }
 
 const fixtureFetch = (input: RequestInfo | URL, init?: RequestInit) => fixtureApi(new Request(input, init));
+
+/**
+ * The signed-in seam: a session and an API client that carries its token as `Authorization: Bearer`, or null
+ * when the visitor is signed out. Only account loaders and actions call this; `getData` above never sends auth.
+ */
+export async function getAccount(
+  args: LoaderFunctionArgs | ActionFunctionArgs,
+): Promise<{ session: Session; client: AccountClient } | null> {
+  const session = await getSession(args);
+  if (!session) return null;
+  const api = currentMode() === 'api' && env.API ? env.API : { fetch: fixtureFetch };
+  return { session, client: createAccountClient(api, session.token) };
+}

@@ -11,7 +11,10 @@ const FORBIDDEN_FORM_ATTRS = new RegExp(
 const FORBIDDEN_NAMES = new RegExp(['SAMPLE' + '_DATA', 'changes' + '\\.json'].join('|'));
 
 const entries = appFiles();
-const notTokens = entries.filter(([path]) => path !== 'app/styles/tokens.css');
+// Clerk takes literal colours; appearance.test.ts checks that file's values against tokens.css.
+const notTokens = entries.filter(
+  ([path]) => path !== 'app/styles/tokens.css' && path !== 'app/lib/clerk-appearance.ts',
+);
 
 describe('style rules', () => {
   it('finds the app files', () => {

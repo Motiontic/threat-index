@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadDotEnv } from '../../../scripts/wrangler-config.mjs';
 
 export const WEB_DIR = fileURLToPath(new URL('..', import.meta.url));
 const ROOT = resolve(WEB_DIR, '..', '..');
@@ -55,6 +56,31 @@ export function builtWebConfig(target, dir = WEB_DIR) {
     );
   }
   return built;
+}
+
+/**
+ * The extra `wrangler deploy` arguments for ti-web: the Clerk publishable key as a plain var, read from
+ * TI_CLERK_PUBLISHABLE_KEY_STAGING (staging) or TI_CLERK_PUBLISHABLE_KEY (production), in the environment or the
+ * repo's .env. Refuses to deploy when the key is missing, when production would get a `pk_test_` key, or when the
+ * built config has an `AUTH_MODE` var (fake sign-in must never ship). The secret key is a Worker secret, set once
+ * with `wrangler secret put CLERK_SECRET_KEY`; it never passes through here.
+ */
+export function webDeployArgs(target, builtConfigPath, env = process.env) {
+  if (!EXPECTED[target]) throw new Error(`unknown target "${target}"`);
+  if (env === process.env) loadDotEnv();
+  const config = JSON.parse(readFileSync(builtConfigPath, 'utf8'));
+  if (config.vars && Object.hasOwn(config.vars, 'AUTH_MODE')) {
+    throw new Error('the built config has an AUTH_MODE var; fake sign-in must never be deployed');
+  }
+  const name = target === 'staging' ? 'TI_CLERK_PUBLISHABLE_KEY_STAGING' : 'TI_CLERK_PUBLISHABLE_KEY';
+  const key = (env[name] ?? '').trim();
+  if (!key) throw new Error(`${name} is not set; ti-web needs the Clerk publishable key to deploy`);
+  if (!/^pk_(test|live)_[A-Za-z0-9+/_=-]+$/.test(key))
+    throw new Error(`${name} is not a Clerk publishable key`);
+  if (target === 'production' && key.startsWith('pk_test_')) {
+    throw new Error('production needs a pk_live_ Clerk key, but TI_CLERK_PUBLISHABLE_KEY is a pk_test_ key');
+  }
+  return ['--var', `CLERK_PUBLISHABLE_KEY:${key}`];
 }
 
 /** Waits (with retries, like checkHealth) until GET / answers 200 with HTML. */

@@ -102,13 +102,15 @@ async function patchMe(request: Request, s: UserState, user: string): Promise<Re
     const a = body.alerts;
     if (typeof a !== 'object' || a === null || Array.isArray(a)) return error(400, 'bad_request');
     const o = a as Record<string, unknown>;
-    for (const k of Object.keys(o)) if (!['instant', 'digest', 'digestWeekday'].includes(k)) return error(400, 'bad_request');
+    for (const k of Object.keys(o))
+      if (!['instant', 'digest', 'digestWeekday'].includes(k)) return error(400, 'bad_request');
     if ('instant' in o) {
       if (typeof o.instant !== 'boolean') return error(400, 'bad_request');
       next.alerts.instant = o.instant;
     }
     if ('digest' in o) {
-      if (o.digest !== 'daily' && o.digest !== 'weekly' && o.digest !== 'off') return error(400, 'bad_request');
+      if (o.digest !== 'daily' && o.digest !== 'weekly' && o.digest !== 'off')
+        return error(400, 'bad_request');
       next.alerts.digest = o.digest;
     }
     if ('digestWeekday' in o) {
@@ -167,9 +169,11 @@ async function savedRoute(request: Request, s: UserState, id: string | null): Pr
     if (alertsOn !== undefined && typeof alertsOn !== 'boolean') return error(400, 'bad_request');
     const stored: SavedSearchParams = {};
     if (params !== undefined) {
-      if (typeof params !== 'object' || params === null || Array.isArray(params)) return error(400, 'bad_request');
+      if (typeof params !== 'object' || params === null || Array.isArray(params))
+        return error(400, 'bad_request');
       const p = params as Record<string, unknown>;
-      for (const k of Object.keys(p)) if (![...PARAM_KEYS, 'sort'].includes(k)) return error(400, 'bad_request');
+      for (const k of Object.keys(p))
+        if (![...PARAM_KEYS, 'sort'].includes(k)) return error(400, 'bad_request');
       for (const k of PARAM_KEYS) {
         const v = p[k];
         if (v === undefined) continue;
@@ -252,7 +256,12 @@ export function fixtureFullEntry(e: FixtureEntry, preview: EntryFull): EntryFull
         url: 'https://www.cisa.gov/known-exploited-vulnerabilities-catalog',
       });
     if (e.kev_added)
-      signals.push({ kind: 'ransomware', source: 'cisa-kev', ref: 'Known ransomware use', firstSeen: e.kev_added });
+      signals.push({
+        kind: 'ransomware',
+        source: 'cisa-kev',
+        ref: 'Known ransomware use',
+        firstSeen: e.kev_added,
+      });
     signals.push(
       {
         kind: 'public_exploit',
@@ -261,7 +270,13 @@ export function fixtureFullEntry(e: FixtureEntry, preview: EntryFull): EntryFull
         firstSeen: first,
         url: 'https://www.exploit-db.com/',
       },
-      { kind: 'poc', source: 'poc-in-github', ref: 'example/poc', firstSeen: first, url: 'https://github.com/' },
+      {
+        kind: 'poc',
+        source: 'poc-in-github',
+        ref: 'example/poc',
+        firstSeen: first,
+        url: 'https://github.com/',
+      },
       { kind: 'detection', source: 'nuclei', ref: `${e.key.toLowerCase()}.yaml`, firstSeen: first },
       { kind: 'sighting', source: 'gcve', ref: 'sample sighting', firstSeen: first },
     );
@@ -281,14 +296,22 @@ export function fixtureFullEntry(e: FixtureEntry, preview: EntryFull): EntryFull
             display: 'full',
             affected: [{ ecosystem: 'PyPI', name: 'example-package', introduced: '0', fixed: '1.2.3' }],
           },
-          { source: 'nvd', sourceId: e.key, status: 'analyzed', url: 'https://nvd.nist.gov/', display: 'link' },
+          {
+            source: 'nvd',
+            sourceId: e.key,
+            status: 'analyzed',
+            url: 'https://nvd.nist.gov/',
+            display: 'link',
+          },
           { source: 'withheld', sourceId: 'X-1', status: 'secret', display: 'hidden' },
         ]
       : [],
     signals,
     changes: [
       { kind: 'cvss', old: '9.0', new: String(e.cvss ?? '9.8'), at: `${first}T12:00:00Z`, source: 'nvd' },
-      ...(e.kev_added ? [{ kind: 'kev_added', new: e.kev_added, at: `${e.kev_added}T06:00:00Z`, source: 'cisa-kev' }] : []),
+      ...(e.kev_added
+        ? [{ kind: 'kev_added', new: e.kev_added, at: `${e.kev_added}T06:00:00Z`, source: 'cisa-kev' }]
+        : []),
     ],
   };
 }

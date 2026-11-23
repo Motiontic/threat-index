@@ -1,7 +1,7 @@
 // The one place that touches Clerk on the server. Tests and fake mode swap `getSession`.
 import { env } from 'cloudflare:workers';
 import { clerkMiddleware, getAuth } from '@clerk/react-router/server';
-import type { LoaderFunctionArgs, MiddlewareFunction } from 'react-router';
+import type { ActionFunctionArgs, LoaderFunctionArgs, MiddlewareFunction } from 'react-router';
 import { authMode, FAKE_TOKEN_PREFIX, readFakeUser } from './fake-auth.server';
 
 export interface Session {
@@ -26,16 +26,14 @@ export const authMiddleware: MiddlewareFunction<Response> = async (args, next) =
 };
 
 /** The signed-in user and a fresh session token, or null (signed out, Clerk off, or no token). */
-export async function getSession(
-  args: Pick<LoaderFunctionArgs, 'request' | 'context' | 'params'>,
-): Promise<Session | null> {
+export async function getSession(args: LoaderFunctionArgs | ActionFunctionArgs): Promise<Session | null> {
   const mode = currentAuth();
   if (mode.kind === 'fake') {
     const user = readFakeUser(args.request);
     return user ? { userId: `user_${user}`, token: `${FAKE_TOKEN_PREFIX}${user}` } : null;
   }
   if (mode.kind !== 'clerk') return null;
-  const auth = await getAuth(args);
+  const auth = await getAuth(args, { acceptsToken: 'session_token' });
   if (!auth.userId) return null;
   const token = await auth.getToken();
   return token ? { userId: auth.userId, token } : null;

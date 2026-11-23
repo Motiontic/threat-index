@@ -1,7 +1,8 @@
 // Fake sign-in for tests and QA. It exists only when the site serves fixtures AND TI_ENV is `local`; in any
 // other deploy `AUTH_MODE=fake` is ignored (and logged once). Clerk is not loaded in fake mode.
-import { type ClerkConfig, clerkConfig } from './clerk-config.server';
+
 import { dataMode } from '../data/mode.server';
+import { type ClerkConfig, clerkConfig } from './clerk-config.server';
 
 export const FAKE_COOKIE = 'ti_fake_user';
 export const FAKE_USER = /^[a-z0-9]{1,20}$/;
@@ -50,6 +51,5 @@ export function readFakeUser(request: Request): string | null {
   return null;
 }
 
-export const fakeSignInCookie = (user: string) =>
-  `${FAKE_COOKIE}=${user}; Path=/; HttpOnly; SameSite=Lax`;
+export const fakeSignInCookie = (user: string) => `${FAKE_COOKIE}=${user}; Path=/; HttpOnly; SameSite=Lax`;
 export const fakeSignOutCookie = () => `${FAKE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;

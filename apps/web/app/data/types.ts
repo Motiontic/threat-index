@@ -64,7 +64,7 @@ export interface EntryFullView extends EntryPreview {
   changes: EntryChange[];
 }
 
-export type { DeleteAccountResponse, Me, SavedSearch, WatchItem, WatchListResponse, SavedSearchListResponse };
+export type { DeleteAccountResponse, Me, SavedSearch, SavedSearchListResponse, WatchItem, WatchListResponse };
 
 /** The signed-in calls. Each sends `Authorization: Bearer` and nothing else about the visitor. */
 export interface AccountClient {

@@ -8,7 +8,10 @@ export function makeNonce(): string {
   return btoa(binary);
 }
 
-export function buildCsp(nonce: string, options: { dev?: boolean } = {}): string {
+export function buildCsp(
+  nonce: string,
+  options: { dev?: boolean; clerk?: { frontendApi: string } | null } = {},
+): string {
   // `vite dev` hot reload needs inline preamble scripts (covered by the nonce) and a websocket back to
   // the dev server. Nothing else is relaxed, and production never passes `dev`.
   const scriptSrc = ["'self'", `'nonce-${nonce}'`];
@@ -17,13 +20,24 @@ export function buildCsp(nonce: string, options: { dev?: boolean } = {}): string
     scriptSrc.push("'unsafe-eval'");
     connectSrc.push('ws:', 'http:');
   }
+  const imgSrc = ["'self'"];
+  const extra: string[] = [];
+  if (options.clerk) {
+    // Sign-in widgets: exactly the instance host, Cloudflare's bot challenge and Clerk's avatar host.
+    const host = `https://${options.clerk.frontendApi}`;
+    scriptSrc.push(host, 'https://challenges.cloudflare.com');
+    connectSrc.push(host);
+    imgSrc.push('https://img.clerk.com');
+    extra.push('frame-src https://challenges.cloudflare.com', "worker-src 'self' blob:");
+  }
   return [
     "default-src 'self'",
     `script-src ${scriptSrc.join(' ')}`,
     "style-src 'self'",
-    "img-src 'self'",
+    `img-src ${imgSrc.join(' ')}`,
     "font-src 'self'",
     `connect-src ${connectSrc.join(' ')}`,
+    ...extra,
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",
@@ -55,10 +69,14 @@ export function shouldNoindex(input: {
 
 export function applySecurityHeaders(
   headers: Headers,
-  options: { nonce?: string; dev?: boolean; noindex?: boolean },
+  options: { nonce?: string; dev?: boolean; noindex?: boolean; clerk?: { frontendApi: string } | null },
 ): void {
   for (const [name, value] of Object.entries(BASE_HEADERS)) headers.set(name, value);
-  if (options.nonce) headers.set('Content-Security-Policy', buildCsp(options.nonce, { dev: options.dev }));
+  if (options.nonce)
+    headers.set(
+      'Content-Security-Policy',
+      buildCsp(options.nonce, { dev: options.dev, clerk: options.clerk }),
+    );
   if (options.noindex) headers.set('X-Robots-Tag', 'noindex');
 }
 

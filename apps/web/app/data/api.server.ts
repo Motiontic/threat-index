@@ -25,9 +25,12 @@ export const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 /** The API did not give a usable answer: 5xx, timeout, network error, oversized body or failed guard. */
 export class ApiUnavailable extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  /** The HTTP status the API answered, when it answered. */
+  readonly status?: number;
+  constructor(message: string, options?: { cause?: unknown; status?: number }) {
     super(message, options);
     this.name = 'ApiUnavailable';
+    if (options?.status !== undefined) this.status = options.status;
   }
 }
 
@@ -227,7 +230,9 @@ export function createAccountClient(api: Pick<Fetcher, 'fetch'>, token: string):
       if (res.status === 400) throw new ApiBadRequest(await errorText(res));
       if (!ok.includes(res.status)) {
         await res.body?.cancel();
-        throw new ApiUnavailable(`ti-api answered ${res.status} for ${method} ${path}`);
+        throw new ApiUnavailable(`ti-api answered ${res.status} for ${method} ${path}`, {
+          status: res.status,
+        });
       }
       return guard(JSON.parse(await readCapped(res)));
     } catch (err) {
