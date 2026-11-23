@@ -49,10 +49,13 @@
   "queues": { "producers": [{ "binding": "LOAD", "queue": "ti-load" }] },
   "vars": {
     "CLERK_PUBLISHABLE_KEY": "<pk_live_or_pk_test>",
-    "ADMIN_USER_IDS": ""
+    "ADMIN_USER_IDS": "",
+    "API_BASE": "${TI_API_URL}",
+    "E2B_TEMPLATE": "threat-index-jobs",
+    "R2_BUCKET_NAME": "threat-index"
   },
   // Secrets: CLERK_SECRET_KEY, CLERK_WEBHOOK_SIGNING_SECRET, RESEND_WEBHOOK_SECRET,
-  // UNSUBSCRIBE_SECRET, JOB_HMAC_SECRET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, E2B_API_KEY
+  // UNSUBSCRIBE_SECRET, JOB_HMAC_SECRET, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, E2B_API_KEY
 
   "env": {
     "staging": {
@@ -94,7 +97,12 @@
       "kv_namespaces": [{ "binding": "SETTINGS", "id": "${TI_SETTINGS_KV_ID_STAGING}" }],
       "queues": { "producers": [{ "binding": "LOAD", "queue": "ti-load-staging" }] },
       // CLERK_PUBLISHABLE_KEY is a secret here (Clerk development instance), not a var.
-      "vars": { "ADMIN_USER_IDS": "" }
+      "vars": {
+        "ADMIN_USER_IDS": "",
+        "API_BASE": "${TI_API_URL_STAGING}",
+        "E2B_TEMPLATE": "threat-index-jobs-staging",
+        "R2_BUCKET_NAME": "threat-index-staging"
+      }
     }
   }
 }
