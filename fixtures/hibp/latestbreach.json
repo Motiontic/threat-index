@@ -1,0 +1,24 @@
+{
+  "Name": "Bromcom",
+  "Title": "Bromcom",
+  "Domain": "bromcom.com",
+  "BreachDate": "2026-09-06",
+  "AddedDate": "2026-11-23T06:36:04Z",
+  "ModifiedDate": "2026-11-23T06:36:04Z",
+  "PwnCount": 355051,
+  "Description": "In September 2026, UK education software provider <a href=\"https://www.theregister.com/security/2026/10/06/legacy-sign-on-service-comes-back-to-bite-school-software-provider-bromcom/5301156\" target=\"_",
+  "LogoPath": "https://logos.haveibeenpwned.com/Bromcom.png",
+  "Attribution": null,
+  "DisclosureUrl": "https://docs.bromcom.com/knowledge-base/sso-personal-data-breach-faqs/",
+  "DataClasses": [
+    "Email addresses"
+  ],
+  "IsVerified": true,
+  "IsFabricated": false,
+  "IsSensitive": false,
+  "IsRetired": false,
+  "IsSpamList": false,
+  "IsMalware": false,
+  "IsSubscriptionFree": false,
+  "IsStealerLog": false
+}
