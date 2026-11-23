@@ -33,13 +33,13 @@ describe('apps/web/wrangler.jsonc', () => {
     expect(web.main).toBe('./workers/app.ts');
     expect(web.compatibility_flags).toContain('nodejs_compat');
     expect(web.observability).toEqual({ enabled: true });
-    expect(web.vars).toEqual({ TI_ENV: 'production' });
+    expect(web.vars).toEqual({ TI_ENV: 'production', DATA_SOURCE: 'api' });
     expect(web.services).toEqual([{ binding: 'API', service: 'ti-api' }]);
   });
 
   it('is the staging worker under env.staging', () => {
     expect(web.env.staging.name).toBe('ti-web-staging');
-    expect(web.env.staging.vars).toEqual({ TI_ENV: 'staging' });
+    expect(web.env.staging.vars).toEqual({ TI_ENV: 'staging', DATA_SOURCE: 'api' });
     expect(web.env.staging.services).toEqual([{ binding: 'API', service: 'ti-api-staging' }]);
   });
 

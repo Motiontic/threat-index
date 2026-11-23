@@ -1,6 +1,0 @@
-[
-  { "date": "2026-11-20", "key": "EXAMPLE-MAL-0001", "text": "New malicious package record" },
-  { "date": "2026-11-12", "key": "EXAMPLE-BREACH-0002", "text": "Breach record added" },
-  { "date": "2025-05-05", "key": "CVE-2025-3248", "text": "Added to CISA KEV" },
-  { "date": "2024-07-01", "key": "CVE-2024-6387", "text": "Published with a CVSS score of 8.1" }
-]

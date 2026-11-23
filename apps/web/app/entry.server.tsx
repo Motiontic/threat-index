@@ -3,11 +3,11 @@ import { isbot } from 'isbot';
 import { renderToReadableStream } from 'react-dom/server';
 import type { EntryContext, HandleDataRequestFunction } from 'react-router';
 import { ServerRouter } from 'react-router';
-import { SAMPLE_DATA } from './data/data.server';
+import { currentMode } from './data/data.server';
 import { NonceProvider } from './lib/nonce';
 import { applySecurityHeaders, makeNonce, shouldNoindex } from './lib/security.server';
 
-const noindex = () => shouldNoindex(SAMPLE_DATA, env.TI_ENV);
+const noindex = (status: number) => shouldNoindex({ mode: currentMode(), tiEnv: env.TI_ENV, status });
 
 export default async function handleRequest(
   request: Request,
@@ -38,13 +38,13 @@ export default async function handleRequest(
   applySecurityHeaders(responseHeaders, {
     nonce,
     dev: import.meta.env.DEV,
-    noindex: noindex(),
+    noindex: noindex(status),
   });
   return new Response(body, { status, headers: responseHeaders });
 }
 
 /** `.data` responses (client navigations) get the same headers, without a CSP (they are not documents). */
 export const handleDataRequest: HandleDataRequestFunction = (response) => {
-  applySecurityHeaders(response.headers, { noindex: noindex() });
+  applySecurityHeaders(response.headers, { noindex: noindex(response.status) });
   return response;
 };

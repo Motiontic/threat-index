@@ -1,11 +1,19 @@
-import changes from './fixtures/changes.json';
 import entries from './fixtures/entries.json';
-import type { EntryPreview } from './types';
 
-/** A fixture record: the preview fields plus the registry ids of the sources it cites. */
-export interface FixtureEntry extends EntryPreview {
+export type FixtureType = 'vuln' | 'breach' | 'ai' | 'mal' | 'tech' | 'term';
+
+/** A fixture record: hand-written public facts plus the registry ids of the sources it cites. */
+export interface FixtureEntry {
+  key: string;
+  type: FixtureType;
+  title: string;
+  subtitle: string;
+  summary: string;
+  aliases: string[];
+  published: string | null;
+  cvss: number | null;
+  kev_added: string | null;
   sources: string[];
 }
 
 export const FIXTURE_ENTRIES = entries as FixtureEntry[];
-export const FIXTURE_CHANGES = changes as { date: string; key: string; text: string }[];

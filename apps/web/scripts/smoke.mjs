@@ -1,7 +1,9 @@
 // Smoke check of the BUILT app in workerd: starts `wrangler dev` on the built config, requests every
 // public route, and exits 1 listing each failure. Always stops wrangler.
 //
-//   node scripts/smoke.mjs        (after `react-router build`; PORT defaults to 8710)
+//   node scripts/smoke.mjs [--mode fixtures|api]   (after `react-router build`; no --mode runs both in turn)
+//   fixtures: port 8710, --var DATA_SOURCE:fixtures, band and noindex everywhere.
+//   api: port 8711, the web worker bound to scripts/stub-api (fixtureApi plus two test hooks).
 import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -14,9 +16,17 @@ const FORBIDDEN_FORM_ATTRS = new RegExp(
   'i',
 );
 
-const PORT = Number(process.env.PORT ?? 8710);
+const modeArg = process.argv.indexOf('--mode');
+const MODE = modeArg > -1 ? process.argv[modeArg + 1] : 'both';
+if (MODE !== 'fixtures' && MODE !== 'api' && MODE !== 'both') {
+  console.error('usage: node scripts/smoke.mjs [--mode fixtures|api]  (no --mode runs both, fixtures first)');
+  process.exit(2);
+}
+const API_MODE = MODE === 'api';
+const PORT = Number(process.env.PORT ?? (API_MODE ? 8711 : 8710));
 const BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = resolve(WEB_DIR, '..', '..');
+const BAND = 'Preview with sample data.';
 const NVD = 'This product uses the NVD API but is not endorsed or certified by the NVD.';
 const failures = [];
 const fail = (where, what) => failures.push(`${where}: ${what}`);
@@ -26,6 +36,7 @@ const PAGES = [
   ['/search', 'Everything'],
   ['/search?q=log4j', 'Results for “log4j”'],
   ['/search?type=vuln&sig=kev', 'Vulnerabilities'],
+  ['/search?q=log4j&sev=critical&year=2021', 'Results for “log4j”'],
   ['/e/CVE-2025-3248', 'CVE-2025-3248: Langflow unauthenticated code execution'],
   ['/index', 'Index A–Z'],
   ['/index/l', 'Index: L'],
@@ -35,6 +46,9 @@ const PAGES = [
 ];
 
 const count = (html, re) => (html.match(re) ?? []).length;
+
+// Pages that carry a robots meta tag of their own (api mode sends no header for them).
+const META_NOINDEX = (path) => path.startsWith('/search') || path === '/account';
 
 function checkDocument(path, res, html, { title, status = 200 }) {
   if (res.status !== status) fail(path, `status ${res.status}, wanted ${status}`);
@@ -47,7 +61,15 @@ function checkDocument(path, res, html, { title, status = 200 }) {
     if (!new RegExp(`<${tag}[\\s>]`).test(html)) fail(path, `no <${tag}>`);
   }
   if (!html.includes(NVD)) fail(path, 'NVD notice missing');
-  if (res.headers.get('x-robots-tag') !== 'noindex') fail(path, 'X-Robots-Tag is not noindex');
+  const robots = res.headers.get('x-robots-tag');
+  const shouldIndex = API_MODE && status < 400;
+  if (shouldIndex && robots !== null) fail(path, `X-Robots-Tag is "${robots}", wanted none`);
+  if (!shouldIndex && robots !== 'noindex') fail(path, 'X-Robots-Tag is not noindex');
+  const metaNoindex = /<meta[^>]*name="robots"[^>]*content="noindex"/.test(html);
+  if (API_MODE && status < 400 && META_NOINDEX(path) && !metaNoindex) fail(path, 'no robots noindex meta');
+  if (API_MODE && status >= 400 && !metaNoindex) fail(path, 'error page has no robots noindex meta');
+  if (API_MODE && html.includes(BAND)) fail(path, 'sample-data band shown in api mode');
+  if (!API_MODE && !html.includes(BAND)) fail(path, 'sample-data band missing in fixtures mode');
   const csp = res.headers.get('content-security-policy') ?? '';
   const nonce = csp.match(/'nonce-([^']+)'/)?.[1];
   if (!nonce) fail(path, 'no CSP nonce');
@@ -80,6 +102,9 @@ async function runChecks() {
       (e) => e.key === 'CVE-2025-3248',
     );
     if (!html.includes(fixture.summary)) fail(path, 'summary not in the server HTML');
+    if (!html.includes(fixture.title)) fail(path, 'title not in the server HTML');
+    if (!html.includes('Sources and credits') || !html.includes('Source: CISA KEV'))
+      fail(path, 'credits missing');
     if (!html.includes('9.8')) fail(path, 'CVSS 9.8 missing');
     if (!html.includes('Exploited in the wild')) fail(path, '"Exploited in the wild" missing');
     if (!html.includes('application/ld+json')) fail(path, 'JSON-LD missing');
@@ -91,13 +116,30 @@ async function runChecks() {
     if (res.status !== 301) fail(from, `status ${res.status}, wanted 301`);
     if (!loc.endsWith('/e/CVE-2025-3248')) fail(from, `redirects to "${loc}"`);
     if (!res.headers.get('content-security-policy')?.includes("'nonce-")) fail(from, 'redirect has no CSP');
-    if (res.headers.get('x-robots-tag') !== 'noindex') fail(from, 'redirect has no X-Robots-Tag: noindex');
+    const robots = res.headers.get('x-robots-tag');
+    if (!API_MODE && robots !== 'noindex') fail(from, 'redirect has no X-Robots-Tag: noindex');
+    if (API_MODE && robots !== null) fail(from, `redirect has X-Robots-Tag "${robots}"`);
     if (res.headers.get('x-content-type-options') !== 'nosniff') fail(from, 'redirect has no nosniff');
   }
 
   for (const path of ['/e/CVE-1999-99999', '/no-such-page', '/index/ab']) {
     const { res, html } = await get(path);
     checkDocument(path, res, html, { title: 'Not found', status: 404 });
+  }
+
+  if (API_MODE) {
+    {
+      const { res, html } = await get('/e/CVE-1900-0500');
+      checkDocument('/e/CVE-1900-0500', res, html, { title: 'The index is not answering', status: 502 });
+    }
+    const { res, html } = await get('/sitemap.xml');
+    if (res.status !== 200) fail('/sitemap.xml', `status ${res.status}`);
+    if (!(res.headers.get('content-type') ?? '').includes('xml')) fail('/sitemap.xml', 'not XML');
+    if (res.headers.get('x-content-type-options') !== 'nosniff') fail('/sitemap.xml', 'no nosniff');
+    if (!html.includes('<urlset')) fail('/sitemap.xml', 'no <urlset>');
+  } else {
+    const { res } = await get('/sitemap.xml');
+    if (res.status !== 404) fail('/sitemap.xml', `status ${res.status}, wanted 404 in fixtures mode`);
   }
 
   if (!stylesheet) fail('/', 'no stylesheet link');
@@ -152,16 +194,16 @@ function stop(child) {
 
 async function main() {
   const config = builtWebConfig('production');
-  const child = spawn(
-    join(ROOT, 'node_modules', '.bin', 'wrangler'),
-    ['dev', '-c', config, '--ip', '127.0.0.1', '--port', String(PORT)],
-    {
-      cwd: ROOT,
-      detached: true,
-      stdio: ['ignore', 'inherit', 'inherit'],
-      env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' },
-    },
-  );
+  const args = ['dev', '-c', config];
+  if (API_MODE) args.push('-c', join(WEB_DIR, 'scripts', 'stub-api', 'wrangler.jsonc'));
+  else args.push('--var', 'DATA_SOURCE:fixtures');
+  args.push('--ip', '127.0.0.1', '--port', String(PORT));
+  const child = spawn(join(ROOT, 'node_modules', '.bin', 'wrangler'), args, {
+    cwd: ROOT,
+    detached: true,
+    stdio: ['ignore', 'inherit', 'inherit'],
+    env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' },
+  });
   const onSignal = () => {
     stop(child);
     process.exit(130);
@@ -181,7 +223,22 @@ async function main() {
     for (const f of failures) console.error(`  ✗ ${f}`);
     process.exit(1);
   }
-  console.log(`✓ smoke: ${PAGES.length + 6} routes and the build checks passed`);
+  console.log(`✓ smoke (${MODE}): ${PAGES.length + 7} routes and the build checks passed`);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await main();
+async function both() {
+  for (const mode of ['fixtures', 'api']) {
+    const code = await new Promise((done) => {
+      const p = spawn(process.execPath, [fileURLToPath(import.meta.url), '--mode', mode], {
+        stdio: 'inherit',
+      });
+      p.on('exit', (c) => done(c ?? 1));
+    });
+    if (code !== 0) process.exit(code);
+  }
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  if (MODE === 'both') await both();
+  else await main();
+}

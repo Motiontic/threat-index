@@ -269,6 +269,18 @@ select {
   }
 }
 
+/* Narrow: the search box takes its own row so it stays usable. */
+@media (max-width: 899px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+  .topbar-search {
+    order: 3;
+    flex: 1 0 100%;
+    max-width: none;
+  }
+}
+
 /* Wide: two columns. */
 @media (min-width: 900px) {
   .shell {
@@ -508,13 +520,6 @@ a.pill:hover {
   color: var(--ink);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
-.tile-number {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: var(--text-tile);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
 .tile-label {
   display: block;
   font-size: var(--text-muted);
@@ -607,6 +612,11 @@ a.pill:hover {
 .filter-actions {
   display: flex;
   gap: var(--space-3);
+}
+.pager {
+  display: flex;
+  gap: var(--space-5);
+  padding: var(--space-4) 0;
 }
 
 /* Entry */

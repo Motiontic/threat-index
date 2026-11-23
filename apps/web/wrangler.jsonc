@@ -17,14 +17,14 @@
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  "vars": { "TI_ENV": "production" },
-  // For later: loaders will call ti-api through this binding. Nothing uses it yet.
+  "vars": { "TI_ENV": "production", "DATA_SOURCE": "api" },
+  // Loaders call ti-api through this binding (app/data/api.server.ts).
   "services": [{ "binding": "API", "service": "ti-api" }],
 
   "env": {
     "staging": {
       "name": "ti-web-staging",
-      "vars": { "TI_ENV": "staging" },
+      "vars": { "TI_ENV": "staging", "DATA_SOURCE": "api" },
       "services": [{ "binding": "API", "service": "ti-api-staging" }]
     }
   }

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
-import type { EntryPreview, EntryType } from '../data/types';
+import { displayType } from '../data/display';
+import type { Credit, EntryType, SearchHit } from '../data/types';
 import { formatDate, TYPE_LABELS } from '../lib/format';
 
 export function TypeBadge({ type }: { type: EntryType }) {
@@ -11,12 +12,20 @@ export function Chip({ children, tone }: { children: ReactNode; tone?: 'kev' | '
   return <span className={tone ? `chip chip-${tone}` : 'chip'}>{children}</span>;
 }
 
-/** Preview facts only: KEV status and CVSS, nothing from the full record. */
-export function previewChips(entry: EntryPreview): ReactNode[] {
+/** The facts a hit or a preview carries: KEV status, CVSS and the published date. */
+export interface Facts {
+  key: string;
+  kind?: string;
+  exploited: boolean;
+  cvss?: number;
+  published?: string;
+}
+
+export function previewChips(facts: Facts): ReactNode[] {
   const chips: ReactNode[] = [];
-  if (entry.type === 'vuln') {
+  if (displayType(facts.kind, facts.key) === 'vuln') {
     chips.push(
-      entry.kev_added ? (
+      facts.exploited ? (
         <Chip key="kev" tone="kev">
           Exploited in the wild
         </Chip>
@@ -25,34 +34,33 @@ export function previewChips(entry: EntryPreview): ReactNode[] {
       ),
     );
   }
-  if (entry.cvss !== null) chips.push(<Chip key="cvss">CVSS {entry.cvss.toFixed(1)}</Chip>);
-  if (entry.published) chips.push(<Chip key="date">{formatDate(entry.published)}</Chip>);
+  if (facts.cvss !== undefined) chips.push(<Chip key="cvss">CVSS {facts.cvss.toFixed(1)}</Chip>);
+  if (facts.published) chips.push(<Chip key="date">{formatDate(facts.published)}</Chip>);
   return chips;
 }
 
-export function ResultCard({ entry }: { entry: EntryPreview }) {
+export function ResultCard({ hit }: { hit: SearchHit & { kind?: string } }) {
   return (
     <article className="result-card">
       <div className="result-head">
-        <TypeBadge type={entry.type} />
-        <span className="mono muted">{entry.key}</span>
+        <TypeBadge type={displayType(hit.kind, hit.key)} />
+        <span className="mono muted">{hit.key}</span>
       </div>
       <h2>
-        <Link to={`/e/${encodeURIComponent(entry.key)}`}>{entry.title}</Link>
+        <Link to={`/e/${encodeURIComponent(hit.key)}`}>{hit.title}</Link>
       </h2>
-      <p className="muted">{entry.subtitle}</p>
-      <p>{entry.summary}</p>
-      <div className="chips">{previewChips(entry)}</div>
+      <p>{hit.summary}</p>
+      <div className="chips">{previewChips(hit)}</div>
     </article>
   );
 }
 
-export function CompactRow({ entry, note }: { entry: EntryPreview; note?: string }) {
+export function CompactRow({ item, note }: { item: { key: string; title: string }; note?: string }) {
   return (
     <li className="row">
-      <span className="mono muted">{entry.key}</span>
+      <span className="mono muted">{item.key}</span>
       <span className="row-main">
-        <Link to={`/e/${encodeURIComponent(entry.key)}`}>{entry.title}</Link>
+        <Link to={`/e/${encodeURIComponent(item.key)}`}>{item.title}</Link>
       </span>
       {note ? <span className="muted">{note}</span> : null}
     </li>
@@ -68,10 +76,9 @@ export function Panel({ title, children }: { title: string; children: ReactNode 
   );
 }
 
-export function Tile({ to, count, label, kev }: { to: string; count: number; label: string; kev?: boolean }) {
+export function Tile({ to, label, kev }: { to: string; label: string; kev?: boolean }) {
   return (
     <Link to={to} className={kev ? 'tile tile-kev' : 'tile'}>
-      <span className="tile-number">{count}</span>
       <span className="tile-label">{label}</span>
     </Link>
   );
@@ -100,27 +107,21 @@ export function Table({ caption, head, children }: { caption: string; head: stri
   );
 }
 
-export function LetterBar({ counts, current }: { counts: Record<string, number>; current: string | null }) {
+export function LetterBar({ current }: { current: string | null }) {
   const letters = [...'abcdefghijklmnopqrstuvwxyz', '0'];
   return (
     <nav className="letter-bar" aria-label="Index letters">
-      {letters.map((l) =>
-        (counts[l] ?? 0) > 0 ? (
-          <Link
-            key={l}
-            to={`/index/${l}`}
-            className="letter"
-            aria-current={current === l ? 'page' : undefined}
-            aria-label={l === '0' ? 'Digits and symbols' : `Letter ${l.toUpperCase()}`}
-          >
-            {l === '0' ? '0–9' : l}
-          </Link>
-        ) : (
-          <span key={l} className="letter letter-empty" aria-hidden="true">
-            {l === '0' ? '0–9' : l}
-          </span>
-        ),
-      )}
+      {letters.map((l) => (
+        <Link
+          key={l}
+          to={`/index/${l}`}
+          className="letter"
+          aria-current={current === l ? 'page' : undefined}
+          aria-label={l === '0' ? 'Digits and symbols' : `Letter ${l.toUpperCase()}`}
+        >
+          {l === '0' ? '0–9' : l}
+        </Link>
+      ))}
     </nav>
   );
 }
@@ -134,16 +135,39 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
   );
 }
 
-export function CreditList({ credits }: { credits: string[] }) {
+/** A credit's name links out only when its URL parses as https. */
+export function safeHttpsUrl(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function CreditList({ credits }: { credits: Credit[] }) {
   return (
     <section className="credits" aria-labelledby="credits-title">
       <h2 id="credits-title" className="label">
         Sources and credits
       </h2>
       <ul>
-        {credits.map((c) => (
-          <li key={c}>{c}</li>
-        ))}
+        {credits.map((c) => {
+          const href = safeHttpsUrl(c.url);
+          return (
+            <li key={`${c.sourceId}-${c.text}`}>
+              {href ? (
+                <a href={href} rel="noopener noreferrer">
+                  {c.name}
+                </a>
+              ) : (
+                c.name
+              )}
+              {c.text ? <span className="muted"> {c.text}</span> : null}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

@@ -3,6 +3,7 @@ declare namespace Cloudflare {
   interface Env {
     API: Fetcher;
     TI_ENV: string;
+    DATA_SOURCE?: string;
   }
 }
 interface Env extends Cloudflare.Env {}

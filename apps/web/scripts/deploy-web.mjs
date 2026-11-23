@@ -49,6 +49,11 @@ export function builtWebConfig(target, dir = WEB_DIR) {
       `built API binding targets "${api?.service}" but ${target} needs "${expected.api}"; rebuild for ${target}`,
     );
   }
+  if (config.vars?.DATA_SOURCE !== 'api') {
+    throw new Error(
+      `built DATA_SOURCE is "${config.vars?.DATA_SOURCE}" but ${target} needs "api"; check wrangler.jsonc and rebuild`,
+    );
+  }
   return built;
 }
 
