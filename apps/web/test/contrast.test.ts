@@ -153,7 +153,7 @@ describe('contrast', () => {
   });
 
   it('prints the ratio table when asked', () => {
-    if (!import.meta.env.VITE_CONTRAST_TABLE) return;
+    if (!process.env.VITE_CONTRAST_TABLE) return;
     const rows = PAIRS.map(
       (p) =>
         `| ${p.use} | ${ratio(p.fg(light), p.bg(light)).toFixed(2)} | ${ratio(p.fg(dark), p.bg(dark)).toFixed(2)} | ${p.min} |`,
