@@ -98,6 +98,9 @@ importers:
       '@ti/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@ti/sources':
+        specifier: workspace:*
+        version: link:../../packages/sources
 
   apps/web:
     dependencies:

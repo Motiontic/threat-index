@@ -7,13 +7,15 @@ const MIGRATIONS = new URL('../packages/db/migrations/', import.meta.url);
 describe('TABLE_DATABASE', () => {
   const fromSql: [string, string][] = [];
   for (const dir of readdirSync(MIGRATIONS)) {
-    const sql = readFileSync(new URL(`${dir}/0001_init.sql`, MIGRATIONS), 'utf8');
-    for (const m of sql.matchAll(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)/gi))
-      fromSql.push([m[1] as string, `ti_${dir}`]);
+    for (const file of readdirSync(new URL(`${dir}/`, MIGRATIONS)).filter((f) => f.endsWith('.sql'))) {
+      const sql = readFileSync(new URL(`${dir}/${file}`, MIGRATIONS), 'utf8');
+      for (const m of sql.matchAll(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)/gi))
+        fromSql.push([m[1] as string, `ti_${dir}`]);
+    }
   }
 
-  it('maps every table in every 0001_init.sql exactly once, to its own database', () => {
-    expect(fromSql.length).toBe(22);
+  it('maps every table in every migration exactly once, to its own database', () => {
+    expect(fromSql.length).toBe(24);
     expect(new Set(fromSql.map(([t]) => t)).size).toBe(fromSql.length);
     expect(Object.entries(TABLE_DATABASE).sort()).toEqual([...fromSql].sort());
   });

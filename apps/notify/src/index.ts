@@ -1,7 +1,8 @@
-import { consume, type Env, type NotifyMessage } from './consume';
+import { consume } from './consume';
+import type { Env, NotifyMessage } from './env';
 
 /** ti-notify. See docs/IMPLEMENTATION_PLAN.md §10. This file only wires queue() to consume.ts. */
-export type { Env } from './consume';
+export type { Env } from './env';
 
 export default {
   async queue(batch: MessageBatch<NotifyMessage>, env: Env): Promise<void> {
