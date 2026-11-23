@@ -20,13 +20,13 @@ Enabled kinds (`ENABLED_JOB_KINDS` in `apps/api/src/lib/e2b.ts`): `echo`, `first
 
 **`first-load` and `big-file`** are one runner (`jobs/first-load.ts`; `big-file` is `mode: 'update'`). The input shape comes from the source's pattern and the job URL (`inputShape`):
 
-| Shape         | Input                                                            | Parsed as                                  |
-| ------------- | ---------------------------------------------------------------- | ------------------------------------------ |
-| `file`        | any other source: one downloaded file                            | one `parse()` call                         |
-| `changelist`  | `pull.changelist.listUrl`                                        | one `ChangeItem` per listed document       |
-| `change-item` | one item URL of a `changelist` source                            | one `ChangeItem` (ref and time from cursor)|
-| `archive`     | `https://github.com/<repo>/archive/<sha>.tar.gz` of a `git` source | `GitFile` (`added`) per included data file |
-| `git-file`    | one raw file URL of a `git` source                               | one `GitFile` (`modified`)                 |
+| Shape         | Input                                                              | Parsed as                                   |
+| ------------- | ------------------------------------------------------------------ | ------------------------------------------- |
+| `file`        | any other source: one downloaded file                              | one `parse()` call                          |
+| `changelist`  | `pull.changelist.listUrl`                                          | one `ChangeItem` per listed document        |
+| `change-item` | one item URL of a `changelist` source                              | one `ChangeItem` (ref and time from cursor) |
+| `archive`     | `https://github.com/<repo>/archive/<sha>.tar.gz` of a `git` source | `GitFile` (`added`) per included data file  |
+| `git-file`    | one raw file URL of a `git` source                                 | one `GitFile` (`modified`)                  |
 
 The job reads `jobs/<id>/request.json` for `cursor` (the target) and `from` (the source's stored cursor when the job started; ti-api adds it). Limits: a change list takes at most 10,000 documents per job (a first load keeps the newest and logs `older`; an update over it fails with `too many changes: <n>`), 8 requests in flight and 10 a second, a document over 10 MiB is skipped, `404`/`410` gives `text: null`. An archive is streamed (never written to disk), keeps files with a data extension that match `pull.git.include`, skips entries over 10 MiB, and fails over 4 GiB unpacked or 400,000 kept files. Files deleted upstream are not deleted here. ti-api commits the target cursor only on `complete({ ok: true })`.
 
@@ -41,7 +41,7 @@ All use the per-job key (`deriveJobKey`), need a `running` job, and sign `METHOD
 | `PUT /internal/jobs/:id/objects/<key>`                                   | Streams the body to R2 (`content-length` required, ≤ 50 MiB; R2 checks the digest). Keys: `jobs/<id>/`, `inbox/<id>/`, plus `lake/records/<source>/` (first-load), `lake/epss/epss/` (epss-diff), `lake/raw/` (nightly-fold), `lookup/{search,index,vuln,pkg}/` and `sitemap.xml` (search-index). `jobs/<id>/request.json` is reserved. |
 | `GET /internal/jobs/:id/objects/<key>`                                   | Streams an object under `raw/`, `lake/`, `lookup/`, `jobs/<id>/` or `inbox/<id>/`. 404 if missing.                                                                                                                                                                                                                                      |
 | `GET /internal/jobs/:id/list?prefix=&cursor=`                            | `{ objects: {key,size}[], cursor }`, ≤ 1,000 per page, prefix inside a read prefix.                                                                                                                                                                                                                                                     |
-| `GET /internal/jobs/:id/rows/<vulns\|advisories\|signals>?after=&limit=` | Keyset-paged D1 rows `{ rows, next }`, limit 1–1,000 (default 500; the jobs use 1,000). Not for `echo`.                                                                                                                                                                                                                                                     |
+| `GET /internal/jobs/:id/rows/<vulns\|advisories\|signals>?after=&limit=` | Keyset-paged D1 rows `{ rows, next }`, limit 1–1,000 (default 500; the jobs use 1,000). Not for `echo`.                                                                                                                                                                                                                                 |
 
 Sandboxes get `SITE_ORIGIN` in their environment when ti-api has an optional `SITE_ORIGIN` var (an https origin).
 

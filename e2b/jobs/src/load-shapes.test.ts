@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { appendFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { inboxChunkKey, inboxManifestKey } from '@ti/core/inbox';
@@ -12,6 +12,10 @@ import { run as firstLoad, inputShape, sandboxLinkDeps } from './jobs/first-load
 import { applyCap } from './lib/changelist.ts';
 import { fakeApi, fakeCtx, JOB_ID, job, makeTar, noSleep, paxRecord } from './test-support.ts';
 
+/** Writes a counts line to $EVIDENCE_FILE when set (the loop saves it under proof/). */
+const evidence = (line: string) => {
+  if (process.env.EVIDENCE_FILE) appendFileSync(process.env.EVIDENCE_FILE, `${line}\n`);
+};
 const NOW = new Date('2026-11-23T10:00:00Z');
 const base = { duckdb: () => null, sleep: noSleep, now: () => NOW };
 const lines = (b: Uint8Array | undefined) =>
@@ -110,7 +114,7 @@ describe('changelist first load', () => {
     const text = JSON.stringify(logs);
     expect(text).not.toContain('security.access.redhat.com');
     // Evidence for the PR: counts.
-    console.log(
+    evidence(
       JSON.stringify({
         evidence: 'changelist-first-load',
         source: 'red-hat',
@@ -309,7 +313,7 @@ describe('archive first load', () => {
     expect(api.puts.at(-1)).toBe(inboxManifestKey(JOB_ID));
     // The archive is streamed: no scratch directory is created for it.
     expect(readdirSync(tmpdir()).filter((n) => !before.has(n) && n.startsWith('job-'))).toEqual([]);
-    console.log(
+    evidence(
       JSON.stringify({
         evidence: 'archive-first-load',
         source: 'avid',
