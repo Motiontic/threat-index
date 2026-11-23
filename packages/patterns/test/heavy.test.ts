@@ -98,7 +98,7 @@ describe('heavy with a validator', () => {
       routes: [route(ZIP, reply(null, 200, { 'last-modified': 'Thu, 08 May 2025 12:00:00 GMT' }), 'HEAD')],
     });
     const r = await fetch(h.ctx);
-    expect(r.nextCursor.value).toBe('lm:Thu, 08 May 2025 12:00:00 GMT');
+    expect(r.nextCursor?.value).toBe('lm:Thu, 08 May 2025 12:00:00 GMT');
   });
 
   it('without a validator and without a version is not-configured, so no job runs every time', async () => {

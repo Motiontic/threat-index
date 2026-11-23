@@ -104,3 +104,9 @@ export function ranged(text: string, headers: Record<string, string> = {}): Rout
 
 export const SHA_A = 'a'.repeat(40);
 export const SHA_B = 'b'.repeat(40);
+
+/** A result's cursor, which the test expects to be there. */
+export function cursorOf(r: { nextCursor: Cursor | null }): Cursor {
+  if (!r.nextCursor) throw new Error('expected a nextCursor');
+  return r.nextCursor;
+}

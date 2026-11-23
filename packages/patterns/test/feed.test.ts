@@ -36,6 +36,12 @@ describe('feed', () => {
     expect(a.requests.length + b.requests.length).toBe(0);
   });
 
+  it('fetch on an empty feed with a null cursor commits nothing (no empty-valued cursor)', async () => {
+    const empty = '<?xml version="1.0"?><rss version="2.0"><channel><title>t</title></channel></rss>';
+    const h = makeCtx({ source, routes: [route(URL_, feedReply(empty))] });
+    expect(await fetch(h.ctx)).toMatchObject({ items: [], receipt: null, more: false, nextCursor: null });
+  });
+
   it('fetch with nothing new keeps the cursor', async () => {
     const cur = at(key(1), '"f0"');
     const h = makeCtx({ source, cursor: cur, routes: [route(URL_, feedReply(xml))] });
@@ -62,7 +68,7 @@ describe('feed', () => {
     const h = makeCtx({ source, cursor: at(key(4), '"f0"'), routes: [route(URL_, feedReply(xml))] });
     const r = await fetch(h.ctx);
     expect(r.items.map((i) => i.id)).toEqual([key(3), key(2), key(1)]);
-    expect(r.nextCursor.value).toBe(key(1));
+    expect(r.nextCursor?.value).toBe(key(1));
   });
 
   it('fetch: over 40 new gives the oldest 40 with more and no validator, then the rest', async () => {
@@ -100,7 +106,7 @@ describe('feed', () => {
     const h = makeCtx({ source: oldestFirst, cursor: at('a', '"x"'), routes: [route(URL_, feedReply(doc))] });
     const r = await fetch(h.ctx);
     expect(r.items.map((i) => i.id)).toEqual(['b', 'c']);
-    expect(r.nextCursor.value).toBe('c');
+    expect(r.nextCursor?.value).toBe('c');
   });
 
   it('reads Atom (id) and RDF (rdf:about), and falls back to link', async () => {
@@ -170,6 +176,6 @@ describe('feed', () => {
     const r = await fetch(h.ctx);
     expect(r.items).toEqual([]);
     expect(r.heavy).toMatchObject({ kind: 'big-file', url: URL_ });
-    expect(r.nextCursor.value).toBe(key(1));
+    expect(r.nextCursor?.value).toBe(key(1));
   });
 });

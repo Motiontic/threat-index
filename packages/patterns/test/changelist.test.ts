@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { fixture } from '../../../test/fixtures';
 import { type ChangeItem, check, fetch, MAX_RANGE_READS } from '../src/changelist';
 import { EXAMPLES, sourceWith } from './examples';
-import { makeCtx, ranged, reply, route } from './helpers';
+import { cursorOf, makeCtx, ranged, reply, route } from './helpers';
 
 const LIST = 'https://osv-vulnerabilities.storage.googleapis.com/modified_id.csv';
 const ITEMS = /osv-vulnerabilities\.storage\.googleapis\.com\/.+\.json$/;
@@ -66,7 +66,7 @@ describe('changelist', () => {
     );
     expect(r).toMatchObject({ more: false });
     expect(r.nextCursor).toEqual(at('2025-05-20T23:00:00Z', 'npm/GHSA-2025-1019', VALIDATOR));
-    expect(r.nextCursor.kind).toBe('timestamp');
+    expect(cursorOf(r).kind).toBe('timestamp');
     expect(r.receipt).toMatchObject({ runId: 'r1', contentType: 'application/x-ndjson' });
     expect(String(r.receipt?.body).trim().split('\n')).toHaveLength(4);
   });
@@ -111,7 +111,7 @@ describe('changelist', () => {
     const r1 = await fetch(makeCtx({ source, cursor: cur, routes }).ctx);
     expect(r1.items).toHaveLength(40);
     expect(r1.more).toBe(true);
-    expect(r1.nextCursor.etag).toBeUndefined();
+    expect(r1.nextCursor?.etag).toBeUndefined();
     expect(r1.items[0]?.id).toBe('npm/GHSA-901');
     const h2 = makeCtx({ source, cursor: r1.nextCursor, routes });
     expect(await check(h2.ctx)).toBe('changed');
@@ -121,7 +121,7 @@ describe('changelist', () => {
     const r3 = await fetch(makeCtx({ source, cursor: r2.nextCursor, routes }).ctx);
     expect(r3.items).toHaveLength(20);
     expect(r3).toMatchObject({ more: false });
-    expect(r3.nextCursor.etag).toBe(VALIDATOR);
+    expect(r3.nextCursor?.etag).toBe(VALIDATOR);
   });
 
   it('fetch: reads a list across ranges, carrying partial lines over', async () => {

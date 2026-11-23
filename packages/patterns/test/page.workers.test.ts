@@ -41,7 +41,7 @@ describe('page (Workers)', () => {
     const h = makeCtx({ source, cursor: at('CIAD-2025-0038', '"p0"'), routes: [route(URL_, page(html))] });
     const r = await fetch(h.ctx);
     expect(r.items.map((i) => i.id)).toEqual(['CIAD-2025-0039', 'CIAD-2025-0040']);
-    expect(r.nextCursor.value).toBe('CIAD-2025-0040');
+    expect(r.nextCursor?.value).toBe('CIAD-2025-0040');
     const cur = at('CIAD-2025-0040', '"p0"');
     const same = makeCtx({ source, cursor: cur, routes: [route(URL_, page(html))] });
     expect(await fetch(same.ctx)).toMatchObject({ items: [], receipt: null, more: false, nextCursor: cur });
@@ -66,7 +66,7 @@ describe('page (Workers)', () => {
     expect(r.items).toHaveLength(40);
     expect(r.more).toBe(true);
     expect(r.items[0]?.id).toBe('K-51');
-    expect(r.nextCursor.etag).toBeUndefined();
+    expect(r.nextCursor?.etag).toBeUndefined();
   });
 
   it('a link-only source cuts rows to { id, title, date, link } in items and receipt', async () => {

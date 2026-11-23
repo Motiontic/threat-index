@@ -16,11 +16,9 @@ export function pullBlock<K extends keyof PullConfig>(
   return block as NonNullable<PullConfig[K]>;
 }
 
-const NO_CURSOR: Cursor = { kind: 'version', value: '' };
-
-/** Nothing new: no items, no receipt, the cursor we got. */
+/** Nothing new: no items, no receipt, the cursor we got (`null` if we got none, which commits nothing). */
 export function unchanged(ctx: PatternContext): PatternResult {
-  return { items: [], receipt: null, nextCursor: ctx.cursor ?? NO_CURSOR, more: false };
+  return { items: [], receipt: null, nextCursor: ctx.cursor, more: false };
 }
 
 export function heavyResult(

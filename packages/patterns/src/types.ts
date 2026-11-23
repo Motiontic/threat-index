@@ -42,8 +42,12 @@ export type HeavyJobRequest = Omit<JobRequest, 'requestId' | 'cursor'>;
 export interface PatternResult {
   items: RawItem[];
   receipt: Receipt | null;
-  /** Committed only after the records are safely written. */
-  nextCursor: Cursor;
+  /**
+   * Committed only after the records are safely written. `null` means there is nothing to commit: the run
+   * found nothing and there was no cursor to keep (a first run on an empty source). The caller leaves the
+   * stored cursor as it is and must never write an empty value.
+   */
+  nextCursor: Cursor | null;
   /** More pages remain: enqueue a continuation message. */
   more: boolean;
   /** Too big for a Worker: hand off to E2B. */

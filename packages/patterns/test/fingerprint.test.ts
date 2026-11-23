@@ -4,14 +4,15 @@ import { fixture } from '../../../test/fixtures';
 import { parseKev } from '../../parsers/src/kev';
 import { check, fetch, MAX_FINGERPRINT_ITEMS } from '../src/fingerprint';
 import { EXAMPLES, sourceWith } from './examples';
-import { makeCtx, ranged, reply, route } from './helpers';
+import { cursorOf, makeCtx, ranged, reply, route } from './helpers';
 
 const URL_ = EXAMPLES['cisa-kev'].fingerprint.url;
 const source = sourceWith('cisa-kev');
 const v1 = fixture('cisa-kev', 'sample.json');
 const v2 = fixture('cisa-kev', 'pattern-catalog-v2.json');
 
-const state = (c: Cursor) => JSON.parse(c.value) as { v: string | null; h: Record<string, string> };
+const state = (c: Cursor | null) =>
+  JSON.parse(cursorOf({ nextCursor: c }).value) as { v: string | null; h: Record<string, string> };
 
 function catalogue(n: number, version = '2025.06.01'): string {
   return JSON.stringify({
@@ -23,7 +24,7 @@ function catalogue(n: number, version = '2025.06.01'): string {
 /** The cursor a first run over `text` ends with. */
 async function settle(text: string, validator = '"e1"'): Promise<Cursor> {
   const h = makeCtx({ source, routes: [route(URL_, ranged(text, { etag: validator }))] });
-  return (await fetch(h.ctx)).nextCursor;
+  return cursorOf(await fetch(h.ctx));
 }
 
 describe('fingerprint', () => {
@@ -67,7 +68,7 @@ describe('fingerprint', () => {
     expect(parsed[1]?.records.map((x) => x.kind)).toEqual(['exploited_wild', 'ransomware']);
     expect(state(r.nextCursor).v).toBe('2025.05.12');
     expect(Object.keys(state(r.nextCursor).h)).toHaveLength(2);
-    expect(r.nextCursor.etag).toBe('"e2"');
+    expect(r.nextCursor?.etag).toBe('"e2"');
     // The same file again: nothing is new.
     const again = makeCtx({
       source,
@@ -99,7 +100,7 @@ describe('fingerprint', () => {
     expect(r1.items).toHaveLength(40);
     expect(r1.more).toBe(true);
     expect(state(r1.nextCursor).v).toBeNull();
-    expect(r1.nextCursor.etag).toBeUndefined();
+    expect(r1.nextCursor?.etag).toBeUndefined();
     expect(Object.keys(state(r1.nextCursor).h)).toHaveLength(40);
 
     const h2 = makeCtx({ source, cursor: r1.nextCursor, routes });
@@ -112,7 +113,7 @@ describe('fingerprint', () => {
     expect(r3.items).toHaveLength(5);
     expect(r3.more).toBe(false);
     expect(state(r3.nextCursor)).toMatchObject({ v: '2025.06.01' });
-    expect(r3.nextCursor.etag).toBe('"big"');
+    expect(r3.nextCursor?.etag).toBe('"big"');
   });
 
   it('fetch: over MAX_FINGERPRINT_ITEMS entries, or a file over the size limit, is a big-file hand-off', async () => {
@@ -134,7 +135,7 @@ describe('fingerprint', () => {
     };
     const cur = await (async () => {
       const h = makeCtx({ source: plain, routes: [route(URL_, ranged(v1, { etag: '"e1"' }))] });
-      return (await fetch(h.ctx)).nextCursor;
+      return cursorOf(await fetch(h.ctx));
     })();
     expect(cur.kind).toBe('etag');
     expect(state(cur).v).toBe('"e1"');

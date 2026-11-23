@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { fixture } from '../../../test/fixtures';
 import { check, fetch, type GitFile } from '../src/git';
 import { EXAMPLES, sourceWith } from './examples';
-import { type Harness, makeCtx, NOW, reply, route, SHA_A, SHA_B } from './helpers';
+import { cursorOf, type Harness, makeCtx, NOW, reply, route, SHA_A, SHA_B } from './helpers';
 
 const API = 'https://api.github.com/repos/CVEProject/cvelistV5';
 const RAW = `https://raw.githubusercontent.com/CVEProject/cvelistV5/${SHA_B}`;
@@ -131,8 +131,8 @@ describe('git', () => {
     const r1 = await fetch(first.ctx);
     expect(r1.items).toHaveLength(40);
     expect(r1.more).toBe(true);
-    expect(JSON.parse(r1.nextCursor.value)).toEqual({ base: SHA_A, head: SHA_B, done: 40, tip: true });
-    expect(r1.nextCursor.etag).toBeUndefined();
+    expect(JSON.parse(cursorOf(r1).value)).toEqual({ base: SHA_A, head: SHA_B, done: 40, tip: true });
+    expect(r1.nextCursor?.etag).toBeUndefined();
 
     const second = makeCtx({ source, cursor: r1.nextCursor, routes });
     expect(await check(second.ctx)).toBe('changed');
@@ -190,7 +190,7 @@ describe('git', () => {
     const r = await fetch(h.ctx);
     expect(r.items).toHaveLength(3);
     expect(r.more).toBe(true);
-    expect(JSON.parse(r.nextCursor.value)).toEqual({ base: first, head: first, done: 0, tip: false });
+    expect(JSON.parse(cursorOf(r).value)).toEqual({ base: first, head: first, done: 0, tip: false });
     expect(
       ids(h)
         .filter((u) => u.startsWith('https://raw.'))
@@ -247,7 +247,7 @@ describe('git', () => {
     expect(r2.items).toEqual([]);
     expect(r2.heavy).toMatchObject({ kind: 'big-file', sourceId: 'cve-list' });
     expect(r2.heavy?.url).toContain(big);
-    expect(JSON.parse(r2.nextCursor.value)).toMatchObject({ done: 2 });
+    expect(JSON.parse(cursorOf(r2).value)).toMatchObject({ done: 2 });
   });
 
   it('fetch: a source with heavy hands off on a change, with the job kind, and downloads nothing', async () => {

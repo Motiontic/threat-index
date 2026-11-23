@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { fixture } from '../../../test/fixtures';
 import { check, fetch } from '../src/since';
 import { EXAMPLES, sourceWith } from './examples';
-import { makeCtx, NOW, reply, route } from './helpers';
+import { cursorOf, makeCtx, NOW, reply, route } from './helpers';
 
 const NVD = 'https://services.nvd.nist.gov/rest/json/cves/2.0';
 const NVD_RE = /^https:\/\/services\.nvd\.nist\.gov\/rest\/json\/cves\/2\.0\?/;
@@ -46,7 +46,7 @@ describe('since', () => {
     expect(await check(a.ctx)).toBe('changed');
     const b = makeCtx({ source, cursor: ts(NOW_ISO) });
     expect(await check(b.ctx)).toBe('unchanged');
-    expect((await fetch(b.ctx)).nextCursor.value).toBe(NOW_ISO);
+    expect((await fetch(b.ctx)).nextCursor?.value).toBe(NOW_ISO);
     expect(b.requests).toHaveLength(0);
   });
 
@@ -69,7 +69,7 @@ describe('since', () => {
     const r1 = await fetch(h.ctx);
     expect(r1.items.map((i) => i.id)).toEqual(['CVE-2025-5000', 'CVE-2025-5001']);
     expect(r1.more).toBe(true);
-    expect(JSON.parse(r1.nextCursor.value)).toEqual({ start: START, end: NOW_ISO, offset: 2 });
+    expect(JSON.parse(cursorOf(r1).value)).toEqual({ start: START, end: NOW_ISO, offset: 2 });
     expect(params(h.requests[0]?.url ?? '').resultsPerPage).toBe('40');
     // Each body is the document cut to one entry.
     const body = r1.items[0]?.body as { vulnerabilities: unknown[]; totalResults: number };
@@ -96,7 +96,7 @@ describe('since', () => {
     const b = makeCtx({ source, cursor: ts('2025-01-01T00:00:00.000Z'), routes: [route(NVD_RE, empty)] });
     const r = await fetch(b.ctx);
     // 120 days after 1 Jan is 1 May.
-    expect(r.nextCursor.value).toBe('2025-05-01T00:00:00.000Z');
+    expect(r.nextCursor?.value).toBe('2025-05-01T00:00:00.000Z');
     expect(r.more).toBe(true);
     expect(params(b.requests[0]?.url ?? '').lastModEndDate).toBe('2025-05-01T00:00:00.000Z');
   });
