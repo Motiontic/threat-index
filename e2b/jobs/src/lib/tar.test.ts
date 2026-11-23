@@ -86,4 +86,18 @@ describe('readTarGz', () => {
       read(makeTar([{ path: 'r/a.json', data: 'a'.repeat(4000) }]), { maxTotalBytes: 2048 }),
     ).rejects.toThrow('size limit');
   });
+
+  it('fails, rather than hangs, when the body errors partway through', async () => {
+    const gz = gzipSync(makeTar([{ path: 'r/a.json', data: 'a'.repeat(100000) }]));
+    let sent = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!sent) {
+          sent = true;
+          controller.enqueue(gz.subarray(0, 50));
+        } else controller.error(new Error('connection reset'));
+      },
+    });
+    await expect(readTarGz(body, async (e) => void (await e.text()))).rejects.toThrow();
+  }, 5000);
 });

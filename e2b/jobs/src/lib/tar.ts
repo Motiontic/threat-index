@@ -2,7 +2,7 @@
  * A streaming reader for gzipped tar archives (ustar, pax, GNU long names). Nothing is written to disk and
  * nothing is held beyond the entry being read.
  */
-import { Readable } from 'node:stream';
+import { pipeline, Readable } from 'node:stream';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { createGunzip } from 'node:zlib';
 
@@ -141,8 +141,9 @@ export async function readTarGz(
   const maxEntry = limits.maxEntryBytes ?? MAX_ENTRY_BYTES;
   const maxTotal = limits.maxTotalBytes ?? MAX_TOTAL_BYTES;
   const gunzip = createGunzip();
-  const source = Readable.fromWeb(body as unknown as WebReadableStream).pipe(gunzip);
-  source.on('error', () => {}); // surfaced through the iterator
+  const source = gunzip;
+  // pipeline() forwards a source error (reset, abort) to gunzip, so the iterator throws instead of hanging.
+  pipeline(Readable.fromWeb(body as unknown as WebReadableStream), gunzip, () => {});
   const r = new ByteReader(source as AsyncIterable<Buffer>, maxTotal);
   let files = 0;
   let skipped = 0;
