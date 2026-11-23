@@ -18,6 +18,9 @@ const files = ['apps/*/vitest.workers.mts', 'packages/*/vitest.workers.mts']
 
 export default defineConfig({
   test: {
+    // Off on purpose, same reason as vitest.config.ts: a cached transform of test/fixtures.ts hides
+    // fixture files added after the cache was written.
+    fsModuleCache: false,
     projects: await Promise.all(
       files.map(async (f) => (await import(new URL(f, `file://${root}`).href)).default),
     ),
