@@ -1,0 +1,208 @@
+{
+  "type": "bundle",
+  "id": "bundle--605de3ac-53fd-5ac4-8e2a-5298846423cc",
+  "objects": [
+    {
+      "type": "x-mitre-collection",
+      "spec_version": "2.1",
+      "id": "x-mitre-collection--7a735cfc-0469-5d8b-b11f-d014be33394e",
+      "created_by_ref": "identity--f1e3e4d7-42b2-5b41-bbee-ffa8f4a03996",
+      "created": "2020-10-23T00:00:00Z",
+      "modified": "2026-10-28T00:00:00Z",
+      "name": "ATLAS",
+      "description": "Adversarial Threat Landscape for AI Systems",
+      "x_mitre_attack_spec_version": "2.1.0",
+      "x_mitre_contents": [
+        {
+          "object_ref": "x-mitre-tactic--e78b4630-6ed6-5f22-9409-f6f4fcf4e78c",
+          "object_modified": "2025-10-13T00:00:00.000Z"
+        },
+        {
+          "object_ref": "x-mitre-tactic--06017740-23bb-5d05-b6d5-366ce7f5d783",
+          "object_modified": "2026-08-31T00:00:00.000Z"
+        },
+        {
+          "object_ref": "x-mitre-tactic--8d151547-7423-5bac-bc2d-a6fd02afba29",
+          "object_modified": "2025-04-09T00:00:00.000Z"
+        }
+      ],
+      "x_mitre_version": "2026.10"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--c02f812d-59cc-5366-b1aa-7eb05154b772",
+      "created": "2021-05-13T00:00:00.000Z",
+      "modified": "2026-09-15T00:00:00.000Z",
+      "name": "Search Open Technical Databases",
+      "description": "Adversaries may search for publicly available research and technical documentation to learn how and where AI is used within a victim organization. The adversary can use this information to identify targets for attack, or to tailor an existing attack to make it more effective. Organizations often use open source model architectures trained on additional proprietary data in production. Knowledge of this underlying architecture allows the adversary to craft more realistic proxy models ([Replicate AI Model Behavior](/techniques/AML.T0005)). An adversary can search these resources for publications for authors employed at the victim organization.\n\nResearch and technical materials may exist as academic papers published in [Journals and Conference Proceedings](/techniques/AML.T0000.000) or stored in [Pre-Print Repositories](/techniques/AML.T0000.001), as well as [Technical Blogs](/techniques/AML.T0000.002). Publicly accessible AI services may be identified via [Scan Databases](/techniques/AML.T0000.003).",
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-atlas",
+          "phase_name": "reconnaissance"
+        }
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-atlas",
+          "url": "https://atlas.mitre.org/techniques/AML.T0000",
+          "external_id": "AML.T0000"
+        },
+        {
+          "source_name": "mitre-attack",
+          "url": "https://attack.mitre.org/techniques/T1596/",
+          "external_id": "T1596"
+        }
+      ],
+      "x_mitre_domains": [
+        "ATLAS"
+      ],
+      "x_mitre_platforms": [
+        "Enterprise"
+      ]
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--518338b9-9239-5e02-95f5-146bc758520f",
+      "created": "2021-05-13T00:00:00.000Z",
+      "modified": "2026-05-27T00:00:00.000Z",
+      "name": "Journals and Conference Proceedings",
+      "description": "Many of the publications accepted at premier artificial intelligence conferences and journals come from commercial labs.\nSome journals and conferences are open access, others may require paying for access or a membership.\nThese publications will often describe in detail all aspects of a particular approach for reproducibility.\nThis information can be used by adversaries to implement the paper.",
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-atlas",
+          "phase_name": "reconnaissance"
+        }
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-atlas",
+          "url": "https://atlas.mitre.org/techniques/AML.T0000.000",
+          "external_id": "AML.T0000.000"
+        }
+      ],
+      "x_mitre_domains": [
+        "ATLAS"
+      ],
+      "x_mitre_is_subtechnique": true,
+      "x_mitre_platforms": [
+        "Enterprise"
+      ]
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--6ff098e9-2864-579e-bebb-a0f1c92ec772",
+      "created": "2023-10-25T00:00:00.000Z",
+      "modified": "2026-05-27T00:00:00.000Z",
+      "name": "LLM Prompt Injection",
+      "description": "An adversary may craft malicious prompts as inputs to an LLM that cause the LLM to act in unintended ways.\nThese \"prompt injections\" are often designed to cause the model to ignore aspects of its original instructions and follow the adversary's instructions instead.\n\nPrompt Injections can be an initial access vector to the LLM that provides the adversary with a foothold to carry out other steps in their operation.\nThey may be designed to bypass defenses in the LLM, or allow the adversary to issue privileged commands.\nThe effects of a prompt injection can persist throughout an interactive session with an LLM.\n\nMalicious prompts may be injected directly by the adversary ([Direct](/techniques/AML.T0051.000)) either to leverage the LLM to generate harmful content or to gain a foothold on the system and lead to further effects.\nPrompts may also be injected indirectly when the LLM, as part of its normal operation, ingests the malicious prompt from another data source ([Indirect](/techniques/AML.T0051.001)). This type of injection can be used by the adversary to gain a foothold on the system or to target the user of the LLM.\nMalicious prompts may also be [Triggered](/techniques/AML.T0051.002) by user actions or system events.",
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-atlas",
+          "phase_name": "execution"
+        }
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-atlas",
+          "url": "https://atlas.mitre.org/techniques/AML.T0051",
+          "external_id": "AML.T0051"
+        }
+      ],
+      "x_mitre_domains": [
+        "ATLAS"
+      ],
+      "x_mitre_platforms": [
+        "Generative AI",
+        "Agentic AI"
+      ]
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--073f16fc-c4c0-5351-8a22-9c77aaaab91f",
+      "created": "2023-10-25T00:00:00.000Z",
+      "modified": "2026-05-27T00:00:00.000Z",
+      "name": "Direct",
+      "description": "An adversary may inject prompts directly as a user of the LLM. This type of injection may be used by the adversary to gain a foothold in the system or to misuse the LLM itself, as for example to generate harmful content.",
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-atlas",
+          "phase_name": "execution"
+        }
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-atlas",
+          "url": "https://atlas.mitre.org/techniques/AML.T0051.000",
+          "external_id": "AML.T0051.000"
+        }
+      ],
+      "x_mitre_domains": [
+        "ATLAS"
+      ],
+      "x_mitre_is_subtechnique": true,
+      "x_mitre_platforms": [
+        "Generative AI",
+        "Agentic AI"
+      ]
+    },
+    {
+      "type": "x-mitre-tactic",
+      "spec_version": "2.1",
+      "id": "x-mitre-tactic--e78b4630-6ed6-5f22-9409-f6f4fcf4e78c",
+      "created": "2021-05-13T00:00:00.000Z",
+      "modified": "2025-10-13T00:00:00.000Z",
+      "name": "AI Model Access",
+      "description": "The adversary is attempting to gain some level of access to an AI model.\n\nAI Model Access enables techniques that use various types of access to the AI model that can be used by the adversary to gain information, develop attacks, and as a means to input data to the model.\nThe level of access can range from the full knowledge of the internals of the model to access to the physical environment where data is collected for use in the AI model.\nThe adversary may use varying levels of model access during the course of their attack, from staging the attack to impacting the target system.\n\nAccess to an AI model may require access to the system housing the model, the model may be publicly accessible via an API, or it may be accessed indirectly via interaction with a product or service that utilizes AI as part of its processes.",
+      "external_references": [
+        {
+          "source_name": "mitre-atlas",
+          "url": "https://atlas.mitre.org/tactics/AML.TA0000",
+          "external_id": "AML.TA0000"
+        }
+      ],
+      "x_mitre_domains": [
+        "ATLAS"
+      ],
+      "x_mitre_shortname": "ai-model-access"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--567ad82c-442b-594a-9a60-aa95b4e61013",
+      "created": "2021-05-13T00:00:00.000Z",
+      "modified": "2026-05-27T00:00:00.000Z",
+      "relationship_type": "subtechnique-of",
+      "source_ref": "attack-pattern--518338b9-9239-5e02-95f5-146bc758520f",
+      "target_ref": "attack-pattern--c02f812d-59cc-5366-b1aa-7eb05154b772"
+    },
+    {
+      "type": "course-of-action",
+      "spec_version": "2.1",
+      "id": "course-of-action--c35b59f9-60f8-5bd1-ad76-9cbb549a97ce",
+      "created": "2023-04-12T00:00:00.000Z",
+      "modified": "2026-07-31T00:00:00.000Z",
+      "name": "Limit Public Release of Information",
+      "description": "Limit the public release of technical information about the AI stack used in an organization's products or services. Technical knowledge of how AI is used can be leveraged by adversaries to perform targeting and tailor attacks to the target system. Additionally, consider limiting the release of organizational information - including physical locations, researcher names, and department structures - from which technical details such as AI techniques, model architectures, or datasets may be inferred.",
+      "external_references": [
+        {
+          "source_name": "mitre-atlas",
+          "url": "https://atlas.mitre.org/mitigations/AML.M0000",
+          "external_id": "AML.M0000"
+        }
+      ],
+      "x_mitre_domains": [
+        "ATLAS"
+      ]
+    },
+    {
+      "type": "x-example-new",
+      "id": "x-example-new--00000000-0000-4000-8000-000000000001",
+      "spec_version": "2.1",
+      "name": "hand-written"
+    }
+  ]
+}

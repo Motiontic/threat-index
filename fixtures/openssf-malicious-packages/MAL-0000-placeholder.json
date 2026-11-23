@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.7.4",
+  "id": "MAL-0000-example-0123456789abcdef",
+  "published": "2026-11-20T10:00:00Z",
+  "modified": "2026-11-20T10:00:00Z",
+  "summary": "Malicious code in example-placeholder-pkg (npm)",
+  "details": "Invented placeholder text for tests. A temporary file that is replaced once an id is allocated.",
+  "affected": [
+    { "package": { "ecosystem": "npm", "name": "example-placeholder-pkg" }, "versions": ["1.0.0"] }
+  ]
+}

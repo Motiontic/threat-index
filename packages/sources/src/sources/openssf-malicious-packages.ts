@@ -7,4 +7,15 @@ export default src(
   'git',
   '3h',
   'on',
+  {
+    credit: 'Source: OpenSSF Malicious Packages (Apache-2.0)',
+    parser: 'osv-malicious',
+    pull: {
+      git: {
+        repo: 'ossf/malicious-packages',
+        branch: 'main',
+        include: ['osv/malicious/**/*.json', 'osv/withdrawn/**/*.json'],
+      },
+    },
+  },
 );
