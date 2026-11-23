@@ -200,3 +200,19 @@ status lines. If a host is unreachable from the sandbox, say so in the PR; don't
    set `pull.jobKind: 'first-load'`.
 
 Re-run every acceptance check.
+
+## Changes from the second build of this branch
+
+The parsers are done; the final `pnpm build` failed on two flaky tests that are already on main. Fix both here
+(you may edit exactly these two test files and nothing else outside your area):
+
+1. `test/parser-load-errors.test.ts` writes temporary parser modules (`tmp-throws.ts` and others) into
+   `packages/parsers/src/` and deletes them, while other test files read that folder in parallel, so a
+   parallel run can hit `ENOENT`. Make it deterministic without changing what it proves: for example write the
+   temporary modules under a unique subfolder that no other test globs and point `loadParser` at it through
+   the existing loader seam, or run that file alone (`describe.sequential` is not enough across files; use a
+   unique folder). Run `pnpm test` five times in a row and show it passes each time.
+2. `apps/web/test/worker.test.ts` matches the CSP nonce with `/'nonce-[\w-]+/`, but the nonce is base64 and can
+   contain `+`, `/` and `=`, so it fails at random. Match `/'nonce-[A-Za-z0-9+/=_-]+'/` instead.
+
+Re-run every acceptance check.
