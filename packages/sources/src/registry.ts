@@ -1,4 +1,5 @@
 import type { LicenceStatus } from '@ti/core/licence';
+import type { PullConfig } from './pull';
 import aiaaic from './sources/aiaaic';
 import aiid from './sources/aiid';
 import avid from './sources/avid';
@@ -79,6 +80,8 @@ export interface SourceConfig {
   /** Name of the parser module in @ti/parsers (`@ti/parsers/<name>`). */
   parser?: string;
   rateLimit?: { perMinute: number };
+  /** How the source's pattern pulls it. Filled per source by later work. */
+  pull?: PullConfig;
 }
 
 // The `src()` helper lives in ./define so source files can use it without an import cycle.
