@@ -311,7 +311,7 @@ describe('logs', () => {
     await call('/v1/sources', { headers: h }, withRl({ RL_PUBLIC: limiter(false).rl }));
     await call('/unsubscribe?t=sekret-token-value', { headers: h });
     const lines = spies.flatMap((s) => s.mock.calls.map((c) => String(c[0])));
-    spies.forEach((s) => s.mockRestore());
+    for (const s of spies) s.mockRestore();
     expect(lines.length).toBeGreaterThan(4);
     for (const line of lines) {
       expect(line).not.toMatch(/example\.com|sekret|203\.0\.113|secretparam|\?/);

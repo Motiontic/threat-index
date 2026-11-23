@@ -152,7 +152,7 @@ describe('Worker: page limit, headers and request ids', () => {
   it('replaces a visitor x-request-id with a fresh one on the request and the response', async () => {
     handle.mockResolvedValue(new Response('ok'));
     const res = await page('/', { 'x-request-id': 'visitor-chosen-id', 'cf-connecting-ip': '203.0.113.9' });
-    const seen = (handle.mock.calls[0]?.[0] as Request).headers.get('x-request-id');
+    const seen = (handle.mock.calls[0]?.[0] as Request | undefined)?.headers.get('x-request-id') ?? null;
     expect(seen).not.toBe('visitor-chosen-id');
     expect(seen).toMatch(/^[0-9a-f-]{36}$/);
     expect(res.headers.get('x-request-id')).toBe(seen);
