@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.7.4",
+  "id": "MAL-2026-99999",
+  "published": "2026-11-01T08:00:00Z",
+  "modified": "2026-11-22T09:30:00Z",
+  "withdrawn": "2026-11-22T09:30:00Z",
+  "summary": "Malicious code in example-withdrawn-pkg (PyPI)",
+  "details": "Invented text for tests. This report was withdrawn after review found a false positive.",
+  "affected": [
+    { "package": { "ecosystem": "PyPI", "name": "example-withdrawn-pkg" }, "versions": ["0.1.0"] }
+  ]
+}
