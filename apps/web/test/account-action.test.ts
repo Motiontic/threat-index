@@ -32,8 +32,17 @@ function recorder(overrides: Partial<AccountClient> = {}) {
   return { client, calls };
 }
 
-function post(fields: Record<string, string>, headers: Record<string, string> = { Origin: ORIGIN }) {
-  return new Request(`${ORIGIN}/account/do`, { method: 'POST', headers, body: new URLSearchParams(fields) });
+function post(
+  fields: Record<string, string | undefined>,
+  headers: Record<string, string> = { Origin: ORIGIN },
+) {
+  return new Request(`${ORIGIN}/account/do`, {
+    method: 'POST',
+    headers,
+    body: new URLSearchParams(
+      Object.entries(fields).filter((e): e is [string, string] => e[1] !== undefined),
+    ),
+  });
 }
 const run = (req: Request, client: AccountClient | null) =>
   handleAccountAction(req, { getClient: async () => client });
@@ -42,8 +51,8 @@ describe('account/do guards', () => {
   it('rejects a foreign Origin with 403, a missing Origin with 403, before anything else', async () => {
     const { client, calls } = recorder();
     for (const headers of [
-      { Origin: 'https://evil.test' },
-      {},
+      { Origin: 'https://evil.test' } as Record<string, string>,
+      {} as Record<string, string>,
       { Origin: 'null' },
       { Origin: `${ORIGIN}.evil.test` },
     ]) {
