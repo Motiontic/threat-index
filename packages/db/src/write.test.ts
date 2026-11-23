@@ -1,4 +1,3 @@
-import { NotImplementedError } from '@ti/core/errors';
 import { describe, expect, it } from 'vitest';
 import { databasesFromEnv, writeRows } from './write';
 
@@ -25,6 +24,21 @@ describe('databasesFromEnv', () => {
   });
 });
 
-it('writeRows() is a stub until the loader feature fills it in', async () => {
-  await expect(writeRows({}, [], { priority: 'steady' })).rejects.toBeInstanceOf(NotImplementedError);
+describe('writeRows (no D1 needed)', () => {
+  it('returns at once for no rows, with no queries', async () => {
+    expect(await writeRows({}, [], { priority: 'steady' })).toEqual({
+      written: 0,
+      statements: 0,
+      deferred: false,
+    });
+  });
+  it('names a missing database before any I/O', async () => {
+    const rows = [
+      { table: 'changes', op: 'upsert' as const, row: { id: 'x', entity_key: 'k', kind: 'k', at: 't' } },
+    ];
+    await expect(writeRows({}, rows, { priority: 'steady' })).rejects.toThrow(/ti_control/);
+    await expect(writeRows({ ti_control: {} as D1Database }, rows, { priority: 'steady' })).rejects.toThrow(
+      /ti_signals/,
+    );
+  });
 });

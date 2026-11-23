@@ -10,29 +10,75 @@
   "workers_dev": false,
   "preview_urls": false,
   "d1_databases": [
-    { "binding": "DB_CONTROL", "database_name": "ti_control" },
-    { "binding": "DB_VULNS", "database_name": "ti_vulns" },
-    { "binding": "DB_ADVISORIES", "database_name": "ti_advisories" },
-    { "binding": "DB_SIGNALS", "database_name": "ti_signals" },
-    { "binding": "DB_WORLD", "database_name": "ti_world" }
+    {
+      "binding": "DB_CONTROL",
+      "database_name": "ti_control",
+      "migrations_dir": "../../packages/db/migrations/control"
+    },
+    {
+      "binding": "DB_VULNS",
+      "database_name": "ti_vulns",
+      "migrations_dir": "../../packages/db/migrations/vulns"
+    },
+    {
+      "binding": "DB_ADVISORIES",
+      "database_name": "ti_advisories",
+      "migrations_dir": "../../packages/db/migrations/advisories"
+    },
+    {
+      "binding": "DB_SIGNALS",
+      "database_name": "ti_signals",
+      "migrations_dir": "../../packages/db/migrations/signals"
+    },
+    {
+      "binding": "DB_WORLD",
+      "database_name": "ti_world",
+      "migrations_dir": "../../packages/db/migrations/world"
+    }
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
   "queues": {
-    "consumers": [{ "queue": "ti-load", "max_batch_size": 1, "max_retries": 10 }]
+    "producers": [{ "binding": "LOAD", "queue": "ti-load" }],
+    // One chunk per invocation bounds the work. max_concurrency caps parallel D1 writers: deferred
+    // chunks all wake just after midnight UTC.
+    "consumers": [{ "queue": "ti-load", "max_batch_size": 1, "max_retries": 10, "max_concurrency": 5 }]
   },
 
   "env": {
     "staging": {
       "d1_databases": [
-        { "binding": "DB_CONTROL", "database_name": "ti_control_staging" },
-        { "binding": "DB_VULNS", "database_name": "ti_vulns_staging" },
-        { "binding": "DB_ADVISORIES", "database_name": "ti_advisories_staging" },
-        { "binding": "DB_SIGNALS", "database_name": "ti_signals_staging" },
-        { "binding": "DB_WORLD", "database_name": "ti_world_staging" }
+        {
+          "binding": "DB_CONTROL",
+          "database_name": "ti_control_staging",
+          "migrations_dir": "../../packages/db/migrations/control"
+        },
+        {
+          "binding": "DB_VULNS",
+          "database_name": "ti_vulns_staging",
+          "migrations_dir": "../../packages/db/migrations/vulns"
+        },
+        {
+          "binding": "DB_ADVISORIES",
+          "database_name": "ti_advisories_staging",
+          "migrations_dir": "../../packages/db/migrations/advisories"
+        },
+        {
+          "binding": "DB_SIGNALS",
+          "database_name": "ti_signals_staging",
+          "migrations_dir": "../../packages/db/migrations/signals"
+        },
+        {
+          "binding": "DB_WORLD",
+          "database_name": "ti_world_staging",
+          "migrations_dir": "../../packages/db/migrations/world"
+        }
       ],
       "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index-staging" }],
       "queues": {
-        "consumers": [{ "queue": "ti-load-staging", "max_batch_size": 1, "max_retries": 10 }]
+        "producers": [{ "binding": "LOAD", "queue": "ti-load-staging" }],
+        "consumers": [
+          { "queue": "ti-load-staging", "max_batch_size": 1, "max_retries": 10, "max_concurrency": 5 }
+        ]
       }
     }
   }

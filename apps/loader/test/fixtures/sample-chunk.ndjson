@@ -1,0 +1,11 @@
+{"table": "vulns", "op": "upsert", "row": {"key": "CVE-2026-0001", "kind": "cve", "title": "Sample flaw", "summary": "s", "modified": "2026-11-01T00:00:00Z", "cvss": 9.8, "ransomware": true, "sources": ["nvd", "kev"]}}
+{"table": "advisories", "op": "upsert", "row": {"source": "nvd", "source_id": "CVE-2026-0001", "vuln_key": "CVE-2026-0001", "modified": "2026-11-01T00:00:00Z"}}
+{"table": "advisories", "op": "delete", "row": {"source": "nvd", "source_id": "CVE-2026-0000"}}
+{"table": "signals", "op": "upsert", "row": {"vuln_key": "CVE-2026-0001", "kind": "exploited_wild", "source": "kev", "ref": "kev", "first_seen": "2026-11-01"}}
+{"table": "changes", "op": "upsert", "row": {"id": "01J00000000000000000000001", "entity_key": "CVE-2026-0001", "kind": "newly_exploited", "at": "2026-11-01T00:00:00Z"}}
+{"table": "techniques", "op": "upsert", "row": {"id": "T1190", "framework": "attack", "name": "Exploit Public-Facing Application"}}
+{"table": "vuln_techniques", "op": "upsert", "row": {"vuln_key": "CVE-2026-0001", "technique_id": "T1190"}}
+{"table": "companies", "op": "upsert", "row": {"key": "acme", "name": "Acme Corp"}}
+{"table": "breach_notices", "op": "upsert", "row": {"source": "hhs", "notice_id": "n1", "raw_name": "Acme", "count": 100, "count_unit": "individuals", "modified": "2026-11-01T00:00:00Z"}}
+{"table": "breach_events", "op": "upsert", "row": {"key": "ev1", "first_seen": "2026-11-01", "modified": "2026-11-01T00:00:00Z"}}
+{"table": "incidents", "op": "upsert", "row": {"source": "aiid", "incident_id": "1", "kind": "ai", "title": "Sample incident", "modified": "2026-11-01T00:00:00Z"}}
