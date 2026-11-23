@@ -9,6 +9,8 @@ export const ROW_ORDER = [
   'advisories',
   'signals',
   'techniques',
+  'companies',
+  'breach_events',
   'breach_notices',
   'incidents',
   // Last, so a partly written batch never holds an alert without its data.
@@ -21,6 +23,8 @@ export const PRIMARY_KEYS: Record<LinkTable, readonly string[]> = {
   advisories: ['source', 'source_id'],
   signals: ['vuln_key', 'kind', 'source', 'ref'],
   techniques: ['id'],
+  companies: ['key'],
+  breach_events: ['key'],
   breach_notices: ['source', 'notice_id'],
   incidents: ['source', 'incident_id'],
   changes: ['id'],
@@ -55,6 +59,17 @@ export const COLUMNS: Record<LinkTable, readonly string[]> = {
   advisories: ['source', 'source_id', 'vuln_key', 'status', 'published', 'modified', 'url', 'licence'],
   signals: ['vuln_key', 'kind', 'source', 'ref', 'first_seen', 'evidence_date', 'url'],
   techniques: ['id', 'framework', 'name', 'parent', 'summary'],
+  companies: ['key', 'name', 'cik', 'domain', 'ticker', 'sector', 'aliases'],
+  breach_events: [
+    'key',
+    'company_key',
+    'first_seen',
+    'dates',
+    'counts_by_unit',
+    'notice_count',
+    'confidence',
+    'modified',
+  ],
   breach_notices: [
     'source',
     'notice_id',
@@ -71,6 +86,7 @@ export const COLUMNS: Record<LinkTable, readonly string[]> = {
     'url',
     'event_key',
     'modified',
+    'name_key',
   ],
   incidents: [
     'source',

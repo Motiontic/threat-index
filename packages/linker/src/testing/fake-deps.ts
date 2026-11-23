@@ -9,6 +9,8 @@ const REQUIRED: Record<LinkTable, readonly string[]> = {
   advisories: ['source', 'source_id', 'status', 'modified'],
   signals: ['vuln_key', 'kind', 'source', 'ref', 'first_seen'],
   techniques: ['id', 'framework', 'name'],
+  companies: ['key', 'name'],
+  breach_events: ['key', 'first_seen', 'modified'],
   breach_notices: ['source', 'notice_id', 'raw_name', 'count_unit', 'modified'],
   incidents: ['source', 'incident_id', 'kind', 'title', 'modified'],
   changes: ['id', 'entity_key', 'kind', 'at'],

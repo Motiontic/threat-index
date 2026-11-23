@@ -319,13 +319,20 @@ it('(k) notices with and without a company key; unchanged incidents and techniqu
   const out = await link(input, f.deps);
   expect(tables(out.rows)).toEqual([
     'techniques',
+    'companies',
+    'companies',
+    'breach_events',
+    'breach_events',
     'breach_notices',
     'breach_notices',
     'incidents',
     'changes',
+    'changes',
   ]);
+  // `companyKey: 'acme'` is not a hint (no cik:/domain: prefix), so both notices are matched by name
   expect(changes(out.rows)).toMatchObject([
-    { kind: 'breach_notice', entity_key: 'acme', new: 'ca-ag:n1', source: 'ca-ag' },
+    { kind: 'breach_notice', entity_key: 'name:acme:xx', new: 'ca-ag:n1', source: 'ca-ag' },
+    { kind: 'breach_notice', entity_key: 'name:nobody:xx', new: 'ca-ag:n2', source: 'ca-ag' },
   ]);
   expect(out.rows.find((r) => r.table === 'incidents')?.row).toMatchObject({
     entities: '["a","b"]',
@@ -334,8 +341,8 @@ it('(k) notices with and without a company key; unchanged incidents and techniqu
   });
   expect(out.rows.filter((r) => r.table === 'breach_notices')[1]?.row).toMatchObject({
     count: null,
-    company_key: null,
-    event_key: null,
+    company_key: 'name:nobody:xx',
+    name_key: 'nobody',
   });
   expect(out.docs).toEqual([]);
   f.apply(out.rows);
@@ -354,17 +361,17 @@ it('(k) notices with and without a company key; unchanged incidents and techniqu
     ],
     f.deps,
   );
-  expect(again.rows[0]?.row).toMatchObject({
+  expect(again.rows.find((r) => r.table === 'breach_notices')?.row).toMatchObject({
     event_key: 'ev1',
-    company_key: 'acme',
+    company_key: 'name:acme:xx',
     count: 99,
     raw_name: 'Acme Incorporated',
   });
-  expect(again.rows[1]?.row).toMatchObject({ gated: 1, title: 'T2' });
+  expect(again.rows.find((r) => r.table === 'incidents')?.row).toMatchObject({ gated: 1, title: 'T2' });
   expect(changes(again.rows)).toEqual([]);
 });
 
-it('(l) each table is read at most once: advisories, then vulns, then signals', async () => {
+it('(l) each table is read at most once (breach_notices three times): advisories, then vulns, then signals', async () => {
   const f = makeFake();
   f.put('vulns', vulnRow(CVE));
   await link(
@@ -380,12 +387,17 @@ it('(l) each table is read at most once: advisories, then vulns, then signals', 
     f.deps,
   );
   const seen = f.reads.map((r) => r.table);
-  expect(new Set(seen).size).toBe(seen.length);
+  // breach_notices: by key, by name_key, by company_key; every other table once
+  expect(seen.filter((t) => t === 'breach_notices')).toHaveLength(3);
+  expect(new Set(seen).size).toBe(seen.length - 2);
   expect(seen.indexOf('advisories')).toBeLessThan(seen.indexOf('vulns'));
   expect(seen.indexOf('vulns')).toBeLessThan(seen.indexOf('signals'));
   expect(seen.sort()).toEqual([
     'advisories',
     'breach_notices',
+    'breach_notices',
+    'breach_notices',
+    'companies',
     'incidents',
     'signals',
     'techniques',
@@ -396,6 +408,11 @@ it('(l) each table is read at most once: advisories, then vulns, then signals', 
     source: 'alias',
     source_id: GHSA,
   });
+  expect(f.reads.filter((r) => r.table === 'breach_notices').map((r) => r.keys)).toEqual([
+    [{ source: 'ca-ag', notice_id: 'n1' }],
+    [{ name_key: 'a' }],
+    [{ company_key: 'name:a:xx' }],
+  ]);
   expect(f.reads.find((r) => r.table === 'signals')?.keys).toEqual([
     { vuln_key: CVE, kind: 'exploited_wild', source: 'cisa-kev', ref: CVE },
   ]);
@@ -452,6 +469,8 @@ it('rows follow ROW_ORDER with changes last', async () => {
     'advisories',
     'advisories',
     'signals',
+    'companies',
+    'breach_events',
     'breach_notices',
     'changes',
     'changes',

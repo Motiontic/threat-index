@@ -10,6 +10,7 @@ import type {
   TechniqueRecord,
   VulnRecord,
 } from '@ti/core/types';
+import { linkNotices, noticeOut } from './breach';
 import { noticeChange, vulnChanges } from './changes';
 import { differs, isoDate, text } from './clean';
 import { isHot } from './detect';
@@ -18,7 +19,6 @@ import { candidateIds, type HubRecord, resolveHubs } from './hubs';
 import { recordKind } from './kinds';
 import { advisoryRow, aliasRow } from './map/advisory';
 import { incidentRow } from './map/incident';
-import { noticeRow } from './map/notice';
 import { applySignal, signalRow } from './map/signal';
 import { techniqueRow } from './map/technique';
 import { applyVuln } from './map/vuln';
@@ -38,8 +38,10 @@ import {
 export interface LinkDeps {
   /**
    * Current rows for these keys, for alias lookups and change detection. Each key is an object of the
-   * table's primary-key columns, using the real column names. The linker calls this at most once per
-   * table per link(); the implementation splits the keys into as many queries as D1's bound-parameter
+   * columns of one index (the primary key, or `name_key` / `company_key` on `breach_notices`), using the
+   * real column names; all keys in one call share the same columns. The linker calls this at most once
+   * per table per link(), except `breach_notices`: at most three times (by primary key, by `name_key`,
+   * by `company_key`). The implementation splits the keys into as many queries as D1's bound-parameter
    * limit needs.
    */
   read(table: string, keys: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
@@ -61,7 +63,7 @@ export interface LinkResult {
   skipped: number;
 }
 
-interface Item<T> {
+export interface Item<T> {
   idx: number;
   r: T;
 }
@@ -221,6 +223,8 @@ export async function link(records: ParsedRecord[], deps: LinkDeps): Promise<Lin
     advisories: [],
     signals: [],
     techniques: [],
+    companies: [],
+    breach_events: [],
     breach_notices: [],
     incidents: [],
     changes: [],
@@ -343,15 +347,24 @@ export async function link(records: ParsedRecord[], deps: LinkDeps): Promise<Lin
 
   // 5. World records: always hot, first record per key wins.
   const seen = new Set<string>();
-  for (const { idx, r } of notices) {
-    const pk = pkOf('breach_notices', { source: r.source, notice_id: r.noticeId });
-    if (seen.has(`n${pk}`)) continue;
-    seen.add(`n${pk}`);
-    const prior = noticeStored.get(pk);
-    const row = noticeRow(r, prior, at);
-    if (row) upsert('breach_notices', idx, row);
-    const change = noticeChange(r, prior, at, deps.newId);
-    if (change) upsert('changes', idx, change);
+  const matched = await linkNotices(notices, deps, at, noticeStored);
+  const firstIdx = (pick: (l: (typeof matched.notices)[number]) => string | null): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const l of matched.notices) {
+      const key = pick(l);
+      if (key !== null && !m.has(key)) m.set(key, l.idx);
+    }
+    return m;
+  };
+  const companyIdx = firstIdx((l) => l.companyKey);
+  const eventIdx = firstIdx((l) => l.eventKey);
+  for (const row of matched.companies) upsert('companies', companyIdx.get(row.key as string) ?? 0, row);
+  for (const row of matched.events) upsert('breach_events', eventIdx.get(row.key as string) ?? 0, row);
+  for (const l of matched.notices) {
+    const out = noticeOut(l, at);
+    if (out.changed) upsert('breach_notices', l.idx, out.row);
+    const change = noticeChange({ ...l.r, companyKey: l.companyKey ?? undefined }, l.stored, at, deps.newId);
+    if (change) upsert('changes', l.idx, change);
   }
   for (const { idx, r } of incidents) {
     const pk = pkOf('incidents', { source: r.source, incident_id: r.incidentId });

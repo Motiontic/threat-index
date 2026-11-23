@@ -75,6 +75,13 @@ function parseTables(
     }
     out.set(name, { cols, pk, checks });
   }
+  // Later migrations add columns with ALTER TABLE ... ADD COLUMN, in file order.
+  for (const m of clean.matchAll(/ALTER TABLE (\w+) ADD COLUMN (\w+)([^;]*);/g)) {
+    const [, name, col, rest] = m as unknown as [string, string, string, string];
+    const t = out.get(name);
+    if (!t) throw new Error(`ALTER TABLE on unknown table ${name}`);
+    t.cols.push({ name: col, required: /NOT NULL/.test(rest) && !/DEFAULT/.test(rest) });
+  }
   return out;
 }
 
