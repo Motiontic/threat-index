@@ -2,7 +2,7 @@ import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlit
 
 /**
  * ti_users: single-user accounts (Clerk user ID is the key; no organisations)
- * Mirrors migrations/users/0001_init.sql. The SQL is the source of truth; every table there is
+ * Mirrors migrations/users/0001_init.sql and 0002_account_settings.sql. The SQL is the source of truth; every table there is
  * WITHOUT ROWID, and CHECK constraints are not modelled. A Workers test compares these columns to
  * PRAGMA table_info.
  */
@@ -19,6 +19,9 @@ export const users = sqliteTable('users', {
   digestWeekday: integer('digest_weekday').notNull().default(1),
   emailSuppressed: integer('email_suppressed').notNull().default(0),
   deletedAt: text('deleted_at'),
+  displayName: text('display_name'),
+  alertInstant: integer('alert_instant').notNull().default(0),
+  digest: text('digest').notNull().default('daily'),
 });
 
 export const watch = sqliteTable(
@@ -40,6 +43,8 @@ export const savedSearches = sqliteTable(
     label: text('label').notNull(),
     query: text('query').notNull(),
     createdAt: text('created_at').notNull(),
+    params: text('params').notNull().default('{}'),
+    alertsOn: integer('alerts_on').notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.userId, t.id] })],
 );
