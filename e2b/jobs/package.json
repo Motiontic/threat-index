@@ -5,7 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
-    "job": "node --experimental-strip-types src/run.ts",
+    "job": "node build.mjs && node dist/run.mjs",
     "bundle": "node build.mjs",
     "round-trip": "node --experimental-strip-types src/round-trip.ts",
     "start-job": "node --experimental-strip-types src/start-job.ts"

@@ -81,35 +81,30 @@ describe('createJobApi', () => {
     await expect(api.complete({ ok: true })).rejects.toThrow(/status 401/);
     expect(seen).toHaveLength(1);
   });
-  it('asks for URLs 50 at a time', async () => {
+  it('asks for presigned URLs 50 at a time', async () => {
     const { seen, fetchFn } = fakeApi();
     const api = createJobApi(await mkJob(), { fetch: fetchFn, sleep: noSleep });
-    const files = Array.from({ length: 120 }, (_, i) => ({
-      key: `jobs/${ID}/${i}`,
-      body: 'x',
-      contentType: 'text/plain',
-    }));
-    await api.upload(files);
+    const keys = Array.from({ length: 120 }, (_, i) => `jobs/${ID}/${i}`);
+    expect(await api.uploadUrls(keys)).toHaveLength(120);
     const asks = seen
       .filter((s) => s.url.endsWith('/upload-urls'))
       .map((s) => JSON.parse(s.body).keys.length);
     expect(asks).toEqual([50, 50, 20]);
-    expect(seen.filter((s) => s.method === 'PUT')).toHaveLength(120);
   });
-  it('throws on a non-2xx PUT or a missing key, without the URL in the message', async () => {
+  it('throws on a missing presigned key, and on a refused or failing PUT without the key in the message', async () => {
+    const missing = fakeApi((_n, s) =>
+      s.url.endsWith('/upload-urls') ? Response.json({ urls: [] }) : undefined,
+    );
+    await expect(
+      createJobApi(await mkJob(), { fetch: missing.fetchFn, sleep: noSleep }).uploadUrls([`jobs/${ID}/a`]),
+    ).rejects.toThrow(/missing a key/);
     const put500 = fakeApi((_n, s) => (s.method === 'PUT' ? new Response('x', { status: 500 }) : undefined));
     const f = [{ key: `jobs/${ID}/a`, body: 'x', contentType: 'text/plain' }];
     const err = await createJobApi(await mkJob(), { fetch: put500.fetchFn, sleep: noSleep })
       .upload(f)
       .catch((e: Error) => e);
     expect((err as Error).message).toMatch(/status 500/);
-    expect((err as Error).message).not.toContain('SECRETSIG');
-    const missing = fakeApi((_n, s) =>
-      s.url.endsWith('/upload-urls') ? Response.json({ urls: [] }) : undefined,
-    );
-    await expect(
-      createJobApi(await mkJob(), { fetch: missing.fetchFn, sleep: noSleep }).upload(f),
-    ).rejects.toThrow(/missing a key/);
+    expect((err as Error).message).not.toContain(`jobs/${ID}/a`);
   });
 });
 
@@ -122,8 +117,8 @@ describe('echo and main', () => {
     expect(code).toBe(0);
     const puts = seen.filter((s) => s.method === 'PUT');
     expect(puts.map((p) => new URL(p.url).pathname)).toEqual([
-      `/jobs/${ID}/echo.json`,
-      `/inbox/${ID}/manifest.json`,
+      `/internal/jobs/${ID}/objects/jobs/${ID}/echo.json`,
+      `/internal/jobs/${ID}/objects/inbox/${ID}/manifest.json`,
     ]);
     expect(JSON.parse((puts[0] as Seen).body)).toMatchObject({ id: ID, kind: 'echo', node: process.version });
     expect(JSON.parse((puts[1] as Seen).body)).toMatchObject({ jobId: ID, chunks: [] });

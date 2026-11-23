@@ -17,6 +17,10 @@ RUN curl -fsSL -o /tmp/duckdb.tar.gz \
  && echo "${DUCKDB_SHA256}  /tmp/duckdb.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/duckdb.tar.gz -C /usr/local/bin duckdb \
  && rm /tmp/duckdb.tar.gz
+RUN duckdb --version
+
+# Heavy jobs hold a day of EPSS scores or a first load in memory; the template has 4 GB.
+ENV NODE_OPTIONS=--max-old-space-size=3072
 
 WORKDIR /app
 # The jobs bundle (dist/run.mjs, built by `pnpm --filter @ti/e2b-jobs bundle`).
