@@ -15,27 +15,42 @@ route.post('/webhooks/clerk', async (c) => {
   }
   const now = new Date().toISOString();
   const svixId = c.req.header('svix-id') ?? `${evt.type}:${now}`;
-  const fresh = await c.env.DB_USERS.prepare(
-    'INSERT INTO webhook_events (id, source, received_at) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO NOTHING',
-  )
-    .bind(svixId, 'clerk', now)
-    .run();
-  if ((fresh.meta.changes ?? 0) === 0) return c.text('OK'); // retried delivery, already handled
+  const seen = await c.env.DB_USERS.prepare('SELECT 1 AS x FROM webhook_events WHERE id = ?1')
+    .bind(svixId)
+    .first();
+  if (seen) return c.text('OK'); // retried delivery, already handled
 
+  // Handle first, then record the id: a failed handler must not make Clerk's retry look like a duplicate.
+  // Handlers are idempotent, so two concurrent deliveries of one event are harmless.
+  try {
+    await handle(c.env.DB_USERS, evt, now);
+    await c.env.DB_USERS.prepare(
+      'INSERT INTO webhook_events (id, source, received_at) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO NOTHING',
+    )
+      .bind(svixId, 'clerk', now)
+      .run();
+  } catch {
+    console.error('clerk webhook handler failed', evt.type);
+    return c.text('Handler failed', 500);
+  }
+  return c.text('OK');
+});
+
+async function handle(db: D1Database, evt: Awaited<ReturnType<typeof verifySvix>>, now: string) {
   if (evt.type === 'user.created' || evt.type === 'user.updated') {
     const d = evt.data;
     const primary =
       d.email_addresses.find((e) => e.id === d.primary_email_address_id) ?? d.email_addresses[0];
     const name = [d.first_name, d.last_name].filter(Boolean).join(' ') || null;
-    await c.env.DB_USERS.prepare(
-      `INSERT INTO users (id, email, name, created_at, digest_weekday) VALUES (?1, ?2, ?3, ?4, ?5)
+    await db
+      .prepare(
+        `INSERT INTO users (id, email, name, created_at, digest_weekday) VALUES (?1, ?2, ?3, ?4, ?5)
        ON CONFLICT(id) DO UPDATE SET email = excluded.email, name = excluded.name`,
-    )
+      )
       .bind(d.id, primary?.email_address ?? '', name, now, new Date().getUTCDay())
       .run();
   }
-  if (evt.type === 'user.deleted' && evt.data.id) await deleteUserData(c.env.DB_USERS, evt.data.id);
-  return c.text('OK');
-});
+  if (evt.type === 'user.deleted' && evt.data.id) await deleteUserData(db, evt.data.id);
+}
 
 export default route;
