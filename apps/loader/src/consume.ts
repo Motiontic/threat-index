@@ -1,6 +1,6 @@
 import { inboxChunkKey, type LoadMessage, MAX_ROWS_PER_CHUNK } from '@ti/core/inbox';
 import { RowValidationError, WriteLimitError } from '@ti/db/plan';
-import { databasesFromEnv, writeRows } from '@ti/db/write';
+import { DataWriteError, databasesFromEnv, writeRows } from '@ti/db/write';
 import { CorruptChunkError, readChunk } from './chunk';
 import { deferDelaySeconds, LOADER_MAX_RETRIES, retryDelaySeconds } from './delays';
 import { recordLoadFailure } from './failure';
@@ -42,7 +42,10 @@ function checkBody(body: unknown): LoadMessage | undefined {
 function corruptReason(err: unknown): string | undefined {
   if (err instanceof CorruptChunkError || err instanceof RowValidationError || err instanceof WriteLimitError)
     return err.message;
-  const text = err instanceof Error ? err.message : '';
+  // Only a data-row statement can say the rows are bad; a constraint error from the budget or control
+  // statements is a fault in our own bookkeeping and is retried.
+  if (!(err instanceof DataWriteError)) return undefined;
+  const text = err.message;
   const at = text.indexOf('constraint failed');
   // SQLite names the constraint, never the value.
   if (at !== -1) return text.slice(Math.max(0, at - 12), at + 200);
@@ -108,6 +111,8 @@ async function handleError(
 ): Promise<void> {
   const { jobId, chunkKey } = body;
   const corrupt = corruptReason(err);
+  const lastDelivery = msg.attempts > LOADER_MAX_RETRIES;
+  const reason = corrupt ?? (err instanceof Error ? `${err.name}: ${err.message}` : 'unknown error');
   if (corrupt !== undefined) {
     try {
       await recordLoadFailure(env.DB_CONTROL, jobId, `${chunkKey}: ${corrupt}`, now);
@@ -115,15 +120,21 @@ async function handleError(
       msg.ack(); // keep the chunk in R2 for inspection; no retry
       return;
     } catch (recordErr) {
-      // Couldn't record it: fall through and retry, so the failure isn't lost.
+      if (lastDelivery) {
+        // The message is gone after this; leave a record in the log at least.
+        log('load_failed', { jobId, chunkKey, reason: corrupt, recordError: String(recordErr) });
+        msg.ack();
+        return;
+      }
+      // Couldn't record it: retry, so the failure isn't lost.
       log('load_retry', { jobId, chunkKey, reason: 'could not record failure', error: String(recordErr) });
       msg.retry({ delaySeconds: retryDelaySeconds(msg.attempts) });
       return;
     }
   }
-  const reason = err instanceof Error ? `${err.name}: ${err.message}` : 'unknown error';
-  if (msg.attempts > LOADER_MAX_RETRIES) {
+  if (lastDelivery) {
     // Last delivery and no dead-letter queue: after this the message is gone.
+    let recordError: string | undefined;
     try {
       await recordLoadFailure(
         env.DB_CONTROL,
@@ -132,9 +143,14 @@ async function handleError(
         now,
       );
     } catch (recordErr) {
-      log('load_failed', { jobId, chunkKey, reason: 'could not record failure', error: String(recordErr) });
+      recordError = String(recordErr);
     }
-    log('load_failed', { jobId, chunkKey, reason: `gave up after ${msg.attempts} tries`, error: reason });
+    log('load_failed', {
+      jobId,
+      chunkKey,
+      reason: `gave up after ${msg.attempts} tries: ${reason}`,
+      ...(recordError ? { recordError } : {}),
+    });
     msg.ack();
     return;
   }

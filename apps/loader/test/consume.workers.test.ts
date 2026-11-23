@@ -392,6 +392,75 @@ describe('transient errors', () => {
     expect(await exists(KEY)).toBe(true);
   });
 
+  it('an R2 body that errors partway is retried, not marked corrupt', async () => {
+    const data = await gz(sample);
+    const failing = {
+      get: async () => ({
+        size: data.byteLength,
+        body: new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(data.subarray(0, 10));
+          },
+          pull(c) {
+            c.error(new Error('R2 connection reset'));
+          },
+        }),
+      }),
+    } as unknown as R2Bucket;
+    const { m } = await run(body(), { env: { BUCKET: failing } });
+    expect(m.ack).not.toHaveBeenCalled();
+    expect(m.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
+    expect((await job())?.status).toBe('running');
+    expect(hasEvent('load_retry')).toBe(true);
+    expect(hasEvent('load_failed')).toBe(false);
+  });
+
+  it('a constraint error from the budget statements is retried, not corrupt', async () => {
+    await put(KEY, await gz(sample));
+    const control = {
+      prepare: () => {
+        throw new Error('CHECK constraint failed: budget');
+      },
+    } as unknown as D1Database;
+    const { m } = await run(body(), { env: { DB_CONTROL: control } });
+    expect(m.ack).not.toHaveBeenCalled();
+    expect(m.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
+    expect(hasEvent('load_failed')).toBe(false);
+    expect(await exists(KEY)).toBe(true);
+  });
+
+  it('on the last delivery, if the failure cannot be recorded, it is still logged', async () => {
+    await put(KEY, await gz(sample));
+    const control = {
+      prepare: () => {
+        throw new Error('control down');
+      },
+    } as unknown as D1Database;
+    // Transient error: DB_VULNS is down, and so is the control DB.
+    const { m } = await run(body(), { attempts: 11, env: { DB_VULNS: broken, DB_CONTROL: control } });
+    expect(m.retry).not.toHaveBeenCalled();
+    expect(m.ack).toHaveBeenCalledOnce();
+    const failed = logs.map((l) => JSON.parse(l)).find((x) => x.event === 'load_failed');
+    expect(failed.chunkKey).toBe(KEY);
+    expect(failed.reason).toMatch(/gave up after 11 tries/);
+    expect(failed.recordError).toMatch(/control down/);
+  });
+
+  it('on the last delivery of a corrupt chunk, an unrecordable failure is still logged', async () => {
+    await put(KEY, 'junk');
+    const control = {
+      prepare: () => {
+        throw new Error('control down');
+      },
+    } as unknown as D1Database;
+    const { m } = await run(body(), { attempts: 11, env: { DB_CONTROL: control } });
+    expect(m.retry).not.toHaveBeenCalled();
+    expect(m.ack).toHaveBeenCalledOnce();
+    const failed = logs.map((l) => JSON.parse(l)).find((x) => x.event === 'load_failed');
+    expect(failed.chunkKey).toBe(KEY);
+    expect(failed.reason).toMatch(/not valid gzip/);
+  });
+
   it('a first-load retry gives its reservation back', async () => {
     await put(KEY, await gz(sample));
     await run(body({ priority: 'first-load' }), { env: { DB_VULNS: broken } });

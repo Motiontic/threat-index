@@ -12,8 +12,32 @@ export class CorruptChunkError extends Error {
   }
 }
 
+/** The R2 body stream failed (not the data in it). Retryable, unlike CorruptChunkError. */
+export class ChunkReadError extends Error {
+  constructor(cause: unknown) {
+    super(`R2 body read failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'ChunkReadError';
+  }
+}
+
 async function gunzip(body: ReadableStream<Uint8Array>): Promise<Uint8Array> {
-  const reader = body.pipeThrough(new DecompressionStream('gzip')).getReader();
+  // Wrap the source so an error from R2 itself can be told apart from a gzip format error.
+  const source = body.getReader();
+  let sourceError: { error: unknown } | undefined;
+  const tagged = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const r = await source.read();
+        if (r.done) controller.close();
+        else controller.enqueue(r.value);
+      } catch (error) {
+        sourceError = { error };
+        controller.error(error);
+      }
+    },
+    cancel: (reason) => source.cancel(reason),
+  });
+  const reader = tagged.pipeThrough(new DecompressionStream('gzip')).getReader();
   const parts: Uint8Array[] = [];
   let total = 0;
   try {
@@ -29,6 +53,7 @@ async function gunzip(body: ReadableStream<Uint8Array>): Promise<Uint8Array> {
     }
   } catch (err) {
     if (err instanceof CorruptChunkError) throw err;
+    if (sourceError) throw new ChunkReadError(sourceError.error);
     throw new CorruptChunkError('not valid gzip');
   }
   const all = new Uint8Array(total);

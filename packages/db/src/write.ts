@@ -25,6 +25,14 @@ export function databasesFromEnv(env: Record<string, unknown>): DatabaseMap {
   return map;
 }
 
+/** A data-row statement failed in D1. Budget and control statements throw their own errors, not this one. */
+export class DataWriteError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'DataWriteError';
+  }
+}
+
 export interface WriteResult {
   written: number;
   statements: number;
@@ -67,7 +75,12 @@ export async function writeRows(
       const db = dbs[name];
       const stmts = plan.statements.filter((s) => s.db === name);
       if (!db || stmts.length === 0) continue;
-      const results = await db.batch(stmts.map((s) => db.prepare(s.sql).bind(...s.params)));
+      let results: D1Result[];
+      try {
+        results = await db.batch(stmts.map((s) => db.prepare(s.sql).bind(...s.params)));
+      } catch (err) {
+        throw new DataWriteError(err);
+      }
       for (const r of results) written += r.meta.changes ?? 0;
     }
   } catch (err) {
