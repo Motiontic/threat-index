@@ -1,0 +1,10 @@
+CVE,Vendor,Product,Type,Description,Date Discovered,Date Patched,Advisory,Analysis URL,Root Cause Analysis,Reported By
+CVE-2026-125350,Google,Chrome,Memory Corruption,Use after free in XML,???,2026-11-09,https://chromereleases.googleblog.com/2026/11/stable-channel-update-for-desktop_018223192.html,???,,Anonymous
+CVE-2026-96951,Microsoft,Windows,Feature Bypass,Windows Shell Security Feature Bypass Vulnerability,???,2026-10-13,https://msrc.microsoft.com/update-guide/vulnerability/CVE-2026-96951,???,,"Riku Bamba and Yuya Chudo with Fujitsu Limited, Benoit Sevens using Claude with Anthropic, yhw"
+CVE-2024-53197,Google,Android,Memory Corruption,OOB free in ALSA USB,2024-11-20,2025-04-01,https://source.android.com/docs/security/bulletin/2025-04-01,https://securitylab.amnesty.org/latest/2025/02/cellebrite-zero-day-exploit-used-to-target-phone-of-serbian-student-activist/,???,Benoît Sevens of Google's Threat Analysis Group
+CVE-2022-26485,Mozilla,Firefox,Memory Corruption,Use-after-free inXSLT parameter processing,??? ,2022-03-05,https://www.mozilla.org/en-US/security/advisories/mfsa2022-09/,???,???,"Wang Gang, Liu Jialei, Du Sihang, Huang Yi & Yang Kang of 360 ATA"
+CVE-2024-7262,Kingsoft,WPS Office,Logic Error,Improper path validation,2024-02-29,,https://www.wps.com/whatsnew/pc/20240422/,https://www.welivesecurity.com/en/eset-research/analysis-of-two-arbitrary-code-execution-vulnerabilities-affecting-wps-office/,,
+-,,,,,,,,,,
+,,,,,,,,,,
+,,,,,,,,,,
+,,,,,,,,,,

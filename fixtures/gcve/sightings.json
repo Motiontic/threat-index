@@ -1,0 +1,69 @@
+{
+  "metadata": {
+    "count": 75630,
+    "page": 1,
+    "per_page": 3
+  },
+  "data": [
+    {
+      "uuid": "b4d50577-798c-4495-8b16-a12ed8cdf386",
+      "vulnerability_lookup_origin": "405284c2-e461-4670-8979-7fd2c9755a60",
+      "creation_timestamp": "2026-11-23T21:00:02.969073+00:00",
+      "type": "exploited",
+      "source": "https://db.gcve.eu/known-exploited-vulnerabilities-catalog/e720a52c-ae39-4ed7-a22c-ea67dbe6b0fb",
+      "content": "",
+      "vulnerability": "CVE-2026-134624",
+      "author": {
+        "login": "cedric"
+      }
+    },
+    {
+      "uuid": "39875cda-3728-4280-b44b-806b130976af",
+      "vulnerability_lookup_origin": "405284c2-e461-4670-8979-7fd2c9755a60",
+      "creation_timestamp": "2026-11-23T21:00:02.873617+00:00",
+      "type": "exploited",
+      "source": "https://db.gcve.eu/known-exploited-vulnerabilities-catalog/103ff074-af80-410e-ba0f-967a09b9b3ab",
+      "content": "",
+      "vulnerability": "CVE-2026-133968",
+      "author": {
+        "login": "cedric"
+      }
+    },
+    {
+      "uuid": "3a7171a3-99bd-4d0d-b816-fd2adfc7e771",
+      "vulnerability_lookup_origin": "caeb2787-0d58-4236-9039-7c86c3e566f3",
+      "creation_timestamp": "2026-11-23T11:00:40.700522+00:00",
+      "type": "exploited",
+      "source": "https://db.gcve.eu/known-exploited-vulnerabilities-catalog/9c1692ed-701c-4533-b639-22eb2a4f2e4d",
+      "content": "",
+      "vulnerability": "CVE-2024-33939",
+      "author": {
+        "login": "cedric"
+      }
+    },
+    {
+      "uuid": "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f",
+      "vulnerability_lookup_origin": "405284c2-e461-4670-8979-7fd2c9755a60",
+      "creation_timestamp": "2026-11-22T09:15:30.123456+00:00",
+      "type": "published-proof-of-concept",
+      "source": "https://github.com/example-org/poc-CVE-2026-134624",
+      "content": "",
+      "vulnerability": "CVE-2026-134624",
+      "author": {
+        "login": "cedric"
+      }
+    },
+    {
+      "uuid": "7a2d3e4f-5b6c-4d7e-9f80-1b2c3d4e5f60",
+      "vulnerability_lookup_origin": "405284c2-e461-4670-8979-7fd2c9755a60",
+      "creation_timestamp": "2026-11-22T08:00:00.000000+00:00",
+      "type": "seen",
+      "source": "https://example.test/post/1",
+      "content": "",
+      "vulnerability": "CVE-2026-133968",
+      "author": {
+        "login": "cedric"
+      }
+    }
+  ]
+}
