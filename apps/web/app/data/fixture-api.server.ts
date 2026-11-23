@@ -12,8 +12,18 @@ import type {
 } from '@ti/core/api';
 import { normaliseId } from '@ti/core/ids';
 import { NVD_NOTICE } from '@ti/core/licence';
+import type {
+  BreachDetail,
+  BreachSummary,
+  IncidentDetail,
+  IncidentSummary,
+  TechniqueDetail,
+  TechniqueSummary,
+  WorldList,
+} from '@ti/core/world-api';
 import { SOURCE_BY_ID, SOURCES } from '@ti/sources/registry';
 import { fakeUserOf, fixtureAccountApi, fixtureFullEntry } from './fixture-account.server';
+import world from './fixtures/world.json';
 import { FIXTURE_ENTRIES, type FixtureEntry } from './fixtures.server';
 
 export const PAGE_SIZE = 20;
@@ -205,6 +215,214 @@ function sources(): Response {
   return json(body);
 }
 
+// ---- the world routes: breaches, incidents, techniques ----
+
+const WORLD_PAGE = 25;
+const SOURCE_OF_FRAMEWORK: Record<string, string> = {
+  attack: 'mitre-attack',
+  atlas: 'mitre-atlas',
+  cwe: 'cwe',
+  capec: 'capec',
+};
+type FixtureBreach = Omit<BreachDetail, 'counts' | 'jurisdictions' | 'sources' | 'noticeCount' | 'credits'>;
+type FixtureIncident = Omit<IncidentDetail, 'credits'>;
+type FixtureTechnique = Omit<TechniqueDetail, 'children' | 'vulns' | 'vulnsMore' | 'credits'> & {
+  vulns: string[];
+};
+const WORLD = world as unknown as {
+  breaches: FixtureBreach[];
+  incidents: FixtureIncident[];
+  techniques: FixtureTechnique[];
+};
+
+/** The same rule as the API: one entry per (unit, jurisdiction), the largest count, never added. */
+function fixtureBreach(b: FixtureBreach): BreachDetail {
+  const best = new Map<string, BreachDetail['counts'][number]>();
+  for (const n of b.notices) {
+    if (n.display !== 'full' || n.count === undefined || !n.countUnit) continue;
+    const k = `${n.countUnit}|${n.jurisdiction ?? ''}`;
+    const cur = best.get(k);
+    if (!cur || n.count > cur.count)
+      best.set(k, { unit: n.countUnit, jurisdiction: n.jurisdiction ?? null, count: n.count });
+  }
+  const sources = [...new Set(b.notices.map((n) => n.source))].sort();
+  return {
+    ...b,
+    noticeCount: b.notices.length,
+    counts: [...best.values()].sort((x, y) => x.unit.localeCompare(y.unit)),
+    jurisdictions: [
+      ...new Set(b.notices.flatMap((n) => (n.display === 'full' && n.jurisdiction ? [n.jurisdiction] : []))),
+    ].sort(),
+    sources,
+    credits: fixtureCredits(sources),
+  };
+}
+const summaryOf = (d: BreachDetail): BreachSummary => {
+  const { notices: _n, credits: _c, ...rest } = d;
+  return rest;
+};
+
+function worldPage(url: URL): { q: string; page: number } | Response {
+  const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
+  if (q.length > 100) return bad('bad_query');
+  const raw = url.searchParams.get('page');
+  const page = raw === null ? 1 : /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
+  if (page < 1 || page > 40) return bad('bad_page');
+  return { q, page };
+}
+
+function worldList<T>(rows: T[], page: number, sources: string[]): WorldList<T> {
+  const slice = rows.slice((page - 1) * WORLD_PAGE, page * WORLD_PAGE);
+  return {
+    items: slice,
+    page,
+    next: rows.length > page * WORLD_PAGE ? page + 1 : null,
+    credits: fixtureCredits([...new Set(sources)]),
+  };
+}
+
+function breachesApi(url: URL, key: string | null): Response {
+  const all = WORLD.breaches.map(fixtureBreach);
+  if (key !== null) {
+    const found = all.find((b) => b.key === key);
+    return found ? json(found) : json({ error: 'not_found' }, 404);
+  }
+  const p = worldPage(url);
+  if (p instanceof Response) return p;
+  const rows = all
+    .filter(
+      (b) =>
+        !p.q ||
+        (b.company?.name ?? '').toLowerCase().includes(p.q) ||
+        b.notices.some((n) => n.name.toLowerCase().includes(p.q)),
+    )
+    .sort((a, b) => b.firstSeen.localeCompare(a.firstSeen) || b.key.localeCompare(a.key));
+  return json(
+    worldList(
+      rows.map(summaryOf),
+      p.page,
+      rows.flatMap((b) => b.sources),
+    ),
+  );
+}
+
+const INCIDENT_KINDS = ['ai', 'cyber_op', 'cyber_event'];
+function incidentsApi(url: URL, source: string | null, id: string | null): Response {
+  const withCredits = (i: FixtureIncident): IncidentDetail => ({ ...i, credits: fixtureCredits([i.source]) });
+  if (source !== null && id !== null) {
+    if (!SOURCE_BY_ID.has(source)) return bad('bad_id');
+    const found = WORLD.incidents.find((i) => i.source === source && i.incidentId === id);
+    return found ? json(withCredits(found)) : json({ error: 'not_found' }, 404);
+  }
+  const p = worldPage(url);
+  if (p instanceof Response) return p;
+  const kinds = new Set<string>();
+  for (const k of url.searchParams.getAll('kind')) {
+    if (k === 'cyber') {
+      kinds.add('cyber_op');
+      kinds.add('cyber_event');
+    } else if (INCIDENT_KINDS.includes(k)) kinds.add(k);
+    else return bad('bad_kind');
+  }
+  const rows = WORLD.incidents
+    .filter((i) => (kinds.size === 0 || kinds.has(i.kind)) && (!p.q || i.title.toLowerCase().includes(p.q)))
+    .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || a.incidentId.localeCompare(b.incidentId));
+  const items: IncidentSummary[] = rows.map(
+    ({ entities: _e, techniques: _t, ...summary }) => summary as IncidentSummary,
+  );
+  return json(
+    worldList(
+      items,
+      p.page,
+      rows.map((r) => r.source),
+    ),
+  );
+}
+
+function techniqueApi(url: URL, id: string | null): Response {
+  const summary = (t: FixtureTechnique): TechniqueSummary => {
+    const out: TechniqueSummary = { id: t.id, framework: t.framework, name: t.name };
+    if (t.parent) out.parent = t.parent;
+    return out;
+  };
+  if (id !== null) {
+    if (!/^(T\d{4}(\.\d{3})?|AML\.T\d{4}(\.\d{3})?|CWE-\d{1,6}|CAPEC-\d{1,6})$/.test(id))
+      return bad('bad_id');
+    const t = WORLD.techniques.find((x) => x.id === id);
+    if (!t) return json({ error: 'not_found' }, 404);
+    const parent = WORLD.techniques.find((x) => x.id === t.parent);
+    const detail: TechniqueDetail = {
+      ...summary(t),
+      children: WORLD.techniques.filter((x) => x.parent === t.id).map(summary),
+      vulns: t.vulns.flatMap((k) => {
+        const e = FIXTURE_ENTRIES.find((f) => f.key === k);
+        if (!e) return [];
+        const v: TechniqueDetail['vulns'][number] = {
+          key: e.key,
+          title: e.title,
+          exploited: e.kev_added !== null,
+        };
+        if (e.cvss !== null) v.cvss = e.cvss;
+        return [v];
+      }),
+      vulnsMore: false,
+      credits: fixtureCredits([SOURCE_OF_FRAMEWORK[t.framework] ?? 'mitre-attack']),
+    };
+    if (t.summary) detail.summary = t.summary;
+    if (parent) detail.parentRef = { id: parent.id, name: parent.name };
+    return json(detail);
+  }
+  const p = worldPage(url);
+  if (p instanceof Response) return p;
+  const frameworks = url.searchParams.getAll('framework');
+  if (frameworks.some((f) => !(f in SOURCE_OF_FRAMEWORK))) return bad('bad_framework');
+  const rows = WORLD.techniques
+    .filter(
+      (t) =>
+        (frameworks.length === 0 || frameworks.includes(t.framework)) &&
+        (!p.q || t.id.toLowerCase().includes(p.q) || t.name.toLowerCase().includes(p.q)),
+    )
+    .sort((a, b) => a.framework.localeCompare(b.framework) || a.id.localeCompare(b.id));
+  return json(
+    worldList(
+      rows.map(summary),
+      p.page,
+      rows.map((r) => SOURCE_OF_FRAMEWORK[r.framework] ?? 'mitre-attack'),
+    ),
+  );
+}
+
+function decoded(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}
+
+function worldApi(url: URL, path: string): Response | null {
+  const printable = (s: string | null): s is string => s !== null && /^[\x20-\x7e]{1,200}$/.test(s);
+  if (path === '/v1/breaches') return breachesApi(url, null);
+  const b = /^\/v1\/breaches\/([^/]+)$/.exec(path)?.[1];
+  if (b !== undefined) {
+    const key = decoded(b);
+    return printable(key) ? breachesApi(url, key) : bad('bad_id');
+  }
+  if (path === '/v1/incidents') return incidentsApi(url, null, null);
+  const i = /^\/v1\/incidents\/([^/]+)\/([^/]+)$/.exec(path);
+  if (i) {
+    const [s, id] = [decoded(i[1] as string), decoded(i[2] as string)];
+    return s !== null && printable(id) ? incidentsApi(url, s, id) : bad('bad_id');
+  }
+  if (path === '/v1/techniques') return techniqueApi(url, null);
+  const t = /^\/v1\/techniques\/([^/]+)$/.exec(path)?.[1];
+  if (t !== undefined) {
+    const id = decoded(t);
+    return id === null ? bad('bad_id') : techniqueApi(url, id);
+  }
+  return null;
+}
+
 export async function fixtureApi(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -212,6 +430,8 @@ export async function fixtureApi(request: Request): Promise<Response> {
   if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
   if (path === '/v1/search') return search(url);
   if (path === '/v1/sources') return sources();
+  const worldResponse = worldApi(url, path);
+  if (worldResponse) return worldResponse;
   const entry = /^\/v1\/entries\/([^/]+)$/.exec(path)?.[1];
   if (entry !== undefined) {
     let id: string;

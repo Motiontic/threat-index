@@ -1,15 +1,18 @@
 import { clerkMiddleware } from '@hono/clerk-auth';
 import { Hono } from 'hono';
 import type { AppEnv } from './lib/env';
+import breaches from './routes/breaches';
 import deepQuery from './routes/deep-query';
 import entries from './routes/entries';
 import health from './routes/health';
+import incidents from './routes/incidents';
 import indexLetter from './routes/index-letter';
 import internalJobs from './routes/internal-jobs';
 import me from './routes/me';
 import savedSearches from './routes/saved-searches';
 import search from './routes/search';
 import sources from './routes/sources';
+import techniques from './routes/techniques';
 import unsubscribe from './routes/unsubscribe';
 import watch from './routes/watch';
 import webhooksClerk from './routes/webhooks-clerk';
@@ -34,6 +37,9 @@ for (const route of [
   entries,
   indexLetter,
   sources,
+  breaches,
+  incidents,
+  techniques,
   me,
   watch,
   savedSearches,

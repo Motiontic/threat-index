@@ -3,15 +3,100 @@ import { errorText, useAccountFetcher } from '../components/account-bits';
 import { EmptyState, ResultCard } from '../components/ui';
 import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
-import type { EntryType, SearchHit } from '../data/types';
+import type { EntryType, SearchHit, SiteData } from '../data/types';
 import { useAuthState, useOpenSignUp } from '../lib/auth';
-import { TYPE_PLURALS } from '../lib/format';
+import { formatDate, TYPE_PLURALS } from '../lib/format';
 import { saveIntent } from '../lib/intent';
-import { API_TYPES, hasCriteria, paramsToQuery, parseSearchParams, SEVERITIES } from '../lib/search-params';
+import {
+  hasCriteria,
+  paramsToQuery,
+  parseSearchParams,
+  SEARCH_API_TYPES,
+  SEVERITIES,
+} from '../lib/search-params';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { FRAMEWORK_LABELS, parseWorldParams, pluralise, worldHref } from '../lib/world';
 import type { Route } from './+types/search';
 
-type Outcome = 'results' | 'no-criteria' | 'not-indexed' | 'bad-request';
+type Outcome = 'results' | 'no-criteria' | 'bad-request';
+
+interface WorldRow {
+  key: string;
+  to: string;
+  title: string;
+  note: string;
+}
+interface WorldSection {
+  type: EntryType;
+  heading: string;
+  rows: WorldRow[];
+  moreLabel: string;
+  moreTo: string;
+}
+
+const WORLD_ROWS = 10;
+const WORLD_TYPES: EntryType[] = ['breach', 'ai', 'tech', 'term'];
+
+/** One section for a world type: the first rows of its list endpoint for this query, and the list page link. */
+async function worldSection(site: SiteData, type: EntryType, q: string | undefined): Promise<WorldSection> {
+  const base = q ? { q } : {};
+  try {
+    if (type === 'breach') {
+      const res = await site.breaches(base);
+      return {
+        type,
+        heading: 'Breaches',
+        moreLabel: 'More breaches',
+        moreTo: worldHref('/breaches', base),
+        rows: res.items.slice(0, WORLD_ROWS).map((b) => ({
+          key: b.key,
+          to: `/breach/${encodeURIComponent(b.key)}`,
+          title: b.company?.name ?? b.key,
+          note: `${pluralise(b.noticeCount, 'notice')}, first reported ${formatDate(b.firstSeen)}`,
+        })),
+      };
+    }
+    if (type === 'ai') {
+      const res = await site.incidents({ ...base, kind: ['ai'] });
+      return {
+        type,
+        heading: 'AI incidents',
+        moreLabel: 'More AI incidents',
+        moreTo: worldHref('/incidents', { ...base, kind: ['ai'] }),
+        rows: res.items.slice(0, WORLD_ROWS).map((i) => ({
+          key: `${i.source}/${i.incidentId}`,
+          to: `/incident/${encodeURIComponent(i.source)}/${encodeURIComponent(i.incidentId)}`,
+          title: i.title,
+          note: formatDate(i.date),
+        })),
+      };
+    }
+    const framework = type === 'tech' ? ['attack', 'atlas', 'capec'] : ['cwe'];
+    const res = await site.techniques({ ...base, framework });
+    return {
+      type,
+      heading: type === 'tech' ? 'Techniques' : 'Terms',
+      moreLabel: type === 'tech' ? 'More techniques' : 'More terms',
+      moreTo: worldHref('/techniques', { ...base, framework }),
+      rows: res.items.slice(0, WORLD_ROWS).map((t) => ({
+        key: t.id,
+        to: `/technique/${encodeURIComponent(t.id)}`,
+        title: `${t.id} ${t.name}`,
+        note: FRAMEWORK_LABELS[t.framework],
+      })),
+    };
+  } catch (err) {
+    // A query the list endpoint refuses shows an empty section.
+    if (!(err instanceof ApiBadRequest)) throw err;
+    return {
+      type,
+      heading: TYPE_PLURALS[type],
+      rows: [],
+      moreLabel: `More ${TYPE_PLURALS[type].toLowerCase()}`,
+      moreTo: '/',
+    };
+  }
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
@@ -24,19 +109,40 @@ export async function loader({ request }: Route.LoaderArgs) {
     mode: site.mode,
     years: Array.from({ length: 10 }, (_, i) => String(year - i)),
   };
-  const empty = { total: 0, hits: [] as (SearchHit & { kind?: string })[], next: null as string | null };
+  const empty = {
+    total: 0,
+    hits: [] as (SearchHit & { kind?: string })[],
+    next: null as string | null,
+    sections: [] as WorldSection[],
+    searched: false,
+  };
 
-  if (site.mode === 'api' && params.type && params.type.every((t) => !API_TYPES.includes(t)))
-    return { ...base, outcome: 'not-indexed' as Outcome, ...empty };
   if (!hasCriteria(params)) return { ...base, outcome: 'no-criteria' as Outcome, ...empty };
+  const selected = params.type ?? [];
+  const worldTypes = WORLD_TYPES.filter((t) => selected.includes(t));
+  const vulnTypes = SEARCH_API_TYPES.filter((t) => selected.includes(t));
+  // `/v1/search` runs when no type is chosen (today's behaviour) or when vuln or mal is chosen.
+  const runSearch = selected.length === 0 || vulnTypes.length > 0 || worldTypes.length === 0;
+  const worldQ = parseWorldParams(url.searchParams).q;
   try {
-    const res = await site.search(params);
+    const [res, sections] = await Promise.all([
+      runSearch
+        ? site.search(
+            vulnTypes.length > 0 || selected.length === 0
+              ? { ...params, type: vulnTypes.length ? vulnTypes : undefined }
+              : params,
+          )
+        : null,
+      Promise.all(worldTypes.map((t) => worldSection(site, t, worldQ))),
+    ]);
     return {
       ...base,
       outcome: 'results' as Outcome,
-      total: res.total,
-      hits: res.hits as (SearchHit & { kind?: string })[],
-      next: res.cursor ?? null,
+      total: res?.total ?? 0,
+      hits: (res?.hits ?? []) as (SearchHit & { kind?: string })[],
+      next: res?.cursor ?? null,
+      sections,
+      searched: res !== null,
     };
   } catch (err) {
     if (err instanceof ApiBadRequest) return { ...base, outcome: 'bad-request' as Outcome, ...empty };
@@ -66,14 +172,14 @@ const TYPES = Object.keys(TYPE_PLURALS) as EntryType[];
 const SEVERITY_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' } as const;
 
 export default function Search({ loaderData }: Route.ComponentProps) {
-  const { params, total, hits, next, outcome, years } = loaderData;
+  const { params, total, hits, next, outcome, years, sections, searched } = loaderData;
   const type = params.type ?? [];
   const sort = params.sort ?? (params.q ? 'rel' : 'new');
   return (
     <div>
       <div className="page-head">
         <h1>{heading(params.q, params.type)}</h1>
-        {outcome === 'results' ? (
+        {outcome === 'results' && searched ? (
           <span className="muted" aria-live="polite">
             {total} {total === 1 ? 'result' : 'results'}
           </span>
@@ -146,14 +252,7 @@ export default function Search({ loaderData }: Route.ComponentProps) {
           </div>
         </Form>
         <div>
-          {outcome === 'not-indexed' ? (
-            <EmptyState title={`${type.map((t) => TYPE_PLURALS[t]).join(', ')} are not in the index yet`}>
-              <p>
-                Try <Link to="/search?type=vuln">vulnerabilities</Link> or{' '}
-                <Link to="/search?type=mal">malicious packages</Link>.
-              </p>
-            </EmptyState>
-          ) : outcome === 'no-criteria' ? (
+          {outcome === 'no-criteria' ? (
             <EmptyState title="Add a word or an ID to search">
               <p>
                 Or browse: <Link to="/search?type=vuln">vulnerabilities</Link>,{' '}
@@ -163,14 +262,40 @@ export default function Search({ loaderData }: Route.ComponentProps) {
             </EmptyState>
           ) : outcome === 'bad-request' ? (
             <EmptyState title="Add a word or an ID to search" />
-          ) : hits.length === 0 ? (
+          ) : hits.length === 0 && sections.every((x) => x.rows.length === 0) ? (
             <EmptyState title="No matching records">
               <p>
                 Try a CVE ID, a product name or fewer filters. <Link to="/search">Clear the search</Link>.
               </p>
             </EmptyState>
           ) : (
-            hits.map((h) => <ResultCard key={h.key} hit={h} />)
+            <>
+              {hits.map((h) => (
+                <ResultCard key={h.key} hit={h} />
+              ))}
+              {sections.map((sec) => (
+                <section key={sec.type} className="panel" aria-label={sec.heading}>
+                  <h2>{sec.heading}</h2>
+                  {sec.rows.length === 0 ? (
+                    <p className="muted">Nothing matches in this group.</p>
+                  ) : (
+                    <ul>
+                      {sec.rows.map((r) => (
+                        <li key={r.key} className="row">
+                          <span className="row-main">
+                            <Link to={r.to}>{r.title}</Link>
+                          </span>
+                          <span className="muted">{r.note}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p>
+                    <Link to={sec.moreTo}>{sec.moreLabel}</Link>
+                  </p>
+                </section>
+              ))}
+            </>
           )}
           {outcome === 'results' && (next || params.cursor) ? (
             <nav className="pager" aria-label="Pages">

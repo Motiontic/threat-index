@@ -55,11 +55,33 @@ function navSections(
           to: '/search?sig=kev',
           current: (p, s) => p === '/search' && s.get('sig') === 'kev',
         },
-        { label: 'Breaches', to: '/search?type=breach', current: filter('breach') },
-        { label: 'AI incidents', to: '/search?type=ai', current: filter('ai') },
+        {
+          label: 'Breaches',
+          to: '/breaches',
+          current: (p) => p === '/breaches' || p.startsWith('/breach/'),
+        },
+        {
+          label: 'AI incidents',
+          to: '/incidents?kind=ai',
+          current: (p, s) => p === '/incidents' && s.get('kind') === 'ai',
+        },
+        {
+          label: 'Cyber operations',
+          to: '/incidents?kind=cyber',
+          current: (p, s) => p === '/incidents' && s.get('kind') === 'cyber',
+        },
         { label: 'Malicious packages', to: '/search?type=mal', current: filter('mal') },
-        { label: 'Techniques', to: '/search?type=tech', current: filter('tech') },
-        { label: 'Terms', to: '/search?type=term', current: filter('term') },
+        {
+          label: 'Techniques',
+          to: '/techniques?framework=attack&framework=atlas&framework=capec',
+          current: (p, s) =>
+            (p === '/techniques' && !s.getAll('framework').includes('cwe')) || p.startsWith('/technique/'),
+        },
+        {
+          label: 'Terms',
+          to: '/techniques?framework=cwe',
+          current: (p, s) => p === '/techniques' && s.getAll('framework').includes('cwe'),
+        },
       ],
     },
     {
