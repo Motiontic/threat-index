@@ -190,3 +190,13 @@ status lines. If a host is unreachable from the sandbox, say so in the PR; don't
   accepted.
 - Both set `pull.jobKind: 'first-load'`, so their hand-off runs the existing `first-load` job rather than the
   `big-file` stub.
+
+## Changes from the first build of this branch
+
+1. The `ref` character class allows `_` as well:
+   `/^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,199}$/` becomes `/^[A-Za-z0-9][A-Za-z0-9._:\/_-]{0,199}$/`. Metasploit
+   module names, Nuclei ids and GitHub repository names contain underscores. Add a test for one.
+2. Where section 6 and the decisions section disagree, the decisions section wins: Exploit-DB and Metasploit
+   set `pull.jobKind: 'first-load'`.
+
+Re-run every acceptance check.
