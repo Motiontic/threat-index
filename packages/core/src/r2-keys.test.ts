@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { jobPrefix, lookupVulnKey, rawReceiptKey, vulnDocKey, vulnShard } from './r2-keys';
+import {
+  indexLetterKey,
+  jobPrefix,
+  lakeKey,
+  lookupVulnKey,
+  rawReceiptKey,
+  sitemapKey,
+  vulnDocKey,
+  vulnShard,
+} from './r2-keys';
 
 describe('R2 keys', () => {
   it('rawReceiptKey uses the UTC date', () => {
@@ -26,5 +35,18 @@ describe('R2 keys', () => {
   });
   it('lookupVulnKey', () => {
     expect(lookupVulnKey('CVE-2021-44228')).toBe('lookup/vuln/7dc.json');
+  });
+});
+
+describe('seam R2 keys', () => {
+  it('indexLetterKey', () => {
+    expect(indexLetterKey('a')).toBe('lookup/index/a.json');
+    expect(indexLetterKey('0')).toBe('lookup/index/0.json');
+  });
+  it('lakeKey', () => {
+    expect(lakeKey('vulns', 'nvd', 2025, 3)).toBe('lake/vulns/nvd/2025/part-3.parquet');
+  });
+  it('sitemapKey', () => {
+    expect(sitemapKey()).toBe('sitemap.xml');
   });
 });
