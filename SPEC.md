@@ -281,3 +281,24 @@ review nits are left; fix them on top of the existing commits and don't redo wor
 
 `PROOF.md` must describe the whole branch, not only these fixes, because it becomes the PR body. Re-run every
 check in the acceptance criteria.
+
+## Changes from the second build of this branch
+
+The round-2 fixes above are committed, and this branch is rebased onto the current `main`. The second build
+stopped before review because `pnpm build` failed with `no fixture fixtures/cisa-kev/pattern-catalog-v2.json`
+in a checkout that had received new fixture files through git. The code was fine; the cause is Vitest's
+persistent module cache (`node_modules/.vitest-cache`). `test/fixtures.ts` expands an eager
+`import.meta.glob('../fixtures/*/*')` when it is transformed, and the cache keys that transform on the helper's
+own content. A fixture added by a pull or a rebase is therefore invisible until someone deletes the cache. CI
+never sees this because it starts with no cache.
+
+1. Make new and changed fixture files always visible to `fixture()`, in `pnpm test` and `pnpm test:workers`,
+   without deleting any cache by hand. Prefer the smallest fix: turn the persistent module cache off for the
+   test runs, or make its key cover the fixture files. Find the exact option in the installed Vitest (its
+   types or docs in `node_modules`), name it in the PR, and explain in a comment where you set it.
+2. Prove it: with the cache populated by a first run, add a new file under `fixtures/`, run the fixtures test
+   again without clearing anything, and show it is found. Save that output as proof, then remove the file.
+3. Note in the `PROOF.md` Risk section that the previous loop run never reviewed the round-2 commit, so this
+   review covers it.
+
+`PROOF.md` must describe the whole branch. Re-run every check in the acceptance criteria.
