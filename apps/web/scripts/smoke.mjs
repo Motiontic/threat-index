@@ -101,7 +101,8 @@ async function checkAccounts() {
     const loc = res.headers.get('location') ?? '';
     if (res.status !== 302) fail('/account', `status ${res.status}, wanted 302 when signed out`);
     if (!loc.endsWith('/sign-in?redirect_url=%2Faccount')) fail('/account', `redirects to "${loc}"`);
-    if (!res.headers.get('content-security-policy')?.includes("'nonce-")) fail('/account', 'redirect has no CSP');
+    if (!res.headers.get('content-security-policy')?.includes("'nonce-"))
+      fail('/account', 'redirect has no CSP');
   }
   // The account action refuses GET, and a POST from another origin, before it does anything.
   {
@@ -112,7 +113,8 @@ async function checkAccounts() {
       headers: { Origin: 'https://evil.example', 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'intent=watch&id=CVE-2025-3248',
     });
-    if (post.res.status !== 403) fail('/account/do', `foreign-origin POST status ${post.res.status}, wanted 403`);
+    if (post.res.status !== 403)
+      fail('/account/do', `foreign-origin POST status ${post.res.status}, wanted 403`);
     const none = await get('/account/do', {
       method: 'POST',
       headers: { Origin: BASE, 'Content-Type': 'application/x-www-form-urlencoded' },
