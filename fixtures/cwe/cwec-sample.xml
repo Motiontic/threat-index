@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Weakness_Catalog Name="CWE" Version="5.0" Date="2026-10-28" xmlns="http://cwe.mitre.org/cwe-8" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <Weaknesses>
+    <Weakness ID="74" Name="Improper Neutralization of Special Elements in Output Used by a Downstream Component ('Injection')" Abstraction="Class" Structure="Simple" Status="Incomplete">
+      <Description>The product constructs all or part of a command using externally-influenced input, but it does not neutralize special elements.</Description>
+      <Related_Weaknesses>
+        <Related_Weakness Nature="ChildOf" CWE_ID="707" View_ID="1000" Ordinal="Primary"/>
+      </Related_Weaknesses>
+    </Weakness>
+    <Weakness ID="79" Name="Improper Neutralization of Input During Web Page Generation (&apos;Cross-site Scripting&apos;)" Abstraction="Base" Structure="Simple" Status="Stable">
+      <Description>The product does not neutralize user-controllable input before it is placed in output, e.g. a &lt;script&gt; tag &amp; friends&#33; Caf&#xe9;.</Description>
+      <Related_Weaknesses>
+        <Related_Weakness Nature="PeerOf" CWE_ID="352" View_ID="1000"/>
+        <Related_Weakness Nature="ChildOf" CWE_ID="1000" View_ID="2000"/>
+        <Related_Weakness Nature="ChildOf" CWE_ID="74" View_ID="1000" Ordinal="Primary"/>
+      </Related_Weaknesses>
+      <Observed_Examples>
+        <Observed_Example><Description>Not the weakness description.</Description></Observed_Example>
+      </Observed_Examples>
+    </Weakness>
+    <Weakness ID="89" Name="Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')" Abstraction="Base" Structure="Simple" Status="Stable">
+      <Description>The product constructs
+        all or part of an SQL command using <xhtml:b>externally-influenced</xhtml:b> input.</Description>
+      <Related_Weaknesses>
+        <Related_Weakness Nature="ChildOf" CWE_ID="943" View_ID="1003"/>
+        <Related_Weakness Nature="ChildOf" CWE_ID="74" View_ID="1000" Ordinal="Primary"/>
+      </Related_Weaknesses>
+    </Weakness>
+    <Weakness ID="16" Name="Old Weakness" Abstraction="Class" Structure="Simple" Status="Deprecated">
+      <Description>Deprecated entry.</Description>
+    </Weakness>
+  </Weaknesses>
+  <Categories>
+    <Category ID="19" Name="Data Processing Errors" Status="Draft">
+      <Summary>A category, not emitted.</Summary>
+      <Relationships><Has_Member CWE_ID="74" View_ID="1000"/></Relationships>
+    </Category>
+  </Categories>
+</Weakness_Catalog>

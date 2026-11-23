@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Attack_Pattern_Catalog xmlns="http://capec.mitre.org/capec-3" xmlns:xhtml="http://www.w3.org/1999/xhtml" Name="CAPEC" Version="3.9" Date="2023-01-24">
+  <Attack_Patterns>
+    <Attack_Pattern ID="66" Name="SQL Injection" Abstraction="Standard" Status="Draft">
+      <Description>This attack exploits target software that constructs SQL statements based on user input.</Description>
+      <Extended_Description><xhtml:p>Not part of the summary.</xhtml:p></Extended_Description>
+      <Related_Attack_Patterns>
+        <Related_Attack_Pattern Nature="ChildOf" CAPEC_ID="248"/>
+        <Related_Attack_Pattern Nature="CanFollow" CAPEC_ID="7"/>
+      </Related_Attack_Patterns>
+    </Attack_Pattern>
+    <Attack_Pattern ID="248" Name="Command Injection" Abstraction="Meta" Status="Draft">
+      <Description>An adversary looks for ways to execute commands &amp; inject them.</Description>
+    </Attack_Pattern>
+    <Attack_Pattern ID="1" Name="Old Pattern" Abstraction="Standard" Status="Deprecated">
+      <Description>Deprecated.</Description>
+    </Attack_Pattern>
+  </Attack_Patterns>
+</Attack_Pattern_Catalog>
