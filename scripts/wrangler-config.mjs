@@ -24,57 +24,97 @@ export function loadDotEnv() {
   }
 }
 
-const PLACEHOLDER = /\$\{([A-Z0-9_]+)\}/g;
+// ${NAME} must be set to deploy. ${NAME?} is optional: when NAME is unset, the array element holding it
+// is dropped (a whole binding, never just its address); outside an array, its key is dropped.
+const PLACEHOLDER = /\$\{([A-Z0-9_]+)(\?)?\}/g;
+const DROP = Symbol('drop');
 
-function fill(value, missing) {
+function fill(value, ctx, inArray = false) {
   if (typeof value === 'string') {
-    return value.replace(PLACEHOLDER, (whole, name) => {
-      const v = process.env[name];
-      if (!v) {
-        missing.add(name);
-        return whole;
+    let drop = false;
+    const out = value.replace(PLACEHOLDER, (whole, name, optional) => {
+      const v = ctx.vars[name];
+      if (v) return v;
+      if (optional) {
+        ctx.dropped.add(name);
+        drop = true;
+      } else {
+        ctx.missing.add(name);
       }
-      return v;
+      return whole;
     });
+    return drop ? DROP : out;
   }
-  if (Array.isArray(value)) return value.map((v) => fill(v, missing));
+  if (Array.isArray(value)) {
+    const kept = value.map((v) => fill(v, ctx, true)).filter((v) => v !== DROP);
+    return kept.length === 0 && value.length > 0 ? DROP : kept;
+  }
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, fill(v, missing)]));
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      const filled = fill(v, ctx, inArray);
+      if (filled === DROP) {
+        if (inArray) return DROP;
+        continue;
+      }
+      out[k] = filled;
+    }
+    return out;
   }
   return value;
 }
 
 /**
- * Writes apps/<app>/wrangler.test.jsonc for the Workers tests: the staging section with every ${VAR}
- * placeholder replaced by a dummy value, so no real ids are needed. Never use it to deploy.
+ * Pure: returns a copy of `config` with the target's section filled from `vars`. Production is the top
+ * level; staging is `env.staging`. The other section is left exactly as written. Throws, naming every
+ * variable, when a required ${VAR} of the target section is unset. Each dropped optional ${VAR?} is
+ * reported once through `log`, by name only.
+ */
+export function fillConfig(config, target, vars = process.env, log = console.error) {
+  const { env = {}, ...top } = config;
+  const ctx = { vars, missing: new Set(), dropped: new Set() };
+  let out;
+  if (target === 'production') {
+    out = { ...fill(top, ctx), ...(Object.keys(env).length > 0 ? { env } : {}) };
+  } else {
+    out = { ...top, env: { ...env, [target]: fill(env[target] ?? {}, ctx) } };
+  }
+  if (ctx.missing.size > 0) {
+    throw new Error(`set ${[...ctx.missing].join(', ')} in the environment or .env to deploy ${target}`);
+  }
+  for (const name of ctx.dropped) log(`wrangler-config: ${name} is unset, dropped the entries that use it`);
+  return out;
+}
+
+/**
+ * Writes apps/<app>/wrangler.test.jsonc for the Workers tests: the staging section with every required
+ * ${VAR} placeholder replaced by a dummy value, so no real ids are needed. Optional ones get no value,
+ * even if the real environment sets them. Never use it to deploy.
  */
 export function writeTestConfig(app) {
   const src = join(ROOT, 'apps', app, 'wrangler.jsonc');
   const text = readFileSync(src, 'utf8');
-  for (const [, name] of text.matchAll(PLACEHOLDER)) {
-    process.env[name] ??= name.includes('URL') ? 'http://localhost' : `test-${name.toLowerCase()}`;
+  const vars = { ...process.env };
+  for (const [, name, optional] of text.matchAll(PLACEHOLDER)) {
+    if (optional) delete vars[name];
+    else vars[name] ||= name.includes('URL') ? 'http://localhost' : `test-${name.toLowerCase()}`;
   }
-  return writeDeployConfig(app, 'staging', 'wrangler.test.jsonc');
+  return writeDeployConfig(app, 'staging', 'wrangler.test.jsonc', vars);
 }
 
 /** Fills one app's config for a target and returns the generated file's path. */
-export function writeDeployConfig(app, target, fileName = 'wrangler.deploy.jsonc') {
+export function writeDeployConfig(app, target, fileName = 'wrangler.deploy.jsonc', vars = process.env) {
   const src = join(ROOT, 'apps', app, 'wrangler.jsonc');
   const { config, error } = ts.parseConfigFileTextToJson(src, readFileSync(src, 'utf8'));
   if (error) throw new Error(`${src}: ${ts.flattenDiagnosticMessageText(error.messageText, '\n')}`);
 
-  // Only the section being deployed must be complete; the other one may keep its placeholders.
-  const { env = {}, ...top } = config;
-  const missing = new Set();
-  fill(target === 'production' ? top : (env[target] ?? {}), missing);
-  if (missing.size > 0) {
-    throw new Error(
-      `apps/${app}: set ${[...missing].join(', ')} in the environment or .env to deploy ${target}`,
-    );
+  let out;
+  try {
+    out = fillConfig(config, target, vars);
+  } catch (err) {
+    throw new Error(`apps/${app}: ${err.message}`);
   }
-
   const dest = join(ROOT, 'apps', app, fileName);
-  const out = fill(config, new Set());
   writeFileSync(
     dest,
     `// Generated by scripts/wrangler-config.mjs. Do not edit or commit.\n${JSON.stringify(out, null, 2)}\n`,

@@ -1,6 +1,8 @@
-// ti-collector: cron planner + ti-jobs consumer (pull patterns, linker, watchdog).
+// ti-collector: cron planner, ti-jobs consumer (one pull step per message), ti-jobs-dlq consumer
+// (records dead-lettered steps) and the daily watchdog report.
 // Top level = production. `--env staging` = staging (worker ti-collector-staging, *_staging resources).
-// D1, R2 and Queues are found by name. ${VAR} values are filled in by scripts/wrangler-config.mjs.
+// D1, R2 and Queues are found by name. ${VAR} values are filled in by scripts/wrangler-config.mjs;
+// ${VAR?} is optional: when unset, the binding or var that uses it is left out.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "ti-collector",
@@ -27,17 +29,25 @@
   "queues": {
     "producers": [{ "binding": "JOBS", "queue": "ti-jobs" }, { "binding": "NOTIFY", "queue": "ti-notify" }],
     "consumers": [
-      { "queue": "ti-jobs", "max_batch_size": 5, "max_retries": 5, "dead_letter_queue": "ti-jobs-dlq" }
+      { "queue": "ti-jobs", "max_batch_size": 5, "max_retries": 5, "dead_letter_queue": "ti-jobs-dlq" },
+      // Steps that ran out of retries land here; recordDeadLetters marks their runs failed.
+      { "queue": "ti-jobs-dlq", "max_batch_size": 10, "max_retries": 3 }
     ]
   },
-  // Watchdog emails go only to an address verified in Email Routing.
-  "send_email": [{ "name": "OPS_EMAIL", "destination_address": "<ops-contact>" }],
+  // ti-api starts E2B jobs for big files (POST /internal/jobs, signed with JOB_HMAC_SECRET).
+  "services": [{ "binding": "API", "service": "ti-api" }],
+  // The daily watchdog report goes only to one address verified in Email Routing. Without
+  // TI_OPS_EMAIL the binding is left out and the report is only logged.
+  "send_email": [{ "name": "OPS_EMAIL", "destination_address": "${TI_OPS_EMAIL?}" }],
   "vars": {
-    "USER_AGENT": "ThreatIndex/0.1 (+https://github.com/Motiontic/threat-index; <ops-contact>)",
-    "API_BASE": "https://api.<domain>"
+    // TI_OPS_EMAIL_FROM: an address on the Email Routing domain.
+    "OPS_EMAIL_TO": "${TI_OPS_EMAIL?}",
+    "OPS_EMAIL_FROM": "${TI_OPS_EMAIL_FROM?}",
+    "USER_AGENT": "ThreatIndex/0.1 (+https://github.com/Motiontic/threat-index; ${TI_OPS_EMAIL?})"
   },
-  // Secrets (wrangler secret put): GITHUB_TOKEN, GITLAB_TOKEN, NVD_API_KEY, E2B_API_KEY,
-  // R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, JOB_HMAC_SECRET
+  // Secrets (wrangler secret put): JOB_HMAC_SECRET (signs calls to ti-api; the same value ti-api holds),
+  // GITHUB_TOKEN and NVD_API_KEY (optional, passed to patterns that need them), GITLAB_TOKEN, E2B_API_KEY,
+  // R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
 
   "env": {
     "staging": {
@@ -61,13 +71,15 @@
             "max_batch_size": 5,
             "max_retries": 5,
             "dead_letter_queue": "ti-jobs-dlq-staging"
-          }
+          },
+          { "queue": "ti-jobs-dlq-staging", "max_batch_size": 10, "max_retries": 3 }
         ]
       },
+      // Bindings don't inherit into env.staging, so the service is named again.
+      "services": [{ "binding": "API", "service": "ti-api-staging" }],
       // No ops email from staging.
       "vars": {
-        "USER_AGENT": "ThreatIndex-staging/0.1 (+https://github.com/Motiontic/threat-index)",
-        "API_BASE": "${TI_API_URL_STAGING}"
+        "USER_AGENT": "ThreatIndex-staging/0.1 (+https://github.com/Motiontic/threat-index)"
       }
     }
   }
