@@ -70,6 +70,7 @@ const META_NOINDEX = (path) =>
 
 function checkDocument(path, res, html, { title, status = 200 }) {
   if (res.status !== status) fail(path, `status ${res.status}, wanted ${status}`);
+  if (!/max-age=\d{7,}/.test(res.headers.get('strict-transport-security') ?? '')) fail(path, 'no HSTS');
   if (!(res.headers.get('content-type') ?? '').includes('text/html')) fail(path, 'not HTML');
   const t = html.match(/<title[^>]*>([^<]*)<\/title>/)?.[1];
   if (!t) fail(path, 'no <title>');
@@ -203,7 +204,7 @@ async function runChecks() {
     if (res.headers.get('x-content-type-options') !== 'nosniff') fail(from, 'redirect has no nosniff');
   }
 
-  for (const path of ['/e/CVE-1999-99999', '/no-such-page', '/index/ab', '/breach/no-such-breach']) {
+  for (const path of ['/e/CVE-1999-99999', '/no-such-page', '/index/ab', '/breach/no-such-breach', '/ops']) {
     const { res, html } = await get(path);
     checkDocument(path, res, html, { title: 'Not found', status: 404 });
   }
@@ -307,7 +308,7 @@ async function main() {
     for (const f of failures) console.error(`  ✗ ${f}`);
     process.exit(1);
   }
-  console.log(`✓ smoke (${MODE}): ${PAGES.length + 12} routes and the build checks passed`);
+  console.log(`✓ smoke (${MODE}): ${PAGES.length + 13} routes and the build checks passed`);
 }
 
 async function both() {

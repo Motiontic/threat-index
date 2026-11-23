@@ -1,4 +1,5 @@
 // The shapes the pages use. The wire shapes come from `@ti/core/api`; only web-side shapes live here.
+
 import type {
   DeleteAccountResponse,
   Me,
@@ -18,6 +19,7 @@ import type {
   SearchResponse,
   SourcesResponse,
 } from '@ti/core/api';
+import type { OpsReport } from '@ti/core/ops';
 
 export type {
   ApiError,
@@ -118,4 +120,8 @@ export interface AccountClient {
   deleteAccount: () => Promise<void>;
   /** The full entry, or null when it is missing or the API still answers `access: 'preview'`. */
   entryFull: (id: string) => Promise<EntryFullView | null>;
+  /** The /ops report, or null when the API answers 403 (not an admin). */
+  adminOps: () => Promise<OpsReport | null>;
 }
+
+export type { OpsReport };

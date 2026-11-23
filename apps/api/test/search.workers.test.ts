@@ -281,7 +281,7 @@ describe('GET /v1/search (Workers runtime, local D1 and R2)', () => {
     ]) {
       const res = await get(`/v1/search?${q}`);
       expect(res.status).toBe(400);
-      expect(res.headers.get('cache-control')).toBeNull();
+      expect(res.headers.get('cache-control')).toBe('no-store');
     }
   });
 

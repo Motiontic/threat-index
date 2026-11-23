@@ -426,7 +426,8 @@ function worldApi(url: URL, path: string): Response | null {
 export async function fixtureApi(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (path === '/v1/me' || path.startsWith('/v1/me/')) return fixtureAccountApi(request, path);
+  if (path === '/v1/me' || path.startsWith('/v1/me/') || path === '/v1/admin/ops')
+    return fixtureAccountApi(request, path);
   if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
   if (path === '/v1/search') return search(url);
   if (path === '/v1/sources') return sources();

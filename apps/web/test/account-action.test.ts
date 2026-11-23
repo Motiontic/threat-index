@@ -269,7 +269,8 @@ describe('against the fixture account API', () => {
   const api = {
     fetch: (input: RequestInfo | URL, init?: RequestInit) => fixtureApi(new Request(input, init)),
   };
-  const as = (user: string) => createAccountClient(api, `fake.${user}`);
+  const as = (user: string) =>
+    createAccountClient(api, `fake.${user}`, { requestId: 'req-test-0001', ip: null });
 
   it('watches, toggles alerts, saves, deletes, and keeps users apart', async () => {
     resetFixtureAccounts();
@@ -293,7 +294,7 @@ describe('against the fixture account API', () => {
 
   it('rejects a token that is not a fake one, and serves the full entry only to a fake token', async () => {
     expect(
-      await createAccountClient(api, 'real.jwt')
+      await createAccountClient(api, 'real.jwt', { requestId: 'req-test-0001', ip: null })
         .me()
         .catch((e) => e),
     ).toBeInstanceOf(SignInRequired);

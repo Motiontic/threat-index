@@ -5,7 +5,14 @@ import {
   MAX_SAVED_SEARCH_NAME_CHARS,
   type SavedSearchParams,
 } from '@ti/core/account';
-import { ApiBadRequest, ApiConflict, ApiUnavailable, NotFound, SignInRequired } from '../data/api.server';
+import {
+  ApiBadRequest,
+  ApiConflict,
+  ApiRateLimited,
+  ApiUnavailable,
+  NotFound,
+  SignInRequired,
+} from '../data/api.server';
 import type { AccountClient } from '../data/types';
 import { DELETE_PHRASE } from './account-phrase';
 import { parseSearchParams } from './search-params';
@@ -128,6 +135,7 @@ export async function handleAccountAction(request: Request, deps: ActionDeps): P
     if (err instanceof ApiConflict) return fail(409, err.error);
     if (err instanceof ApiBadRequest) return fail(400, 'bad_request');
     if (err instanceof NotFound) return fail(404, 'not_found');
+    if (err instanceof ApiRateLimited) return fail(429, 'rate_limited');
     if (err instanceof ApiUnavailable) {
       console.error(err.message, err.cause);
       return fail(

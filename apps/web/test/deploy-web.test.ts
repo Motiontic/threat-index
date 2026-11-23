@@ -124,6 +124,21 @@ describe('webDeployArgs', () => {
       );
     }
   });
+
+  it('passes a valid TI_ADMIN_USER_IDS as the ADMIN_USER_IDS var and rejects anything else', () => {
+    build(staging);
+    const base = { TI_CLERK_PUBLISHABLE_KEY_STAGING: TEST };
+    expect(webDeployArgs('staging', path(), { ...base, TI_ADMIN_USER_IDS: 'user_a1, user_b2' })).toEqual([
+      '--var',
+      `CLERK_PUBLISHABLE_KEY:${TEST}`,
+      '--var',
+      'ADMIN_USER_IDS:user_a1,user_b2',
+    ]);
+    expect(webDeployArgs('staging', path(), base)).toHaveLength(2);
+    expect(() => webDeployArgs('staging', path(), { ...base, TI_ADMIN_USER_IDS: 'bob@example.com' })).toThrow(
+      /user ids/,
+    );
+  });
 });
 
 describe('scripts/deploy.mjs wiring', () => {

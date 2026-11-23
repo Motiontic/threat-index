@@ -12,7 +12,7 @@ function toHex(buf: ArrayBuffer): string {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function hmac(key: string, message: string): Promise<string> {
+export async function hmac(key: string, message: string): Promise<string> {
   const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, [
     'sign',
   ]);
@@ -34,7 +34,7 @@ export async function signRequest(
   return hmac(key, `${method.toUpperCase()}\n${path}\n${timestamp}\n${await sha256Hex(body)}`);
 }
 
-function constantTimeEqual(a: string, b: string): boolean {
+export function constantTimeEqual(a: string, b: string): boolean {
   const x = enc.encode(a);
   const y = enc.encode(b);
   let diff = x.length ^ y.length;

@@ -64,3 +64,42 @@ describe('apps/web/wrangler.jsonc', () => {
     expect(webText).toContain('.wrangler/deploy/config.json');
   });
 });
+
+describe('rate limit bindings', () => {
+  type Rl = { name: string; namespace_id: string; simple: { limit: number; period: number } }[];
+  const top = (c: unknown) => (c as { ratelimits: Rl }).ratelimits;
+  const staging = (c: unknown) => (c as { env: { staging: { ratelimits: Rl } } }).env.staging.ratelimits;
+
+  it('both apps declare their bindings at the top level and again in env.staging', () => {
+    expect(top(api).map((r) => r.name)).toEqual(['RL_PUBLIC', 'RL_USER', 'RL_DEEP']);
+    expect(staging(api).map((r) => r.name)).toEqual(['RL_PUBLIC', 'RL_USER', 'RL_DEEP']);
+    expect(top(web).map((r) => r.name)).toEqual(['RL_PAGES']);
+    expect(staging(web).map((r) => r.name)).toEqual(['RL_PAGES']);
+  });
+
+  it('every namespace id is an integer string and none is shared between apps or environments', () => {
+    const all = [...top(api), ...staging(api), ...top(web), ...staging(web)];
+    const ids = all.map((r) => r.namespace_id);
+    for (const id of ids) expect(id).toMatch(/^\d+$/);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(['7101', '7102', '7103', '7201', '7202', '7203', '7104', '7204']);
+  });
+
+  it('uses the specified limits and periods', () => {
+    const lim = (rl: Rl) => rl.map((r) => [r.name, r.simple.limit, r.simple.period]);
+    const apiLimits = [
+      ['RL_PUBLIC', 120, 60],
+      ['RL_USER', 240, 60],
+      ['RL_DEEP', 5, 60],
+    ];
+    expect(lim(top(api))).toEqual(apiLimits);
+    expect(lim(staging(api))).toEqual(apiLimits);
+    expect(lim(top(web))).toEqual([['RL_PAGES', 120, 60]]);
+    expect(lim(staging(web))).toEqual([['RL_PAGES', 120, 60]]);
+  });
+
+  it('puts no admin id in the repo', () => {
+    expect(apiText).not.toMatch(/user_[A-Za-z0-9]{6,}/);
+    expect(webText).not.toMatch(/user_[A-Za-z0-9]{6,}/);
+  });
+});

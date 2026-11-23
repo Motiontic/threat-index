@@ -14,6 +14,7 @@ import {
 } from '@ti/core/account';
 import type { EntryFull } from '@ti/core/api';
 import { normaliseId } from '@ti/core/ids';
+import type { OpsReport } from '@ti/core/ops';
 import { FAKE_TOKEN_PREFIX, FAKE_USER } from '../lib/fake-auth.server';
 import { FIXTURE_ENTRIES, type FixtureEntry } from './fixtures.server';
 
@@ -213,6 +214,8 @@ async function savedRoute(request: Request, s: UserState, id: string | null): Pr
 export async function fixtureAccountApi(request: Request, path: string): Promise<Response> {
   const user = fakeUserOf(request);
   if (!user) return error(401, 'sign_in_required');
+  if (path === '/v1/admin/ops')
+    return request.method === 'GET' ? json(fixtureOpsReport()) : error(405, 'method_not_allowed');
   const s = stateOf(user);
   if (path === '/v1/me') {
     if (request.method === 'GET') return json(toMe(user, s));
@@ -313,6 +316,91 @@ export function fixtureFullEntry(e: FixtureEntry, preview: EntryFull): EntryFull
       ...(e.kev_added
         ? [{ kind: 'kev_added', new: e.kev_added, at: `${e.kev_added}T06:00:00Z`, source: 'cisa-kev' }]
         : []),
+    ],
+  };
+}
+
+/** An invented /ops report for fixtures mode. The web's own admin list decides who may see it. */
+export function fixtureOpsReport(now: Date = new Date()): OpsReport {
+  const ago = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
+  return {
+    generatedAt: now.toISOString(),
+    sources: [
+      {
+        id: 'example-late',
+        cadence: 'daily',
+        ingest: true,
+        lastSuccess: ago(80),
+        lastRun: { status: 'failed', startedAt: ago(2) },
+        failed7d: 4,
+        deadLettered7d: 1,
+        late: true,
+      },
+      {
+        id: 'cisa-kev',
+        cadence: '3h',
+        ingest: true,
+        lastSuccess: ago(1),
+        lastRun: { status: 'ok', startedAt: ago(1) },
+        failed7d: 0,
+        deadLettered7d: 0,
+        late: false,
+      },
+      {
+        id: 'example-off',
+        cadence: 'weekly',
+        ingest: false,
+        lastSuccess: null,
+        lastRun: null,
+        failed7d: 0,
+        deadLettered7d: 0,
+        late: false,
+      },
+    ],
+    budget: {
+      day: now.toISOString().slice(0, 10),
+      d1Writes: 41_250,
+      d1Limit: 100_000,
+      emailsSent: 12,
+      emailCap: 95,
+      queueOps: 0,
+      r2ClassA: 0,
+    },
+    queues: [
+      { name: 'ti-jobs', backlog: 3, oldest: ago(0.1) },
+      { name: 'ti-jobs-dlq', backlog: 1, oldest: ago(30) },
+      { name: 'ti-load', backlog: null, oldest: null },
+    ],
+    jobs: {
+      byStatus: { complete: 6, failed: 1, running: 1 },
+      recent: [
+        {
+          id: '01JEXAMPLE0000000000000001',
+          kind: 'deep-query',
+          status: 'running',
+          sourceId: null,
+          createdAt: ago(0.05),
+          finishedAt: null,
+          error: null,
+        },
+        {
+          id: '01JEXAMPLE0000000000000002',
+          kind: 'first-load',
+          status: 'failed',
+          sourceId: 'example-late',
+          createdAt: ago(5),
+          finishedAt: ago(4.9),
+          error: 'invented failure for the fixtures page',
+        },
+      ],
+    },
+    deadLetters: [
+      {
+        runId: 'run-example-1',
+        sourceId: 'example-late',
+        finishedAt: ago(30),
+        error: 'dead-lettered after 6 attempts: invented timeout',
+      },
     ],
   };
 }

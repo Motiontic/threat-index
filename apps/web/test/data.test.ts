@@ -13,11 +13,11 @@ describe('public data calls', () => {
       '/v1/sitemap.xml': { text: '<urlset/>', headers: { 'content-type': 'application/xml' } },
     });
     // A signed-in visitor's client exists on the same binding...
-    const account = createAccountClient(f.api, 'session.token');
+    const account = createAccountClient(f.api, 'session.token', { requestId: 'req-test-0001', ip: null });
     await account.entryFull('CVE-2025-1').catch(() => {});
     f.requests.length = 0;
     // ...and the public client still sends nothing of it.
-    const site = createSiteData(f.api, 'api');
+    const site = createSiteData(f.api, 'api', { requestId: 'req-test-0001', ip: null });
     await site.entry('CVE-2025-1');
     await site.search({ q: 'q' });
     await site.index('a');
@@ -39,10 +39,16 @@ describe('public data calls', () => {
     expect(publicClient).not.toMatch(/authorization|cookie/i);
   });
 
-  it('getData never reads the request', () => {
+  it('getData reads only the request id and the client IP from the request', () => {
     const src = readWeb('app/data/data.server.ts');
+    const ctx = src.slice(
+      src.indexOf('export function clientContext'),
+      src.indexOf('/** What every loader calls'),
+    );
+    expect(ctx).toContain('request.headers.get(REQUEST_ID_HEADER)');
+    expect(ctx).toContain("request.headers.get('cf-connecting-ip')");
+    expect(ctx.match(/request\.headers\.get/g)).toHaveLength(2);
     const body = src.slice(src.indexOf('export function getData'), src.indexOf('const fixtureFetch'));
-    expect(body).toContain('_request');
-    expect(body).not.toMatch(/\brequest\b(?!\))/);
+    expect(body.match(/\brequest\b/g)).toHaveLength(2); // the parameter and clientContext(request)
   });
 });

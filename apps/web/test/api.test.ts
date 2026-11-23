@@ -14,7 +14,7 @@ import { CREDIT, fakeApi, PREVIEW } from './fake-api';
 
 const site = (routes: Parameters<typeof fakeApi>[0]) => {
   const f = fakeApi(routes);
-  return { ...f, data: createSiteData(f.api, 'api') };
+  return { ...f, data: createSiteData(f.api, 'api', { requestId: 'req-test-0001', ip: null }) };
 };
 
 describe('request building', () => {
@@ -41,7 +41,7 @@ describe('request building', () => {
     const sent = requests[0]?.headers;
     expect(sent?.get('cookie')).toBeNull();
     expect(sent?.get('authorization')).toBeNull();
-    expect([...(sent?.keys() ?? [])]).toEqual(['accept']);
+    expect([...(sent?.keys() ?? [])].sort()).toEqual(['accept', 'x-request-id']);
   });
 
   it('encodes index letters and passes the cursor', async () => {

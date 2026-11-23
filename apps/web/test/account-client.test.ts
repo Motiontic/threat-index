@@ -61,7 +61,7 @@ const FULL = {
 
 const client = (routes: Parameters<typeof fakeApi>[0], token = 'tok.en') => {
   const f = fakeApi(routes);
-  return { ...f, client: createAccountClient(f.api, token) };
+  return { ...f, client: createAccountClient(f.api, token, { requestId: 'req-test-0001', ip: null }) };
 };
 
 describe('account client requests', () => {
@@ -96,6 +96,7 @@ describe('account client requests', () => {
         [
           'accept',
           'authorization',
+          'x-request-id',
           ...(r.method === 'PATCH' || r.method === 'PUT' || r.method === 'POST' ? ['content-type'] : []),
         ].sort(),
       );

@@ -1,3 +1,4 @@
+import { CADENCE_MS } from '@ti/core/cadence';
 import { canIngest } from '@ti/core/licence';
 import { readSourceSettings } from '@ti/core/settings';
 import type { Cursor } from '@ti/core/types';
@@ -11,16 +12,7 @@ export const CADENCE_BY_CRON: Record<string, SourceConfig['cadence'][]> = {
   '0 5 * * 1': ['weekly', 'monthly', 'quarterly'],
 };
 
-const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
-export const CADENCE_MS: Record<SourceConfig['cadence'], number> = {
-  '3h': 3 * HOUR,
-  'with-cve-list': 3 * HOUR,
-  daily: DAY,
-  weekly: 7 * DAY,
-  monthly: 30 * DAY,
-  quarterly: 91 * DAY,
-};
+export { CADENCE_MS };
 
 /** Cron ticks drift a little; without this slack a 3-hourly source would run on every other tick. */
 export const DUE_SLACK_MS = 30 * 60_000;

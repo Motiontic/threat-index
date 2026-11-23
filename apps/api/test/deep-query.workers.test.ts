@@ -9,7 +9,8 @@ import { createDeepQueryRoute } from '../src/routes/deep-query';
 
 const SECRET = env.JOB_HMAC_SECRET;
 const BASE = 'https://ti-api.example.com';
-const CONFIGURED = { ...env, API_BASE: BASE, E2B_TEMPLATE: 'tmpl' };
+// RL_DEEP is off here: these tests cover the hourly limit; launch.workers.test.ts covers the per-minute one.
+const CONFIGURED = { ...env, API_BASE: BASE, E2B_TEMPLATE: 'tmpl', RL_DEEP: undefined };
 const ULID = (n: number) =>
   `01HZX3K9ABCDEFGHJKMNPQ${String(n)
     .padStart(4, '0')

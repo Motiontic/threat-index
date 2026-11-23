@@ -46,17 +46,31 @@
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
   "kv_namespaces": [{ "binding": "SETTINGS", "id": "${TI_SETTINGS_KV_ID}" }],
-  "queues": { "producers": [{ "binding": "LOAD", "queue": "ti-load" }] },
+  "queues": {
+    // JOBS and JOBS_DLQ are read-only here: the /ops page calls metrics() on them.
+    "producers": [
+      { "binding": "LOAD", "queue": "ti-load" },
+      { "binding": "JOBS", "queue": "ti-jobs" },
+      { "binding": "JOBS_DLQ", "queue": "ti-jobs-dlq" }
+    ]
+  },
+  // Rate limits (per Cloudflare location, approximate). Not inherited by env.staging, which has its own
+  // namespace ids so staging never shares production counters.
+  "ratelimits": [
+    { "name": "RL_PUBLIC", "namespace_id": "7101", "simple": { "limit": 120, "period": 60 } },
+    { "name": "RL_USER", "namespace_id": "7102", "simple": { "limit": 240, "period": 60 } },
+    { "name": "RL_DEEP", "namespace_id": "7103", "simple": { "limit": 5, "period": 60 } }
+  ],
   "vars": {
     "CLERK_PUBLISHABLE_KEY": "<pk_live_or_pk_test>",
-    "ADMIN_USER_IDS": "",
+    "ADMIN_USER_IDS": "${TI_ADMIN_USER_IDS?}",
     "API_BASE": "${TI_API_URL}",
     "E2B_TEMPLATE": "threat-index-jobs",
     "R2_BUCKET_NAME": "threat-index",
     "SITE_ORIGIN": "${TI_APP_URL?}"
   },
   // Secrets: CLERK_SECRET_KEY, CLERK_WEBHOOK_SIGNING_SECRET, RESEND_WEBHOOK_SECRET,
-  // UNSUBSCRIBE_SECRET, JOB_HMAC_SECRET, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, E2B_API_KEY
+  // UNSUBSCRIBE_SECRET, JOB_HMAC_SECRET, EDGE_HMAC_SECRET (same value as ti-web's), R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, E2B_API_KEY
 
   "env": {
     "staging": {
@@ -96,10 +110,21 @@
       ],
       "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index-staging" }],
       "kv_namespaces": [{ "binding": "SETTINGS", "id": "${TI_SETTINGS_KV_ID_STAGING}" }],
-      "queues": { "producers": [{ "binding": "LOAD", "queue": "ti-load-staging" }] },
+      "queues": {
+        "producers": [
+          { "binding": "LOAD", "queue": "ti-load-staging" },
+          { "binding": "JOBS", "queue": "ti-jobs-staging" },
+          { "binding": "JOBS_DLQ", "queue": "ti-jobs-dlq-staging" }
+        ]
+      },
+      "ratelimits": [
+        { "name": "RL_PUBLIC", "namespace_id": "7201", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_USER", "namespace_id": "7202", "simple": { "limit": 240, "period": 60 } },
+        { "name": "RL_DEEP", "namespace_id": "7203", "simple": { "limit": 5, "period": 60 } }
+      ],
       // CLERK_PUBLISHABLE_KEY is a secret here (Clerk development instance), not a var.
       "vars": {
-        "ADMIN_USER_IDS": "",
+        "ADMIN_USER_IDS": "${TI_ADMIN_USER_IDS?}",
         "API_BASE": "${TI_API_URL_STAGING}",
         "E2B_TEMPLATE": "threat-index-jobs-staging",
         "R2_BUCKET_NAME": "threat-index-staging",

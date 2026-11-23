@@ -61,7 +61,7 @@ export function builtWebConfig(target, dir = WEB_DIR) {
 /**
  * The extra `wrangler deploy` arguments for ti-web: the Clerk publishable key as a plain var, read from
  * TI_CLERK_PUBLISHABLE_KEY_STAGING (staging) or TI_CLERK_PUBLISHABLE_KEY (production), in the environment or the
- * repo's .env. Refuses to deploy when the key is missing, when production would get a `pk_test_` key, or when the
+ * repo's .env, and the /ops admin list from TI_ADMIN_USER_IDS (optional). Refuses to deploy when the key is missing, when production would get a `pk_test_` key, or when the
  * built config has an `AUTH_MODE` var (fake sign-in must never ship). The secret key is a Worker secret, set once
  * with `wrangler secret put CLERK_SECRET_KEY`; it never passes through here.
  */
@@ -80,7 +80,15 @@ export function webDeployArgs(target, builtConfigPath, env = process.env) {
   if (target === 'production' && key.startsWith('pk_test_')) {
     throw new Error('production needs a pk_live_ Clerk key, but TI_CLERK_PUBLISHABLE_KEY is a pk_test_ key');
   }
-  return ['--var', `CLERK_PUBLISHABLE_KEY:${key}`];
+  const args = ['--var', `CLERK_PUBLISHABLE_KEY:${key}`];
+  // The admin list for /ops: user ids, never secrets. Optional: with none, /ops is a 404 for everyone.
+  const admins = (env.TI_ADMIN_USER_IDS ?? '').trim();
+  if (admins) {
+    if (!/^user_[A-Za-z0-9]{1,64}(\s*,\s*user_[A-Za-z0-9]{1,64}){0,19}$/.test(admins))
+      throw new Error('TI_ADMIN_USER_IDS must be a comma list of Clerk user ids (user_...)');
+    args.push('--var', `ADMIN_USER_IDS:${admins.replace(/\s+/g, '')}`);
+  }
+  return args;
 }
 
 /** Waits (with retries, like checkHealth) until GET / answers 200 with HTML. */
