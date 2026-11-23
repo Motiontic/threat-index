@@ -4,6 +4,8 @@ import { inboxManifestKey } from '@ti/core/inbox';
 import { canIngest } from '@ti/core/licence';
 import { jobPrefix } from '@ti/core/r2-keys';
 import { deriveJobKey, SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyRequest } from '@ti/core/sign';
+import { databaseFor } from '@ti/db/tables';
+import { databasesFromEnv } from '@ti/db/write';
 import { SOURCE_BY_ID } from '@ti/sources/registry';
 import type { Context } from 'hono';
 import { Hono } from 'hono';
@@ -12,6 +14,7 @@ import {
   type ApiJobKind,
   describeE2bError,
   ENABLED_JOB_KINDS,
+  GLOBAL_JOB_KINDS,
   JOB_TIMEOUT_MS,
   type JobLauncher,
   launcherFromEnv,
@@ -23,15 +26,34 @@ import {
 } from '../lib/e2b';
 import type { AppEnv, Bindings } from '../lib/env';
 import {
+  ALLOWED_EXACT_KEYS,
   allowedPrefixes,
+  listPrefixError,
   MAX_UPLOAD_URLS,
   presignPut,
   r2SigningConfig,
+  readKeyError,
+  readPrefixes,
   UPLOAD_URL_TTL_SECONDS,
   uploadKeyError,
 } from '../lib/presign';
 
 const MAX_BODY_BYTES = 16 * 1024;
+/** The largest object a sandbox may PUT through the API. */
+export const MAX_OBJECT_BYTES = 50 * 1024 * 1024;
+const LIST_LIMIT = 1000;
+const ROWS_DEFAULT_LIMIT = 500;
+const ROWS_MAX_LIMIT = 1000;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const CONTENT_TYPE = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
+/** Tables a sandbox may page, with their primary keys. Hard-coded: never taken from input. */
+export const ROW_TABLES = ['vulns', 'advisories', 'signals'] as const;
+type RowTable = (typeof ROW_TABLES)[number];
+const ROW_PKS: Record<RowTable, readonly string[]> = {
+  vulns: ['key'],
+  advisories: ['source', 'source_id'],
+  signals: ['vuln_key', 'kind', 'source', 'ref'],
+};
 const MAX_ERROR_CHARS = 1000;
 const SEND_BATCH = 100;
 const ACTIVE = `('queued','starting','running')`;
@@ -61,7 +83,17 @@ const jobRequestSchema = z.object({
   cursor: cursorSchema.optional(),
 }) satisfies z.ZodType<JobRequest>;
 const echoSchema = z.object({ kind: z.literal('echo'), reason: z.string().max(200) });
-const startSchema = z.union([jobRequestSchema, echoSchema]);
+const globalSchema = z.object({
+  kind: z.enum(GLOBAL_JOB_KINDS),
+  reason: z.string().max(200),
+  requestId: z.string().regex(JOB_ID).optional(),
+  day: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine((d) => new Date(`${d}T00:00:00Z`).toISOString().startsWith(d))
+    .optional(),
+});
+const startSchema = z.union([jobRequestSchema, echoSchema, globalSchema]);
 const uploadSchema = z.object({ keys: z.array(z.string()).min(1).max(MAX_UPLOAD_URLS) });
 const completeSchema = z.union([
   z.object({ ok: z.literal(true) }),
@@ -91,7 +123,14 @@ type Ctx = Context<AppEnv>;
 
 function log(
   msg: string,
-  fields: { jobId: string; kind?: string; status?: string; sandboxId?: string | null },
+  fields: {
+    jobId: string;
+    kind?: string;
+    status?: string;
+    sandboxId?: string | null;
+    route?: string;
+    key?: string;
+  },
 ) {
   console.log(JSON.stringify({ msg, ...fields }));
 }
@@ -142,12 +181,12 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
     return text;
   }
 
-  async function signed(c: Ctx, key: string | undefined, body: string): Promise<boolean> {
+  async function signed(c: Ctx, key: string | undefined, body: string, path?: string): Promise<boolean> {
     return verifyRequest(
       key,
       {
         method: c.req.method,
-        path: new URL(c.req.url).pathname,
+        path: path ?? new URL(c.req.url).pathname,
         timestamp: c.req.header(TIMESTAMP_HEADER) ?? null,
         signature: c.req.header(SIGNATURE_HEADER) ?? null,
         body,
@@ -208,7 +247,7 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
 
     if (!enabled.includes(req.kind)) return c.json({ error: 'job_kind_not_ready' }, 501);
     let sourceId: string | null = null;
-    if (req.kind !== 'echo') {
+    if ('sourceId' in req) {
       const source = SOURCE_BY_ID.get(req.sourceId);
       if (!source) return c.json({ error: 'unknown_source' }, 400);
       if (!canIngest(source.licence)) return c.json({ error: 'source_not_ingestible' }, 403);
@@ -230,7 +269,8 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
       killLater(c, s.sandbox_id, s.id, s.kind);
     }
 
-    const id = req.kind === 'echo' ? (deps.newId ?? (() => newJobId(now())))() : req.requestId;
+    const id =
+      'requestId' in req && req.requestId ? req.requestId : (deps.newId ?? (() => newJobId(now())))();
     const existing = (row: Pick<JobRow, 'id' | 'status'>) =>
       c.json({ jobId: row.id, status: row.status, existing: true }, 200);
 
@@ -266,7 +306,7 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
     };
 
     try {
-      const { kind: _k, ...rest } = req as JobRequest & { kind: ApiJobKind };
+      const { kind: _k, ...rest } = req;
       await c.env.BUCKET.put(`${jobPrefix(id)}request.json`, JSON.stringify({ kind: req.kind, ...rest }));
     } catch {
       return fail('could not store the request');
@@ -288,7 +328,8 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
         id,
         kind: req.kind,
         ...(sourceId ? { sourceId } : {}),
-        ...(req.kind !== 'echo' && req.url ? { url: req.url } : {}),
+        ...('url' in req && req.url ? { url: req.url } : {}),
+        ...('day' in req && req.day ? { day: req.day } : {}),
         apiBase,
         hmac: await deriveJobKey(c.env.JOB_HMAC_SECRET, id),
       });
@@ -329,9 +370,10 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
     const row = await getRow(c, auth.id);
     if (!row) return c.json({ error: 'not_found' }, 404);
     if (row.status !== 'running') return c.json({ error: 'job_not_running' }, 409);
-    const prefixes = allowedPrefixes(row.kind, row.id);
+    const prefixes = allowedPrefixes(row.kind, row.id, row.source_id);
+    const exact = ALLOWED_EXACT_KEYS[row.kind] ?? [];
     for (const key of body.keys) {
-      if (uploadKeyError(key, prefixes) !== null) return c.json({ error: 'invalid_key', key }, 400);
+      if (uploadKeyError(key, prefixes, exact) !== null) return c.json({ error: 'invalid_key', key }, 400);
     }
     const cfg = r2SigningConfig(c.env);
     if (!cfg) return c.json({ error: 'r2_not_configured' }, 503);
@@ -412,6 +454,180 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
     log('job complete', { jobId: id, kind: row.kind, status: 'complete', sandboxId: row.sandbox_id });
     killLater(c, row.sandbox_id, id, row.kind);
     return c.json({ jobId: id, status: 'complete', queued: messages.length });
+  });
+
+  // ---- Data routes (sandbox key; the signed path includes the query) ----
+  const rawTarget = (c: Ctx) => {
+    const u = new URL(c.req.url);
+    return { pathname: u.pathname, target: u.pathname + u.search };
+  };
+
+  /**
+   * Signature over `pathname + search` and `signedBody`, the id shape, no `%` in the path, and a `running`
+   * job row. Returns the row, or the Response that refuses the call.
+   */
+  async function dataAuth(c: Ctx, signedBody: string): Promise<JobRow | Response> {
+    const id = c.req.param('id') ?? '';
+    const secret = c.env.JOB_HMAC_SECRET;
+    const key = secret ? await deriveJobKey(secret, id) : undefined;
+    const { pathname, target } = rawTarget(c);
+    if (!(await signed(c, key, signedBody, target))) return c.json({ error: 'invalid_signature' }, 401);
+    if (!JOB_ID.test(id)) return c.json({ error: 'invalid_job_id' }, 400);
+    if (pathname.includes('%')) return c.json({ error: 'invalid_key' }, 400);
+    const row = await getRow(c, id);
+    if (!row) return c.json({ error: 'not_found' }, 404);
+    if (row.status !== 'running') return c.json({ error: 'job_not_running' }, 409);
+    return row;
+  }
+
+  /** The object key from the raw path: everything after `/objects/`. */
+  const objectKey = (c: Ctx): string => {
+    const { pathname } = rawTarget(c);
+    const marker = '/objects/';
+    const at = pathname.indexOf(marker);
+    return at < 0 ? '' : pathname.slice(at + marker.length);
+  };
+
+  route.put('/internal/jobs/:id/objects/*', async (c) => {
+    const digest = c.req.header('x-ti-content-sha256') ?? '';
+    const auth = await dataAuth(c, digest);
+    if (auth instanceof Response) return auth;
+    const key = objectKey(c);
+    const prefixes = allowedPrefixes(auth.kind, auth.id, auth.source_id);
+    if (uploadKeyError(key, prefixes, ALLOWED_EXACT_KEYS[auth.kind] ?? []) !== null) {
+      log('object put refused', { jobId: auth.id, route: 'put-object', key, status: 'invalid_key' });
+      return c.json({ error: 'invalid_key' }, 400);
+    }
+    const lengthHeader = c.req.header('content-length');
+    if (lengthHeader === undefined || !/^\d{1,15}$/.test(lengthHeader))
+      return c.json({ error: 'length_required' }, 411);
+    if (Number(lengthHeader) > MAX_OBJECT_BYTES) return c.json({ error: 'body_too_large' }, 413);
+    if (!SHA256_HEX.test(digest)) return c.json({ error: 'invalid_checksum' }, 400);
+    const contentTypeHeader = c.req.header('content-type') ?? '';
+    const contentType = CONTENT_TYPE.test(contentTypeHeader) ? contentTypeHeader : 'application/octet-stream';
+    try {
+      // The body is streamed straight to R2, which checks the digest: the Worker hashes nothing.
+      const stored = await c.env.BUCKET.put(key, c.req.raw.body ?? new Uint8Array(0), {
+        sha256: digest,
+        httpMetadata: { contentType },
+      });
+      log('object put', { jobId: auth.id, route: 'put-object', key, status: 'ok' });
+      return c.json({ key, size: stored?.size ?? Number(lengthHeader) });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      if (/checksum|sha-?256|did not match|10037/i.test(message)) {
+        log('object put refused', { jobId: auth.id, route: 'put-object', key, status: 'checksum_mismatch' });
+        return c.json({ error: 'checksum_mismatch' }, 400);
+      }
+      log('object put failed', { jobId: auth.id, route: 'put-object', key, status: 'storage_error' });
+      return c.json({ error: 'storage_error' }, 502);
+    }
+  });
+
+  route.get('/internal/jobs/:id/objects/*', async (c) => {
+    const auth = await dataAuth(c, '');
+    if (auth instanceof Response) return auth;
+    const key = objectKey(c);
+    if (readKeyError(key, readPrefixes(auth.id)) !== null) {
+      log('object get refused', { jobId: auth.id, route: 'get-object', key, status: 'invalid_key' });
+      return c.json({ error: 'invalid_key' }, 400);
+    }
+    const obj = await c.env.BUCKET.get(key);
+    if (!obj) return c.json({ error: 'not_found' }, 404);
+    log('object get', { jobId: auth.id, route: 'get-object', key, status: 'ok' });
+    return new Response(obj.body, {
+      headers: {
+        'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream',
+        'content-length': String(obj.size),
+      },
+    });
+  });
+
+  route.get('/internal/jobs/:id/list', async (c) => {
+    const auth = await dataAuth(c, '');
+    if (auth instanceof Response) return auth;
+    const prefix = c.req.query('prefix') ?? '';
+    const cursor = c.req.query('cursor');
+    if (
+      listPrefixError(prefix, readPrefixes(auth.id)) !== null ||
+      (cursor !== undefined && cursor.length > 2048)
+    ) {
+      log('list refused', { jobId: auth.id, route: 'list', key: prefix, status: 'invalid_key' });
+      return c.json({ error: 'invalid_key' }, 400);
+    }
+    const page = await c.env.BUCKET.list({ prefix, ...(cursor ? { cursor } : {}), limit: LIST_LIMIT });
+    log('list', { jobId: auth.id, route: 'list', key: prefix, status: 'ok' });
+    return c.json({
+      objects: page.objects.map((o) => ({ key: o.key, size: o.size })),
+      cursor: page.truncated ? page.cursor : null,
+    });
+  });
+
+  const b64url = {
+    encode: (values: unknown[]) =>
+      btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(values))))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, ''),
+    decode: (text: string): unknown => {
+      if (!/^[A-Za-z0-9_-]{1,2048}$/.test(text)) throw new Error('bad cursor');
+      const bin = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
+      return JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (ch) => ch.charCodeAt(0))));
+    },
+  };
+
+  route.get('/internal/jobs/:id/rows/:table', async (c) => {
+    const auth = await dataAuth(c, '');
+    if (auth instanceof Response) return auth;
+    if (auth.kind === 'echo') return c.json({ error: 'not_allowed' }, 403);
+    const table = c.req.param('table');
+    const invalid = () => {
+      log('rows refused', {
+        jobId: auth.id,
+        route: 'rows',
+        key: table.slice(0, 40),
+        status: 'invalid_query',
+      });
+      return c.json({ error: 'invalid_query' }, 400);
+    };
+    if (!(ROW_TABLES as readonly string[]).includes(table)) return invalid();
+    const pk = ROW_PKS[table as RowTable];
+    const limitText = c.req.query('limit');
+    let limit = ROWS_DEFAULT_LIMIT;
+    if (limitText !== undefined) {
+      if (!/^\d{1,5}$/.test(limitText)) return invalid();
+      limit = Number(limitText);
+      if (limit < 1 || limit > ROWS_MAX_LIMIT) return invalid();
+    }
+    let after: (string | number | null)[] | null = null;
+    const afterText = c.req.query('after');
+    if (afterText) {
+      try {
+        const v = b64url.decode(afterText);
+        if (
+          !Array.isArray(v) ||
+          v.length !== pk.length ||
+          !v.every((x) => typeof x === 'string' || (typeof x === 'number' && Number.isFinite(x)))
+        )
+          return invalid();
+        after = v;
+      } catch {
+        return invalid();
+      }
+    }
+    const db = databasesFromEnv(c.env as unknown as Record<string, unknown>)[databaseFor(table)];
+    if (!db) return c.json({ error: 'database_unavailable' }, 503);
+    const cols = pk.join(', ');
+    const where = after ? ` WHERE (${cols}) > (${pk.map(() => '?').join(', ')})` : '';
+    const result = await db
+      .prepare(`SELECT * FROM ${table}${where} ORDER BY ${cols} LIMIT ?`)
+      .bind(...(after ?? []), limit)
+      .all<Record<string, unknown>>();
+    const rows = result.results;
+    const last = rows[rows.length - 1];
+    const next = rows.length >= limit && last ? b64url.encode(pk.map((col) => last[col] ?? null)) : null;
+    log('rows', { jobId: auth.id, route: 'rows', key: table, status: 'ok' });
+    return c.json({ rows, next });
   });
 
   return route;
