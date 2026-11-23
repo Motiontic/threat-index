@@ -104,7 +104,11 @@ describe('unsubscribe tokens', () => {
   });
 
   it('builds the URL without a doubled slash', () => {
-    expect(unsubscribeUrl('https://api.example.com/', 'abc.def')).toBe('https://api.example.com/unsubscribe?t=abc.def');
-    expect(unsubscribeUrl('https://api.example.com', 'abc.def')).toBe('https://api.example.com/unsubscribe?t=abc.def');
+    expect(unsubscribeUrl('https://api.example.com/', 'abc.def')).toBe(
+      'https://api.example.com/unsubscribe?t=abc.def',
+    );
+    expect(unsubscribeUrl('https://api.example.com', 'abc.def')).toBe(
+      'https://api.example.com/unsubscribe?t=abc.def',
+    );
   });
 });

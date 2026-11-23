@@ -92,7 +92,7 @@ export async function verifyUnsubscribeToken(
 
     const bytes = fromBase64Url(body);
     if (!bytes) return null;
-    const j = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as Record<string, unknown>;
+    const j = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
     if (typeof j !== 'object' || j === null || j.v !== 1) return null;
     const payload = {
       userId: j.u,

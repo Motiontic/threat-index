@@ -1,24 +1,45 @@
+import { verifyUnsubscribeToken } from '@ti/core/unsubscribe';
 import { Hono } from 'hono';
-import { verifyHmac } from '../lib/auth';
 import type { AppEnv } from '../lib/env';
-import { notImplemented } from '../lib/not-implemented';
+import { applyUnsubscribe, renderPage } from '../lib/unsubscribe';
 
 const route = new Hono<AppEnv>();
 
-/** Token format: `<payload>.<hmac-sha256 hex of payload>`, signed with UNSUBSCRIBE_SECRET. */
-async function tokenOk(secret: string | undefined, token: string | undefined): Promise<boolean> {
-  const dot = token?.lastIndexOf('.') ?? -1;
-  if (!token || dot < 1) return false;
-  return verifyHmac(secret, token.slice(0, dot), token.slice(dot + 1));
+const HTML_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'";
+
+function harden(c: { header: (k: string, v: string) => void }, html: boolean) {
+  c.header('Cache-Control', 'no-store');
+  c.header('Referrer-Policy', 'no-referrer'); // the token is in the URL
+  c.header('X-Content-Type-Options', 'nosniff');
+  if (html) c.header('Content-Security-Policy', HTML_CSP);
 }
 
-// Signed token. GET shows a confirmation, POST is the RFC 8058 one-click.
-for (const method of ['get', 'post'] as const) {
-  route[method]('/unsubscribe', async (c) => {
-    if (!(await tokenOk(c.env.UNSUBSCRIBE_SECRET, c.req.query('t'))))
-      return c.json({ error: 'invalid_token' }, 401);
-    return notImplemented(c);
-  });
-}
+// GET shows a confirmation and writes nothing (mail scanners prefetch links).
+route.get('/unsubscribe', async (c) => {
+  const token = c.req.query('t');
+  const p = await verifyUnsubscribeToken(c.env.UNSUBSCRIBE_SECRET, token);
+  harden(c, true);
+  if (!p) return c.html(renderPage('invalid'), 401);
+  return c.html(renderPage('confirm', p, token), 200);
+});
+
+// POST is the RFC 8058 one-click and the page's button. The token comes from the query only.
+route.post('/unsubscribe', async (c) => {
+  const p = await verifyUnsubscribeToken(c.env.UNSUBSCRIBE_SECRET, c.req.query('t'));
+  if (!p) {
+    harden(c, false);
+    return c.json({ error: 'invalid_token' }, 401);
+  }
+  try {
+    await applyUnsubscribe(c.env.DB_USERS, p);
+  } catch {
+    console.error(JSON.stringify({ route: 'unsubscribe', scope: p.scope, applied: false }));
+    harden(c, false);
+    return c.json({ error: 'internal' }, 500);
+  }
+  console.log(JSON.stringify({ route: 'unsubscribe', scope: p.scope, applied: true }));
+  harden(c, true);
+  return c.html(renderPage('done', p), 200);
+});
 
 export default route;
