@@ -1,0 +1,35 @@
+id: example-multi-cve
+
+info:
+  name: Example Product - Multiple Issues
+  author: example-author
+  severity: high
+  description: Hand-written template with a block list of CVE ids.
+  reference:
+    - https://example.test/advisory
+  classification:
+    cvss-score: 8.8
+    cve-id:
+      - CVE-2023-1111
+      - "cve-2023-2222"
+      - not-a-cve
+    cwe-id: CWE-79
+  metadata:
+    max-request: 1
+  tags: cve,cve2023,example
+  confidence: high
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/probe"
+    matchers:
+      - type: word
+        words:
+          - "example"
+    extractors:
+      - type: regex
+        regex:
+          - "x"
+    classification:
+      cve-id: CVE-2099-9999

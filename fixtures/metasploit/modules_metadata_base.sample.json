@@ -1,0 +1,465 @@
+{
+  "exploit_linux/http/panos_telemetry_cmd_exec": {
+    "name": "Palo Alto Networks PAN-OS Unauthenticated Remote Code Execution",
+    "fullname": "exploit/linux/http/panos_telemetry_cmd_exec",
+    "aliases": [],
+    "rank": 600,
+    "disclosure_date": "2024-04-12",
+    "type": "exploit",
+    "author": [
+      "remmons-r7",
+      "sfewer-r7"
+    ],
+    "description": "This module exploits two vulnerabilities in Palo Alto Networks PAN-OS that\n          allow an unauthenticated attacker to create arbitrarily named files and exe",
+    "references": [
+      "CVE-2024-3400",
+      "EDB-51996",
+      "URL-https://security.paloaltonetworks.com/CVE-2024-3400",
+      "URL-https://www.volexity.com/blog/2024/04/12/zero-day-exploitation-of-unauthenticated-remote-code-execution-vulnerability-in-globalprotect-cve-2024-3400/",
+      "URL-https://attackerkb.com/topics/SSTk336Tmf/cve-2024-3400/rapid7-analysis"
+    ],
+    "platform": "Linux,Unix",
+    "arch": "cmd",
+    "rport": 443,
+    "autofilter_ports": [
+      80,
+      8080,
+      443,
+      8000,
+      8888,
+      8880,
+      8008,
+      3000,
+      8443
+    ],
+    "autofilter_services": [
+      "http",
+      "https"
+    ],
+    "targets": [
+      "Default"
+    ],
+    "mod_time": "2026-06-03 06:46:27 +0000",
+    "path": "/modules/exploits/linux/http/panos_telemetry_cmd_exec.rb",
+    "is_install_path": true,
+    "ref_name": "linux/http/panos_telemetry_cmd_exec",
+    "check": true,
+    "post_auth": false,
+    "default_credential": false,
+    "notes": {
+      "Stability": [
+        "crash-safe"
+      ],
+      "Reliability": [
+        "repeatable-session"
+      ],
+      "SideEffects": [
+        "ioc-in-logs",
+        "artifacts-on-disk"
+      ]
+    },
+    "session_types": false,
+    "needs_cleanup": true,
+    "future_field": "example"
+  },
+  "exploit_android/browser/webview_addjavascriptinterface": {
+    "name": "Android Browser and WebView addJavascriptInterface Code Execution",
+    "fullname": "exploit/android/browser/webview_addjavascriptinterface",
+    "aliases": [],
+    "rank": 600,
+    "disclosure_date": "2012-12-21",
+    "type": "exploit",
+    "author": [
+      "jduck <jduck@metasploit.com>",
+      "joev <joev@metasploit.com>"
+    ],
+    "description": "This module exploits a privilege escalation issue in Android < 4.2's WebView component\n          that arises when untrusted JavaScript code is executed by a Web",
+    "references": [
+      "URL-http://blog.trustlook.com/2013/09/04/alert-android-webview-addjavascriptinterface-code-execution-vulnerability/",
+      "URL-https://labs.mwrinfosecurity.com/blog/2012/04/23/adventures-with-android-webviews/",
+      "URL-http://50.56.33.56/blog/?p=314",
+      "URL-https://labs.mwrinfosecurity.com/advisories/2013/09/24/webview-addjavascriptinterface-remote-code-execution/",
+      "URL-https://github.com/mwrlabs/drozer/blob/bcadf5c3fd08c4becf84ed34302a41d7b5e9db63/src/drozer/modules/exploit/mitm/addJavaScriptInterface.py",
+      "CVE-2012-6636",
+      "CVE-2013-4710",
+      "EDB-31519",
+      "OSVDB-97520"
+    ],
+    "platform": "Android,Linux",
+    "arch": "dalvik, x86, armle, mipsle",
+    "rport": null,
+    "autofilter_ports": [],
+    "autofilter_services": [],
+    "targets": [
+      "Automatic"
+    ],
+    "mod_time": "2025-04-26 01:28:35 +0000",
+    "path": "/modules/exploits/android/browser/webview_addjavascriptinterface.rb",
+    "is_install_path": true,
+    "ref_name": "android/browser/webview_addjavascriptinterface",
+    "check": false,
+    "post_auth": false,
+    "default_credential": false,
+    "notes": {
+      "SideEffects": [
+        "artifacts-on-disk"
+      ],
+      "Reliability": [
+        "unreliable-session"
+      ],
+      "Stability": [
+        "crash-safe"
+      ]
+    },
+    "session_types": false,
+    "needs_cleanup": null
+  },
+  "auxiliary_scanner/acpp/login": {
+    "name": "Apple Airport ACPP Authentication Scanner",
+    "fullname": "auxiliary/scanner/acpp/login",
+    "aliases": [],
+    "rank": 300,
+    "disclosure_date": null,
+    "type": "auxiliary",
+    "author": [
+      "Jon Hart <jon_hart@rapid7.com>"
+    ],
+    "description": "This module attempts to authenticate to an Apple Airport using its\n        proprietary and largely undocumented protocol known only as ACPP.",
+    "references": [
+      "CVE-2003-0270"
+    ],
+    "platform": "",
+    "arch": "",
+    "rport": 5009,
+    "autofilter_ports": [
+      5009
+    ],
+    "autofilter_services": [],
+    "targets": null,
+    "mod_time": "2026-11-05 18:27:09 +0000",
+    "path": "/modules/auxiliary/scanner/acpp/login.rb",
+    "is_install_path": true,
+    "ref_name": "scanner/acpp/login",
+    "check": false,
+    "post_auth": true,
+    "default_credential": false,
+    "notes": {
+      "Stability": [
+        "crash-safe"
+      ],
+      "SideEffects": [
+        "ioc-in-logs"
+      ],
+      "Reliability": []
+    },
+    "session_types": false,
+    "needs_cleanup": false,
+    "actions": []
+  },
+  "auxiliary_admin/2wire/xslt_password_reset": {
+    "name": "2Wire Cross-Site Request Forgery Password Reset Vulnerability",
+    "fullname": "auxiliary/admin/2wire/xslt_password_reset",
+    "aliases": [],
+    "rank": 300,
+    "disclosure_date": "2007-08-15",
+    "type": "auxiliary",
+    "author": [
+      "hkm <hkm@hakim.ws>",
+      "Travis Phillips"
+    ],
+    "description": "This module will reset the admin password on a 2Wire wireless router.  This is\n          done by using the /xslt page where authentication is not required, thus",
+    "references": [
+      "CVE-2007-4387",
+      "OSVDB-37667",
+      "BID-36075",
+      "URL-https://seclists.org/bugtraq/2007/Aug/225"
+    ],
+    "platform": "",
+    "arch": "",
+    "rport": 80,
+    "autofilter_ports": [
+      80,
+      8080,
+      443,
+      8000,
+      8888,
+      8880,
+      8008,
+      3000,
+      8443
+    ],
+    "autofilter_services": [
+      "http",
+      "https"
+    ],
+    "targets": null,
+    "mod_time": "2025-05-21 08:32:40 +0000",
+    "path": "/modules/auxiliary/admin/2wire/xslt_password_reset.rb",
+    "is_install_path": true,
+    "ref_name": "admin/2wire/xslt_password_reset",
+    "check": false,
+    "post_auth": false,
+    "default_credential": false,
+    "notes": {
+      "Stability": [
+        "crash-safe"
+      ],
+      "SideEffects": [
+        "ioc-in-logs",
+        "config-changes"
+      ],
+      "Reliability": []
+    },
+    "session_types": false,
+    "needs_cleanup": false,
+    "actions": []
+  },
+  "exploit_windows/fileformat/abbs_amp_lst": {
+    "name": "ABBS Audio Media Player .LST Buffer Overflow",
+    "fullname": "exploit/windows/fileformat/abbs_amp_lst",
+    "aliases": [],
+    "rank": 300,
+    "disclosure_date": "2013-06-30",
+    "type": "exploit",
+    "author": [
+      "Julian Ahrens",
+      "modpr0be <modpr0be@spentera.com>"
+    ],
+    "description": "This module exploits a buffer overflow in ABBS Audio Media Player. The vulnerability\n          occurs when adding a specially crafted .lst file, allowing arbitr",
+    "references": [
+      "CVE-2019-5621 ",
+      "OSVDB-75096",
+      "EDB-25204"
+    ],
+    "platform": "Windows",
+    "arch": "",
+    "rport": null,
+    "autofilter_ports": [],
+    "autofilter_services": [],
+    "targets": [
+      "ABBS Audio Media Player 3.1 / Windows XP SP3 / Windows 7 SP1"
+    ],
+    "mod_time": "2025-10-06 17:15:11 +0000",
+    "path": "/modules/exploits/windows/fileformat/abbs_amp_lst.rb",
+    "is_install_path": true,
+    "ref_name": "windows/fileformat/abbs_amp_lst",
+    "check": false,
+    "post_auth": false,
+    "default_credential": false,
+    "notes": {
+      "Reliability": [
+        "unknown-reliability"
+      ],
+      "Stability": [
+        "unknown-stability"
+      ],
+      "SideEffects": [
+        "unknown-side-effects"
+      ]
+    },
+    "session_types": false,
+    "needs_cleanup": null
+  },
+  "exploit_android/adb/adb_server_exec": {
+    "name": "Android ADB Debug Server Remote Payload Execution",
+    "fullname": "exploit/android/adb/adb_server_exec",
+    "aliases": [],
+    "rank": 600,
+    "disclosure_date": "2016-01-01",
+    "type": "exploit",
+    "author": [
+      "joev <joev@metasploit.com>"
+    ],
+    "description": "Writes and spawns a native payload on an Android device that is listening\n          for adb debug messages.",
+    "references": [],
+    "platform": "Linux",
+    "arch": "armle, x86, x64, mipsle",
+    "rport": 5555,
+    "autofilter_ports": [],
+    "autofilter_services": [],
+    "targets": [
+      "armle",
+      "x86",
+      "x64",
+      "mipsle"
+    ],
+    "mod_time": "2026-04-22 11:59:31 +0000",
+    "path": "/modules/exploits/android/adb/adb_server_exec.rb",
+    "is_install_path": true,
+    "ref_name": "android/adb/adb_server_exec",
+    "check": true,
+    "post_auth": false,
+    "default_credential": false,
+    "notes": {
+      "SideEffects": [
+        "artifacts-on-disk"
+      ],
+      "Reliability": [
+        "repeatable-session"
+      ],
+      "Stability": [
+        "crash-safe"
+      ]
+    },
+    "session_types": false,
+    "needs_cleanup": null
+  },
+  "post_android/local/koffee": {
+    "name": "KOFFEE - Kia OFFensivE Exploit",
+    "fullname": "post/android/local/koffee",
+    "aliases": [],
+    "rank": 300,
+    "disclosure_date": "2020-12-02",
+    "type": "post",
+    "author": [
+      "Gianpiero Costantino",
+      "Ilaria Matteucci"
+    ],
+    "description": "This module exploits CVE-2020-8539, which is an arbitrary code execution vulnerability that allows an to\n          attacker execute the micomd binary file on th",
+    "references": [
+      "CVE-2020-8539",
+      "URL-https://sowhat.iit.cnr.it/pdf/IIT-20-2020.pdf"
+    ],
+    "platform": "Android",
+    "arch": "",
+    "rport": null,
+    "autofilter_ports": null,
+    "autofilter_services": null,
+    "targets": null,
+    "mod_time": "2023-02-03 18:12:53 +0000",
+    "path": "/modules/post/android/local/koffee.rb",
+    "is_install_path": true,
+    "ref_name": "android/local/koffee",
+    "check": false,
+    "post_auth": false,
+    "default_credential": false,
+    "notes": {
+      "Stability": [
+        "crash-safe"
+      ],
+      "SideEffects": [
+        "screen-effects",
+        "config-changes",
+        "ioc-in-logs"
+      ],
+      "Reliability": []
+    },
+    "session_types": [
+      "meterpreter"
+    ],
+    "needs_cleanup": null,
+    "actions": [
+      {
+        "name": "CAMERA_REVERSE_OFF",
+        "description": "It hides the parking camera video stream"
+      },
+      {
+        "name": "CAMERA_REVERSE_ON",
+        "description": "It shows the parking camera video stream"
+      },
+      {
+        "name": "CLUSTER_CHANGE_LANGUAGE",
+        "description": "It changes the cluster language"
+      },
+      {
+        "name": "CLUSTER_RADIO_INFO",
+        "description": "It shows radio info in the instrument cluster "
+      },
+      {
+        "name": "CLUSTER_RANDOM_NAVIGATION",
+        "description": "It shows navigation signals in the instrument cluster "
+      },
+      {
+        "name": "CLUSTER_ROUNDABOUT_FARAWAY",
+        "description": "It shows a round about signal with variable distance in the instrument cluster "
+      },
+      {
+        "name": "CLUSTER_SPEED_LIMIT",
+        "description": "It changes the speed limit shown in the instrument cluster"
+      },
+      {
+        "name": "HIGH_SCREEN_BRIGHTNESS",
+        "description": "It increases the head unit screen brightness"
+      },
+      {
+        "name": "INJECT_CUSTOM",
+        "description": "It injects custom micom payloads"
+      },
+      {
+        "name": "LOW_FUEL_WARNING",
+        "description": "It pops up a low fuel message on the head unit"
+      },
+      {
+        "name": "LOW_SCREEN_BRIGHTNESS",
+        "description": "It decreases the head unit screen brightness"
+      },
+      {
+        "name": "MAX_RADIO_VOLUME",
+        "description": "It sets the radio volume to the max"
+      },
+      {
+        "name": "NAVIGATION_FULL_SCREEN",
+        "description": "It pops up the navigation app window"
+      },
+      {
+        "name": "REDUCE_RADIO_VOLUME",
+        "description": "It decreases the radio volume"
+      },
+      {
+        "name": "SEEK_DOWN_SEARCH",
+        "description": "It triggers the seek down radio frequency search"
+      },
+      {
+        "name": "SEEK_UP_SEARCH",
+        "description": "It triggers the seek up radio frequency search"
+      },
+      {
+        "name": "SET_NAVIGATION_ADDRESS",
+        "description": "It pops up the navigation address window"
+      },
+      {
+        "name": "SWITCH_OFF_HU",
+        "description": "It switches off the head unit"
+      },
+      {
+        "name": "SWITCH_ON_HU",
+        "description": "It switches on the head unit"
+      },
+      {
+        "name": "TOGGLE_RADIO_MUTE",
+        "description": "It mutes/umutes the radio"
+      }
+    ]
+  },
+  "payload_aix/ppc/shell_bind_tcp": {
+    "name": "AIX Command Shell, Bind TCP Inline",
+    "fullname": "payload/aix/ppc/shell_bind_tcp",
+    "aliases": [],
+    "rank": 300,
+    "disclosure_date": null,
+    "type": "payload",
+    "author": [
+      "Ramon de C Valle <rcvalle@metasploit.com>"
+    ],
+    "description": "Listen for a connection and spawn a command shell",
+    "references": [],
+    "platform": "AIX",
+    "arch": "ppc",
+    "rport": null,
+    "autofilter_ports": null,
+    "autofilter_services": null,
+    "targets": null,
+    "mod_time": "2025-04-20 02:57:34 +0000",
+    "path": "/modules/payloads/singles/aix/ppc/shell_bind_tcp.rb",
+    "is_install_path": true,
+    "ref_name": "aix/ppc/shell_bind_tcp",
+    "check": false,
+    "post_auth": false,
+    "default_credential": false,
+    "notes": {},
+    "session_types": false,
+    "needs_cleanup": false,
+    "payload_type": 1,
+    "staged": false
+  }
+}
