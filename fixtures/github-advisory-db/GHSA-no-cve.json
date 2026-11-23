@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.4.0",
+  "id": "GHSA-aaaa-bbbb-cccc",
+  "modified": "2026-11-22T09:15:30Z",
+  "published": "2026-11-22T09:00:00Z",
+  "summary": "Hand-written: advisory with no CVE",
+  "details": "Hand-written for tests.",
+  "affected": [
+    {
+      "package": { "ecosystem": "npm", "name": "example-pkg" },
+      "ranges": [{ "type": "ECOSYSTEM", "events": [{ "introduced": "0" }, { "fixed": "3.1.0" }] }]
+    }
+  ],
+  "database_specific": { "cwe_ids": ["CWE-79", "CWE-79", "not-a-cwe"], "severity": "LOW", "github_reviewed": true }
+}

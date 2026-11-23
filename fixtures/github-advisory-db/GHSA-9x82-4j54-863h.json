@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.4.0",
+  "id": "GHSA-9x82-4j54-863h",
+  "modified": "2026-11-23T21:07:02Z",
+  "published": "2026-11-23T21:07:02Z",
+  "aliases": [
+    "CVE-2026-63476"
+  ],
+  "summary": "isomorphic-git allows unbounded memory allocation from attacker-controlled delta target size (DoS)",
+  "details": "### Summary\nWhen applying a delta object from a packfile, isomorphic-git reads a **server-controlled** `targetSize` and calls `Buffer.alloc(targetSize)` with no upper bound. A single malicious HTTP response to `git.clone()`/`git.fetch()` can force a ~2 GB allocation → memory exhaustion / DoS (process killed on memory-constrained hosts).\n\n### Details\n`src/utils/applyDelta.js`:\n\n```js\nconst sourceSize = readVarIntLE(reader)\nconst targetSize = readVarIntLE(reader)   // attacker-controlled\n…\ntarget = Buffer.alloc(targetSize)\n```\n\nA pack with one `OBJ_REF_DELTA` whose header declares `targetSize = ",
+  "severity": [
+    {
+      "type": "CVSS_V3",
+      "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:L"
+    }
+  ],
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "npm",
+        "name": "isomorphic-git"
+      },
+      "ranges": [
+        {
+          "type": "ECOSYSTEM",
+          "events": [
+            {
+              "introduced": "0"
+            },
+            {
+              "fixed": "1.38.6"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "references": [
+    {
+      "type": "WEB",
+      "url": "https://github.com/isomorphic-git/isomorphic-git/security/advisories/GHSA-9x82-4j54-863h"
+    },
+    {
+      "type": "ADVISORY",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-63476"
+    },
+    {
+      "type": "WEB",
+      "url": "https://github.com/isomorphic-git/isomorphic-git/pull/2370"
+    },
+    {
+      "type": "WEB",
+      "url": "https://github.com/isomorphic-git/isomorphic-git/pull/2373"
+    },
+    {
+      "type": "WEB",
+      "url": "https://github.com/isomorphic-git/isomorphic-git/commit/5c37ea69e9691183fc52d41ba7b6361263e9fedd"
+    },
+    {
+      "type": "WEB",
+      "url": "https://github.com/isomorphic-git/isomorphic-git/commit/823843d1cd19182df79bc907c767f5bcecb39a0b"
+    },
+    {
+      "type": "PACKAGE",
+      "url": "https://github.com/isomorphic-git/isomorphic-git"
+    },
+    {
+      "type": "WEB",
+      "url": "https://github.com/isomorphic-git/isomorphic-git/releases/tag/v1.38.6"
+    }
+  ],
+  "database_specific": {
+    "cwe_ids": [
+      "CWE-400",
+      "CWE-789"
+    ],
+    "severity": "MODERATE",
+    "github_reviewed": true,
+    "github_reviewed_at": "2026-11-23T21:07:02Z",
+    "nvd_published_at": "2026-11-03T20:18:16Z"
+  }
+}
