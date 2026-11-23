@@ -1,6 +1,10 @@
 // ti-api: Hono JSON API, Clerk auth (single-user), webhooks, E2B job callbacks.
 // This config also lists every D1 database with its migrations folder, so
 // `pnpm --filter @ti/db migrate:local` can apply all migrations from here.
+//
+// Top level = production. `--env staging` = staging (worker ti-api-staging, *_staging resources).
+// D1, R2 and Queues are found by name. ${VAR} values are filled in by scripts/wrangler-config.mjs
+// before a deploy, so account-specific IDs never live in this public file.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "ti-api",
@@ -12,47 +16,85 @@
     {
       "binding": "DB_CONTROL",
       "database_name": "ti_control",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/control"
     },
     {
       "binding": "DB_VULNS",
       "database_name": "ti_vulns",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/vulns"
     },
     {
       "binding": "DB_ADVISORIES",
       "database_name": "ti_advisories",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/advisories"
     },
     {
       "binding": "DB_SIGNALS",
       "database_name": "ti_signals",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/signals"
     },
     {
       "binding": "DB_WORLD",
       "database_name": "ti_world",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/world"
     },
     {
       "binding": "DB_USERS",
       "database_name": "ti_users",
-      "database_id": "<fill-after-create>",
       "migrations_dir": "../../packages/db/migrations/users"
     }
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
-  "kv_namespaces": [{ "binding": "SETTINGS", "id": "<fill-after-create>" }],
+  "kv_namespaces": [{ "binding": "SETTINGS", "id": "${TI_SETTINGS_KV_ID}" }],
   "queues": { "producers": [{ "binding": "LOAD", "queue": "ti-load" }] },
   "vars": {
     "CLERK_PUBLISHABLE_KEY": "<pk_live_or_pk_test>",
     "ADMIN_USER_IDS": ""
-  }
+  },
   // Secrets: CLERK_SECRET_KEY, CLERK_WEBHOOK_SIGNING_SECRET, RESEND_WEBHOOK_SECRET,
   // UNSUBSCRIBE_SECRET, JOB_HMAC_SECRET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, E2B_API_KEY
+
+  "env": {
+    "staging": {
+      // Per-branch preview URLs (`pnpm preview`) let loops test here instead of on a laptop.
+      "preview_urls": true,
+      "d1_databases": [
+        {
+          "binding": "DB_CONTROL",
+          "database_name": "ti_control_staging",
+          "migrations_dir": "../../packages/db/migrations/control"
+        },
+        {
+          "binding": "DB_VULNS",
+          "database_name": "ti_vulns_staging",
+          "migrations_dir": "../../packages/db/migrations/vulns"
+        },
+        {
+          "binding": "DB_ADVISORIES",
+          "database_name": "ti_advisories_staging",
+          "migrations_dir": "../../packages/db/migrations/advisories"
+        },
+        {
+          "binding": "DB_SIGNALS",
+          "database_name": "ti_signals_staging",
+          "migrations_dir": "../../packages/db/migrations/signals"
+        },
+        {
+          "binding": "DB_WORLD",
+          "database_name": "ti_world_staging",
+          "migrations_dir": "../../packages/db/migrations/world"
+        },
+        {
+          "binding": "DB_USERS",
+          "database_name": "ti_users_staging",
+          "migrations_dir": "../../packages/db/migrations/users"
+        }
+      ],
+      "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index-staging" }],
+      "kv_namespaces": [{ "binding": "SETTINGS", "id": "${TI_SETTINGS_KV_ID_STAGING}" }],
+      "queues": { "producers": [{ "binding": "LOAD", "queue": "ti-load-staging" }] },
+      // CLERK_PUBLISHABLE_KEY is a secret here (Clerk development instance), not a var.
+      "vars": { "ADMIN_USER_IDS": "" }
+    }
+  }
 }

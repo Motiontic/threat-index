@@ -1,13 +1,17 @@
 // ti-notify: matches changes to watchlists and sends alerts with Resend (free: 100 emails/day).
+// Top level = production. `--env staging` = staging (worker ti-notify-staging, *_staging resources).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "ti-notify",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
+  // No HTTP handler: queue and cron events only, so no public workers.dev URL.
+  "workers_dev": false,
+  "preview_urls": false,
   "d1_databases": [
-    { "binding": "DB_SIGNALS", "database_name": "ti_signals", "database_id": "<fill-after-create>" },
-    { "binding": "DB_USERS", "database_name": "ti_users", "database_id": "<fill-after-create>" }
+    { "binding": "DB_SIGNALS", "database_name": "ti_signals" },
+    { "binding": "DB_USERS", "database_name": "ti_users" }
   ],
   "queues": {
     "consumers": [{ "queue": "ti-notify", "max_batch_size": 1, "max_retries": 5 }]
@@ -15,6 +19,22 @@
   "vars": {
     "EMAIL_FROM": "Threat Index <alerts@<domain>>",
     "APP_BASE": "https://<domain>"
-  }
+  },
   // Secrets: RESEND_API_KEY, UNSUBSCRIBE_SECRET
+
+  "env": {
+    "staging": {
+      "d1_databases": [
+        { "binding": "DB_SIGNALS", "database_name": "ti_signals_staging" },
+        { "binding": "DB_USERS", "database_name": "ti_users_staging" }
+      ],
+      "queues": {
+        "consumers": [{ "queue": "ti-notify-staging", "max_batch_size": 1, "max_retries": 5 }]
+      },
+      "vars": {
+        "EMAIL_FROM": "Threat Index staging <alerts@<domain>>",
+        "APP_BASE": "${TI_APP_URL_STAGING}"
+      }
+    }
+  }
 }

@@ -79,7 +79,7 @@ Code: [Apache License 2.0](LICENSE). The Motiontic name and logo are not covered
 
 ## Before this repo goes public (maintainers)
 
-- [ ] Fill in placeholders: `<ops-contact>`, `<domain>`, `<fill-after-create>` resource IDs.
+- [ ] Fill in placeholders: `<ops-contact>`, `<domain>`, and the `<fill-after-create>` KV namespace ID. D1, R2 and Queues are found by name.
 - [ ] Turn on GitHub private vulnerability reporting, secret scanning, Dependabot alerts and CodeQL.
 - [ ] Pin GitHub Actions to commit SHAs.
 - [ ] Run `pnpm install` and commit the lockfile, then `pnpm up --latest` once to confirm dependency versions.
