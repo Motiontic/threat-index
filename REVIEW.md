@@ -7,11 +7,14 @@ here (or a lint rule) rather than paying for another review cycle.
 ## What failure looks like here
 
 - A licence gate is bypassed: data from a source that is off, link-only or unlicensed gets stored or
-  shown (`packages/core/src/licence.ts`, the source registry, the API's display modes).
+  shown (`packages/core/src/licence.ts`, the source registry and the per-source files in
+  `packages/sources/src/sources/`, the API's display modes).
 - A secret, account ID, KV namespace ID or Clerk key lands in the repo or in logs. Wrangler configs
   keep `${VAR}` placeholders; real values live in `.env`, `.dev.vars` or Wrangler secrets.
 - Account code reads `orgId` or assumes Clerk Organizations. Accounts are single-user, keyed by `userId`.
 - A webhook is accepted without signature verification, or processed twice (dedupe on `svix-id`).
+  Routes for webhooks, `/unsubscribe` and `/internal/jobs/*` (`apps/api/src/routes/`) must check their
+  signature or token before anything else, including while they are still `501` stubs (`lib/auth.ts`).
 - D1 writes skip the budget meter (`reserveWrites`) or go one row at a time instead of in batches;
   a Worker invocation does unbounded work.
 - A migration that may already be applied is edited instead of adding a new one.

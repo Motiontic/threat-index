@@ -22,7 +22,7 @@ Node 22 and pnpm 10 are required. Unit tests run with plain Vitest. From M1, Wor
 
 ## Adding a source
 
-1. **Registry:** add an entry to `packages/sources/src/registry.ts` with id, name, pattern, cadence, licence status and credit line.
+1. **Source file:** add `packages/sources/src/sources/<id>.ts` with id, name, pattern, cadence, licence status and credit line, and list it in `packages/sources/src/registry.ts`.
 2. **Pattern:** reuse one of the seven patterns in `packages/patterns`. Only add a new pattern if none fits, and explain why in the PR.
 3. **Parser:** add `packages/parsers/src/<format>.ts`, or reuse an existing one. Return typed records and list any unknown fields.
 4. **Fixture:** save one small, real response in `fixtures/<source-id>/`, with a `SOURCE.md`.

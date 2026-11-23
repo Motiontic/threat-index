@@ -9,7 +9,8 @@
       "!fixtures",
       "!worktrees",
       "!.loops",
-      "!**/wrangler.deploy.jsonc"
+      "!**/wrangler.deploy.jsonc",
+      "!**/wrangler.test.jsonc"
     ]
   },
   "formatter": {
