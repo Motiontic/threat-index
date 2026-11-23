@@ -1,6 +1,6 @@
 // ti-collector: cron planner + ti-jobs consumer (pull patterns, linker, watchdog).
-// D1, R2 and Queues are found by name, so no IDs are needed. Only the KV id must be filled in before deploying
-// (`wrangler kv namespace list`).
+// Top level = production. `--env staging` = staging (worker ti-collector-staging, *_staging resources).
+// D1, R2 and Queues are found by name. ${VAR} values are filled in by scripts/wrangler-config.mjs.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "ti-collector",
@@ -8,8 +8,11 @@
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // No HTTP handler: queue and cron events only, so no public workers.dev URL.
+  "workers_dev": false,
+  "preview_urls": false,
   "triggers": {
-    // every 3 h · daily after EPSS · nightly fold · weekly (4 of the 5 free cron triggers)
+    // every 3 h · daily after EPSS · nightly fold · weekly (staging inherits the same schedule)
     "crons": ["0 */3 * * *", "45 14 * * *", "30 2 * * *", "0 5 * * 1"]
   },
   "d1_databases": [
@@ -20,19 +23,52 @@
     { "binding": "DB_WORLD", "database_name": "ti_world" }
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
-  "kv_namespaces": [{ "binding": "SETTINGS", "id": "<fill-after-create>" }],
+  "kv_namespaces": [{ "binding": "SETTINGS", "id": "${TI_SETTINGS_KV_ID}" }],
   "queues": {
     "producers": [{ "binding": "JOBS", "queue": "ti-jobs" }, { "binding": "NOTIFY", "queue": "ti-notify" }],
     "consumers": [
       { "queue": "ti-jobs", "max_batch_size": 5, "max_retries": 5, "dead_letter_queue": "ti-jobs-dlq" }
     ]
   },
-  // Watchdog emails go only to an address verified in Email Routing (free).
+  // Watchdog emails go only to an address verified in Email Routing.
   "send_email": [{ "name": "OPS_EMAIL", "destination_address": "<ops-contact>" }],
   "vars": {
     "USER_AGENT": "ThreatIndex/0.1 (+https://github.com/Motiontic/threat-index; <ops-contact>)",
     "API_BASE": "https://api.<domain>"
-  }
+  },
   // Secrets (wrangler secret put): GITHUB_TOKEN, GITLAB_TOKEN, NVD_API_KEY, E2B_API_KEY,
   // R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, JOB_HMAC_SECRET
+
+  "env": {
+    "staging": {
+      "d1_databases": [
+        { "binding": "DB_CONTROL", "database_name": "ti_control_staging" },
+        { "binding": "DB_VULNS", "database_name": "ti_vulns_staging" },
+        { "binding": "DB_ADVISORIES", "database_name": "ti_advisories_staging" },
+        { "binding": "DB_SIGNALS", "database_name": "ti_signals_staging" },
+        { "binding": "DB_WORLD", "database_name": "ti_world_staging" }
+      ],
+      "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index-staging" }],
+      "kv_namespaces": [{ "binding": "SETTINGS", "id": "${TI_SETTINGS_KV_ID_STAGING}" }],
+      "queues": {
+        "producers": [
+          { "binding": "JOBS", "queue": "ti-jobs-staging" },
+          { "binding": "NOTIFY", "queue": "ti-notify-staging" }
+        ],
+        "consumers": [
+          {
+            "queue": "ti-jobs-staging",
+            "max_batch_size": 5,
+            "max_retries": 5,
+            "dead_letter_queue": "ti-jobs-dlq-staging"
+          }
+        ]
+      },
+      // No ops email from staging.
+      "vars": {
+        "USER_AGENT": "ThreatIndex-staging/0.1 (+https://github.com/Motiontic/threat-index)",
+        "API_BASE": "${TI_API_URL_STAGING}"
+      }
+    }
+  }
 }

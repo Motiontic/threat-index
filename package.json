@@ -14,7 +14,10 @@
     "format": "biome format --write .",
     "typecheck": "pnpm -r --parallel --filter \"!@ti/web\" exec tsc --noEmit",
     "test": "vitest run",
-    "deploy": "pnpm -r --filter \"./apps/*\" deploy"
+    "build": "pnpm lint && pnpm typecheck && pnpm test",
+    "preview": "node scripts/preview.mjs",
+    "deploy:staging": "node scripts/deploy.mjs staging",
+    "deploy:production": "node scripts/deploy.mjs production"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

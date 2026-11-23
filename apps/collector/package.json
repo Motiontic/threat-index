@@ -5,8 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "dev": "wrangler dev"
   },
   "dependencies": {
     "@ti/core": "workspace:*",

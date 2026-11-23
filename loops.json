@@ -1,0 +1,46 @@
+{
+  "worktreeDir": "worktrees",
+  "branchPrefix": "feat/",
+  "portStride": 100,
+  "repos": [
+    {
+      "name": "threat-index",
+      "path": ".",
+      "baseBranch": "main",
+      "basePort": 4000,
+      "dev": [
+        "node",
+        "-e",
+        "console.error('No local dev servers in this repo. Run `pnpm preview` and test the staging URL it prints.'); process.exit(1)"
+      ],
+      "env": {}
+    }
+  ],
+  "review": {
+    "fixCycles": 2,
+    "security": true,
+    "sensitivePaths": [
+      ".github/workflows/**",
+      "CODEOWNERS",
+      ".github/CODEOWNERS",
+      "**/wrangler.jsonc",
+      "packages/db/migrations/**",
+      "apps/api/src/**/auth*",
+      "apps/api/src/**/webhook*",
+      "apps/api/src/routes/webhooks*/**",
+      "apps/web/app/**/sign-*",
+      "apps/notify/**",
+      "packages/core/src/licence*",
+      "packages/sources/src/registry*",
+      "e2b/e2b.Dockerfile",
+      "e2b/e2b.toml",
+      "**/.dev.vars*",
+      "pnpm-workspace.yaml",
+      "**/install*"
+    ]
+  },
+  "hooks": {
+    "preLoop": null,
+    "postShip": null
+  }
+}

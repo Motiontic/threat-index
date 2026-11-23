@@ -1,10 +1,14 @@
-// ti-loader: moves E2B output (R2 inbox/) into D1 within the free daily write budget.
+// ti-loader: moves E2B output (R2 inbox/) into D1 within the daily write budget.
+// Top level = production. `--env staging` = staging (worker ti-loader-staging, *_staging resources).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "ti-loader",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
+  // No HTTP handler: queue and cron events only, so no public workers.dev URL.
+  "workers_dev": false,
+  "preview_urls": false,
   "d1_databases": [
     { "binding": "DB_CONTROL", "database_name": "ti_control" },
     { "binding": "DB_VULNS", "database_name": "ti_vulns" },
@@ -15,5 +19,21 @@
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index" }],
   "queues": {
     "consumers": [{ "queue": "ti-load", "max_batch_size": 1, "max_retries": 10 }]
+  },
+
+  "env": {
+    "staging": {
+      "d1_databases": [
+        { "binding": "DB_CONTROL", "database_name": "ti_control_staging" },
+        { "binding": "DB_VULNS", "database_name": "ti_vulns_staging" },
+        { "binding": "DB_ADVISORIES", "database_name": "ti_advisories_staging" },
+        { "binding": "DB_SIGNALS", "database_name": "ti_signals_staging" },
+        { "binding": "DB_WORLD", "database_name": "ti_world_staging" }
+      ],
+      "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "threat-index-staging" }],
+      "queues": {
+        "consumers": [{ "queue": "ti-load-staging", "max_batch_size": 1, "max_retries": 10 }]
+      }
+    }
   }
 }

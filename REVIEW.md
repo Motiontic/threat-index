@@ -1,0 +1,33 @@
+# REVIEW.md
+
+What gstack-loops' reviewer should care about in this repo. It reads this file on every review,
+headless or in `/gloop-build`. Keep it short. When the same finding keeps coming back, add a line
+here (or a lint rule) rather than paying for another review cycle.
+
+## What failure looks like here
+
+- A licence gate is bypassed: data from a source that is off, link-only or unlicensed gets stored or
+  shown (`packages/core/src/licence.ts`, the source registry, the API's display modes).
+- A secret, account ID, KV namespace ID or Clerk key lands in the repo or in logs. Wrangler configs
+  keep `${VAR}` placeholders; real values live in `.env`, `.dev.vars` or Wrangler secrets.
+- Account code reads `orgId` or assumes Clerk Organizations. Accounts are single-user, keyed by `userId`.
+- A webhook is accepted without signature verification, or processed twice (dedupe on `svix-id`).
+- D1 writes skip the budget meter (`reserveWrites`) or go one row at a time instead of in batches;
+  a Worker invocation does unbounded work.
+- A migration that may already be applied is edited instead of adding a new one.
+- Personal data (emails, user IDs) appears in logs, or deleting an account leaves user rows behind.
+- A queue- or cron-only Worker gets a public HTTP route.
+
+## Do not nitpick
+
+- Formatting and naming that Biome already enforces.
+- Style preferences with no effect on behavior.
+
+## Ignore
+
+- `pnpm-lock.yaml`, generated `apps/*/wrangler.deploy.jsonc`, test fixtures under `fixtures/`.
+
+## How to report
+
+- Every finding names a file and a line. Never guess a filename.
+- Start with a summary that gives the count, or says exactly "no issues".
