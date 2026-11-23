@@ -82,21 +82,40 @@ export function toNotice(row: NoticeRow, mode: 'full' | 'link'): BreachNotice {
   return out;
 }
 
-function parseDates(raw: string | null): { from: string; to: string } | undefined {
-  if (!raw) return undefined;
-  try {
-    const v = JSON.parse(raw) as { from?: unknown; to?: unknown };
-    return typeof v.from === 'string' && typeof v.to === 'string' ? { from: v.from, to: v.to } : undefined;
-  } catch {
-    return undefined;
-  }
+const earliest = (xs: (string | null | undefined)[]): string | undefined =>
+  xs.reduce<string | undefined>((m, x) => (x && (m === undefined || x < m) ? x : m), undefined);
+
+/**
+ * Earliest `notified` among visible notices (as the linker does), else the earliest occurred/discovered date
+ * of a `full` notice. The event row is only a last resort: it is built from hidden sources too.
+ * `listBreaches` orders by the same rule in SQL.
+ */
+function visibleFirstSeen(ev: EventRow, notices: { row: NoticeRow; mode: 'full' | 'link' }[]): string {
+  return (
+    earliest(notices.map((n) => n.row.notified)) ??
+    earliest(notices.flatMap((n) => (n.mode === 'full' ? [n.row.occurred_from ?? n.row.discovered] : []))) ??
+    ev.first_seen
+  );
+}
+
+/** The occurrence span of `full` notices only. */
+function visibleDates(
+  notices: { row: NoticeRow; mode: 'full' | 'link' }[],
+): { from: string; to: string } | undefined {
+  const full = notices.filter((n) => n.mode === 'full').map((n) => n.row);
+  const from = earliest(full.map((r) => r.occurred_from));
+  const to = full.reduce<string | undefined>(
+    (m, r) => (r.occurred_to && (m === undefined || r.occurred_to > m) ? r.occurred_to : m),
+    undefined,
+  );
+  return from && to ? { from, to } : undefined;
 }
 
 function summarise(ev: EventRow, notices: { row: NoticeRow; mode: 'full' | 'link' }[]): BreachSummary {
   const out: BreachSummary = {
     key: ev.key,
     company: ev.company_key && ev.company_name ? { key: ev.company_key, name: ev.company_name } : null,
-    firstSeen: ev.first_seen,
+    firstSeen: visibleFirstSeen(ev, notices),
     noticeCount: notices.length,
     counts: breachCounts(notices),
     jurisdictions: [
@@ -106,7 +125,7 @@ function summarise(ev: EventRow, notices: { row: NoticeRow; mode: 'full' | 'link
     ].sort(),
     sources: [...new Set(notices.map((n) => n.row.source))].sort(),
   };
-  const dates = parseDates(ev.dates);
+  const dates = visibleDates(notices);
   if (dates) out.dates = dates;
   return out;
 }
@@ -140,12 +159,18 @@ export async function listBreaches(
       : `AND (c.name LIKE ?3 ESCAPE '\\' OR EXISTS (SELECT 1 FROM breach_notices m WHERE m.company_key = e.company_key AND m.event_key = e.key AND m.source IN (${src}) AND m.raw_name LIKE ?3 ESCAPE '\\'))`;
   const binds: (string | number)[] = [PAGE_SIZE + 1, offset];
   if (q !== undefined) binds.push(likePattern(q));
-  binds.push(...ids);
+  binds.push(...ids, ...v.full);
+  const fullSrc = placeholders(base + ids.length, v.full.length);
+  // The event row is built from every notice, so its first_seen is not used for order: sort on visible notices only.
+  const seen = `COALESCE(
+      (SELECT MIN(s.notified) FROM breach_notices s WHERE s.company_key = e.company_key AND s.event_key = e.key AND s.source IN (${src})),
+      (SELECT MIN(COALESCE(s.occurred_from, s.discovered)) FROM breach_notices s WHERE s.company_key = e.company_key AND s.event_key = e.key AND s.source IN (${fullSrc})),
+      e.first_seen)`;
   const sql = `SELECT e.key AS key, e.company_key AS company_key, e.first_seen AS first_seen, e.dates AS dates, c.name AS company_name
     FROM breach_events e LEFT JOIN companies c ON c.key = e.company_key
     WHERE EXISTS (SELECT 1 FROM breach_notices n WHERE n.company_key = e.company_key AND n.event_key = e.key AND n.source IN (${src}))
     ${match}
-    ORDER BY e.first_seen DESC, e.key DESC LIMIT ?1 OFFSET ?2`;
+    ORDER BY ${seen} DESC, e.key DESC LIMIT ?1 OFFSET ?2`;
   const rows =
     (
       await env.DB_WORLD.prepare(sql)

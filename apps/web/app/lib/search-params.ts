@@ -4,7 +4,6 @@ import type { EntryType, SearchParams, SearchSort, Severity } from '../data/type
 export const MAX_QUERY = 200;
 export const SEARCH_TYPES: EntryType[] = ['vuln', 'breach', 'ai', 'mal', 'tech', 'term'];
 /** Every type has an API behind it: `/v1/search` for vuln and mal, the world list routes for the rest. */
-export const API_TYPES: EntryType[] = ['vuln', 'breach', 'ai', 'mal', 'tech', 'term'];
 /** The types `/v1/search` answers. */
 export const SEARCH_API_TYPES: EntryType[] = ['vuln', 'mal'];
 export const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low'];

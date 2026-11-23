@@ -97,6 +97,17 @@ describe('breaches', () => {
     expect(JSON.stringify(list)).not.toContain('ransomware-live');
   });
 
+  it('a hidden notice with the earliest date moves neither firstSeen, dates nor the list order', async () => {
+    const d = await json(await get(`/v1/breaches/${ACME}`));
+    expect(d.firstSeen).toBe('2024-03-10'); // H1; W1 (hidden) is 2022-12-01
+    expect(d.dates).toEqual({ from: '2024-03-01', to: '2024-03-04' }); // not 2022-11-01
+    const list = await json(await get('/v1/breaches'));
+    const row = list.items.find((i: { key: string }) => i.key === 'cik:0000000001@2024-03-04');
+    expect(row.firstSeen).toBe('2024-03-10');
+    expect(row.dates).toEqual({ from: '2024-03-01', to: '2024-03-04' });
+    expect(list.items.map((i: { key: string }) => i.key).indexOf('cik:0000000001@2024-03-04')).toBe(1);
+  });
+
   it('link notices carry only the link fields and add no count or jurisdiction', async () => {
     const d = await json(await get(`/v1/breaches/${ACME}`));
     const link = d.notices.find((n: { source: string }) => n.source === 'databreaches-net');
