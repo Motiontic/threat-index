@@ -6,20 +6,20 @@ A one-page map of how Threat Index fits together. The full design is in
 
 ## Apps and packages
 
-| Path | Owns |
-| ---- | ---- |
-| `apps/collector` | Cron planner, the `ti-jobs` queue consumer (`step.ts`), receipts, the watchdog, and the signed hand-off of heavy jobs |
-| `apps/loader` | Consumes the `ti-load` queue and moves E2B output from R2 into D1 within the daily write budget |
-| `apps/notify` | Consumes the `ti-notify` queue, matches changes to watchlists, and sends alert and digest email |
-| `apps/api` | Hono JSON API: entries, search, accounts, webhooks, and the signed `/internal/jobs` routes |
-| `apps/web` | React Router server-rendered web app; it reads everything through the API service binding |
-| `packages/core` | Types, ID normalisation, licence gates, the budget meter, request signing, R2 key layout |
-| `packages/sources` | The source registry: one file per source in `src/sources/` |
-| `packages/patterns` | The seven pull patterns: `git`, `changelist`, `since`, `fingerprint`, `feed`, `page`, `heavy` |
-| `packages/parsers` | One parser per data format, found by file name (`loadParser`) |
-| `packages/linker` | Alias graph, hot-set rule, change log, company matching |
-| `packages/db` | SQL migrations for the six D1 databases |
-| `e2b/` | The sandbox template and the heavy jobs it runs |
+| Path                | Owns                                                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `apps/collector`    | Cron planner, the `ti-jobs` queue consumer (`step.ts`), receipts, the watchdog, and the signed hand-off of heavy jobs |
+| `apps/loader`       | Consumes the `ti-load` queue and moves E2B output from R2 into D1 within the daily write budget                       |
+| `apps/notify`       | Consumes the `ti-notify` queue, matches changes to watchlists, and sends alert and digest email                       |
+| `apps/api`          | Hono JSON API: entries, search, accounts, webhooks, and the signed `/internal/jobs` routes                            |
+| `apps/web`          | React Router server-rendered web app; it reads everything through the API service binding                             |
+| `packages/core`     | Types, ID normalisation, licence gates, the budget meter, request signing, R2 key layout                              |
+| `packages/sources`  | The source registry: one file per source in `src/sources/`                                                            |
+| `packages/patterns` | The seven pull patterns: `git`, `changelist`, `since`, `fingerprint`, `feed`, `page`, `heavy`                         |
+| `packages/parsers`  | One parser per data format, found by file name (`loadParser`)                                                         |
+| `packages/linker`   | Alias graph, hot-set rule, change log, company matching                                                               |
+| `packages/db`       | SQL migrations for the six D1 databases                                                                               |
+| `e2b/`              | The sandbox template and the heavy jobs it runs                                                                       |
 
 ## Data flow
 

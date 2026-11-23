@@ -13,12 +13,12 @@ guide: [`packages/sources/src/sources/trickest-cve.ts`](../packages/sources/src/
 Read the source's terms before writing code. The registry records one status per source
 (`LicenceStatus` in `packages/core/src/licence.ts`):
 
-| Status | Meaning | What the code does |
-| ------ | ------- | ------------------ |
-| `on` | Commercial use allowed, with attribution | Ingested and shown in full, with the credit line |
-| `ask` | No written terms found | Ingested and shown with credit; confirmation is being sought |
-| `wait` | Needs written permission, or forbids commercial use | Not ingested (`canIngest`) and hidden (`displayMode`) |
-| `link` | All rights reserved | Ingested, but only ID, title, date and link are kept and shown |
+| Status | Meaning                                             | What the code does                                             |
+| ------ | --------------------------------------------------- | -------------------------------------------------------------- |
+| `on`   | Commercial use allowed, with attribution            | Ingested and shown in full, with the credit line               |
+| `ask`  | No written terms found                              | Ingested and shown with credit; confirmation is being sought   |
+| `wait` | Needs written permission, or forbids commercial use | Not ingested (`canIngest`) and hidden (`displayMode`)          |
+| `link` | All rights reserved                                 | Ingested, but only ID, title, date and link are kept and shown |
 
 Find the terms: a `LICENSE` file, the repository's licence on GitHub (`curl https://api.github.com/repos/<owner>/<repo>`
 shows `license`), or the site's terms page. Write down the URL and what it says in the fixture's `SOURCE.md`
@@ -33,15 +33,15 @@ metadata only: ID, date, URL and CVE. Never fetch or store exploit code.
 How does the source tell you what changed? Each pattern reads its own block of the source's `pull` config
 (`PullConfig` in `packages/sources/src/pull.ts`) and hands the parser one `RawItem.body` per item.
 
-| The source has… | Pattern | `pull` block needs | The parser receives (`RawItem.body`) |
-| --- | --- | --- | --- |
-| a git repo (GitHub) | `git` | `git: { repo: 'owner/name', branch?, include: [globs] }` | a `GitFile`: `{ path, status, previousPath?, text }`; `text` is `null` when removed |
-| its own list of changed records | `changelist` | `changelist: { listUrl, timeColumn, refColumn, itemUrl }` | `{ ref, time, text }`; `text` is `null` if the item is gone |
-| an API with a "modified since" filter | `since` | `since: { url, startParam, offsetParam, limitParam, itemsPath, idPath }` | the response document with its items array cut to one entry |
-| one small file with an ETag or version | `fingerprint` | `fingerprint: { url, format, key }` | one changed entry (with `itemsPath`, the whole document cut to that entry) |
-| an RSS or Atom feed | `feed` | `feed: { url }` | one feed item as parsed XML; for `link` sources only `{ id, title, date, link }` |
-| only a web page | `page` | `page: { url, item, key, fields }` | one row: an object with a value per configured field |
-| a big file, or data that changes rarely | `heavy` (E2B) | `heavy: { url }`, optional `version` | none: a job parses the file in E2B, not a Worker |
+| The source has…                         | Pattern       | `pull` block needs                                                       | The parser receives (`RawItem.body`)                                                |
+| --------------------------------------- | ------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| a git repo (GitHub)                     | `git`         | `git: { repo: 'owner/name', branch?, include: [globs] }`                 | a `GitFile`: `{ path, status, previousPath?, text }`; `text` is `null` when removed |
+| its own list of changed records         | `changelist`  | `changelist: { listUrl, timeColumn, refColumn, itemUrl }`                | `{ ref, time, text }`; `text` is `null` if the item is gone                         |
+| an API with a "modified since" filter   | `since`       | `since: { url, startParam, offsetParam, limitParam, itemsPath, idPath }` | the response document with its items array cut to one entry                         |
+| one small file with an ETag or version  | `fingerprint` | `fingerprint: { url, format, key }`                                      | one changed entry (with `itemsPath`, the whole document cut to that entry)          |
+| an RSS or Atom feed                     | `feed`        | `feed: { url }`                                                          | one feed item as parsed XML; for `link` sources only `{ id, title, date, link }`    |
+| only a web page                         | `page`        | `page: { url, item, key, fields }`                                       | one row: an object with a value per configured field                                |
+| a big file, or data that changes rarely | `heavy` (E2B) | `heavy: { url }`, optional `version`                                     | none: a job parses the file in E2B, not a Worker                                    |
 
 Git sources only request data files (`json`, `csv`, `md`, `xml`, `yaml`, `yml`, `txt`), never code. Read
 `packages/patterns/src/<pattern>.ts` for the exact shapes. One call returns at most 40 items.
@@ -98,7 +98,12 @@ file name, so there is no map to edit; the file name is what you put in `parser:
 today's date, take the clock as an argument and wrap it, as `trickest-cve` does:
 
 ```ts
-export function parseTrickestCve(input: unknown, today: Date): ParseResult<SignalRecord> & { skipped: number } { /* … */ }
+export function parseTrickestCve(
+  input: unknown,
+  today: Date,
+): ParseResult<SignalRecord> & { skipped: number } {
+  /* … */
+}
 export const parse = (input: unknown) => parseTrickestCve(input, new Date());
 ```
 
