@@ -28,7 +28,7 @@ export const SOURCE_JOB_KINDS = ['first-load', 'epss-diff', 'big-file'] as const
 export const GLOBAL_JOB_KINDS = ['nightly-fold', 'search-index'] as const;
 export type GlobalJobKind = (typeof GLOBAL_JOB_KINDS)[number];
 // `echo` exists only in the API and the sandbox
-export type ApiJobKind = JobRequest['kind'] | GlobalJobKind | 'echo';
+export type ApiJobKind = JobRequest['kind'] | GlobalJobKind | 'echo' | 'deep-query';
 /** Kinds whose sandbox job is implemented. The work that implements a kind adds it here. */
 export const ENABLED_JOB_KINDS: readonly ApiJobKind[] = [
   'echo',
@@ -36,6 +36,7 @@ export const ENABLED_JOB_KINDS: readonly ApiJobKind[] = [
   'epss-diff',
   'nightly-fold',
   'search-index',
+  'deep-query',
 ];
 
 /** Mirrors `Job` in e2b/jobs/src/types.ts. */
