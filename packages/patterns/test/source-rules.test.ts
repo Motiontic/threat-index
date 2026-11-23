@@ -1,13 +1,19 @@
-import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { fillTemplate, globToRegExp } from '../src/util';
 
-const SRC = new URL('../src/', import.meta.url);
-const files = readdirSync(SRC).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
+interface GlobImportMeta {
+  glob(pattern: string, options: { query: string; import: string; eager: true }): Record<string, string>;
+}
+const sources = (import.meta as unknown as GlobImportMeta).glob('../src/*.ts', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+const files = Object.keys(sources)
+  .map((k) => k.replace('../src/', ''))
+  .filter((f) => !f.endsWith('.test.ts'));
 const code = (f: string) =>
-  readFileSync(new URL(f, SRC), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  (sources[`../src/${f}`] ?? '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 describe('what packages/patterns/src may call', () => {
   it('never uses the global fetch, Date.now or new Date()', () => {
