@@ -1,0 +1,14 @@
+{
+  "id": "EUVD-2026-900001",
+  "description": "Example Widget Server before 2.4.1 allows a remote attacker to read arbitrary files through a crafted request. Further details are withheld until a fix is widely deployed.",
+  "datePublished": "Nov 10, 2026, 8:00:00 AM",
+  "dateUpdated": "Nov 21, 2026, 3:45:10 PM",
+  "baseScore": 8.7,
+  "baseScoreVersion": "4.0",
+  "baseScoreVector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+  "references": "https://example.test/advisory/1\n",
+  "aliases": "GHSA-aaaa-bbbb-cccc\n",
+  "assigner": "example",
+  "exploitedSince": "Nov 15, 2026, 12:00:00 AM",
+  "vendorNotes": "hand-written unknown field"
+}
