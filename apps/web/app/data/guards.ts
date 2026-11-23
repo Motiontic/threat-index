@@ -2,6 +2,16 @@
 // pages use into a new object, so nothing else the API sends (an `access: 'full'` body, say) reaches a page.
 // A guard throws `GuardError` on a missing or wrongly typed required field.
 import type {
+  AlertSettings,
+  DigestCadence,
+  Me,
+  SavedSearch,
+  SavedSearchListResponse,
+  SavedSearchParams,
+  WatchItem,
+  WatchListResponse,
+} from '@ti/core/account';
+import type {
   Credit,
   EntryPreview,
   IndexLetterResponse,
@@ -10,6 +20,7 @@ import type {
   SourceStatus,
   SourcesResponse,
 } from '@ti/core/api';
+import type { EntryFullView } from './types';
 
 export class GuardError extends Error {}
 
@@ -175,4 +186,158 @@ export function guardSources(value: unknown): SourcesResponse {
 export function guardApiError(value: unknown): string {
   const o = obj(value, 'error');
   return str(o, 'error', 'error');
+}
+
+// ---- Signed-in responses ----
+
+/** Only http(s) links reach a page; `javascript:`, `data:` and the rest are dropped. */
+export function safeUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const u = new URL(value);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function strList(o: Obj, key: string, what: string): string[] {
+  return arr(o, key, what).map((v) => {
+    if (typeof v !== 'string') throw new GuardError(`${what}.${key}: not strings`);
+    return v;
+  });
+}
+
+const CADENCES: readonly string[] = ['daily', 'weekly', 'off'];
+
+function guardAlerts(value: unknown): AlertSettings {
+  const o = obj(value, 'alerts');
+  const digest = str(o, 'digest', 'alerts');
+  if (!CADENCES.includes(digest)) throw new GuardError('alerts.digest: unknown');
+  const weekday = num(o, 'digestWeekday', 'alerts');
+  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6)
+    throw new GuardError('alerts.digestWeekday: out of range');
+  return { instant: bool(o, 'instant', 'alerts'), digest: digest as DigestCadence, digestWeekday: weekday };
+}
+
+export function guardMe(value: unknown): Me {
+  const o = obj(value, 'me');
+  const name = o.displayName;
+  if (name !== null && name !== undefined && typeof name !== 'string')
+    throw new GuardError('me.displayName: not a string');
+  return {
+    userId: str(o, 'userId', 'me'),
+    email: str(o, 'email', 'me'),
+    displayName: typeof name === 'string' ? name : null,
+    alerts: guardAlerts(o.alerts),
+  };
+}
+
+export function guardWatchItem(value: unknown): WatchItem {
+  const o = obj(value, 'watch item');
+  return {
+    entryKey: str(o, 'entryKey', 'watch item'),
+    title: str(o, 'title', 'watch item'),
+    alertsOn: bool(o, 'alertsOn', 'watch item'),
+    createdAt: str(o, 'createdAt', 'watch item'),
+  };
+}
+
+export function guardWatchList(value: unknown): WatchListResponse {
+  const o = obj(value, 'watch list');
+  return { items: arr(o, 'items', 'watch list').map(guardWatchItem), limit: num(o, 'limit', 'watch list') };
+}
+
+function guardSavedParams(value: unknown): SavedSearchParams {
+  if (value === undefined || value === null) return {};
+  const o = obj(value, 'params');
+  const out: SavedSearchParams = {};
+  for (const k of ['type', 'sig', 'sev', 'year'] as const) {
+    if (o[k] !== undefined) out[k] = strList(o, k, 'params');
+  }
+  if (o.sort === 'rel' || o.sort === 'new') out.sort = o.sort;
+  return out;
+}
+
+export function guardSavedSearch(value: unknown): SavedSearch {
+  const o = obj(value, 'saved search');
+  return {
+    id: str(o, 'id', 'saved search'),
+    name: str(o, 'name', 'saved search'),
+    query: str(o, 'query', 'saved search'),
+    params: guardSavedParams(o.params),
+    alertsOn: bool(o, 'alertsOn', 'saved search'),
+    createdAt: str(o, 'createdAt', 'saved search'),
+  };
+}
+
+export function guardSavedList(value: unknown): SavedSearchListResponse {
+  const o = obj(value, 'saved list');
+  return {
+    items: arr(o, 'items', 'saved list').map(guardSavedSearch),
+    limit: num(o, 'limit', 'saved list'),
+  };
+}
+
+/**
+ * The full entry: `access: 'full'` only (a `preview` answer is null: the page keeps the preview). Fields are
+ * copied; advisories with `display: 'hidden'` are dropped and `link` ones keep only source, id and URL.
+ */
+export function guardEntryFull(value: unknown): EntryFullView | null {
+  const o = obj(value, 'response');
+  if (str(o, 'access', 'response') !== 'full') return null;
+  const base = guardEntryResponse(value);
+  const e = obj(o.entry, 'entry');
+  const advisories: EntryFullView['advisories'] = [];
+  for (const raw of arr(e, 'advisories', 'entry')) {
+    const a = obj(raw, 'advisory');
+    const display = str(a, 'display', 'advisory');
+    if (display === 'hidden') continue;
+    if (display !== 'full' && display !== 'link') throw new GuardError('advisory.display: unknown');
+    const out: EntryFullView['advisories'][number] = {
+      source: str(a, 'source', 'advisory'),
+      sourceId: str(a, 'sourceId', 'advisory'),
+      status: display === 'link' ? '' : str(a, 'status', 'advisory'),
+      display,
+    };
+    put(out, 'url', safeUrl(optStr(a, 'url', 'advisory')));
+    if (display === 'full') {
+      put(out, 'published', optStr(a, 'published', 'advisory'));
+      put(out, 'modified', optStr(a, 'modified', 'advisory'));
+      if (Array.isArray(a.affected)) {
+        out.affected = a.affected.slice(0, 200).map((x) => {
+          const r = obj(x, 'affected');
+          const item: NonNullable<typeof out.affected>[number] = {
+            ecosystem: str(r, 'ecosystem', 'affected'),
+            name: str(r, 'name', 'affected'),
+          };
+          put(item, 'introduced', optStr(r, 'introduced', 'affected'));
+          put(item, 'fixed', optStr(r, 'fixed', 'affected'));
+          put(item, 'range', optStr(r, 'range', 'affected'));
+          return item;
+        });
+      }
+    }
+    advisories.push(out);
+  }
+  const signals = arr(e, 'signals', 'entry').map((raw) => {
+    const s = obj(raw, 'signal');
+    const out: EntryFullView['signals'][number] = {
+      kind: str(s, 'kind', 'signal'),
+      source: str(s, 'source', 'signal'),
+      ref: str(s, 'ref', 'signal'),
+      firstSeen: str(s, 'firstSeen', 'signal'),
+    };
+    put(out, 'url', safeUrl(optStr(s, 'url', 'signal')));
+    return out;
+  });
+  const changes = arr(e, 'changes', 'entry').map((raw) => {
+    const c = obj(raw, 'change');
+    const out: EntryFullView['changes'][number] = { kind: str(c, 'kind', 'change'), at: str(c, 'at', 'change') };
+    put(out, 'old', optStr(c, 'old', 'change'));
+    put(out, 'new', optStr(c, 'new', 'change'));
+    put(out, 'source', optStr(c, 'source', 'change'));
+    return out;
+  });
+  return { ...base, cwe: strList(e, 'cwe', 'entry'), advisories, signals, changes };
 }

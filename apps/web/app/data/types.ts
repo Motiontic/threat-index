@@ -1,5 +1,23 @@
 // The shapes the pages use. The wire shapes come from `@ti/core/api`; only web-side shapes live here.
-import type { EntryPreview, IndexLetterResponse, SearchResponse, SourcesResponse } from '@ti/core/api';
+import type {
+  DeleteAccountResponse,
+  Me,
+  MePatch,
+  SavedSearch,
+  SavedSearchCreate,
+  SavedSearchListResponse,
+  WatchItem,
+  WatchListResponse,
+} from '@ti/core/account';
+import type {
+  EntryAdvisory,
+  EntryChange,
+  EntryPreview,
+  EntrySignal,
+  IndexLetterResponse,
+  SearchResponse,
+  SourcesResponse,
+} from '@ti/core/api';
 
 export type {
   ApiError,
@@ -36,4 +54,29 @@ export interface SiteData {
   index: (letter: string, cursor?: string) => Promise<IndexLetterResponse | null>;
   sources: () => Promise<SourcesResponse>;
   sitemap: () => Promise<Response | null>;
+}
+
+/** The full view of an entry, as the pages use it (copied field by field by `guardEntryFull`). */
+export interface EntryFullView extends EntryPreview {
+  cwe: string[];
+  advisories: EntryAdvisory[];
+  signals: EntrySignal[];
+  changes: EntryChange[];
+}
+
+export type { DeleteAccountResponse, Me, SavedSearch, WatchItem, WatchListResponse, SavedSearchListResponse };
+
+/** The signed-in calls. Each sends `Authorization: Bearer` and nothing else about the visitor. */
+export interface AccountClient {
+  me: () => Promise<Me>;
+  patchMe: (patch: MePatch) => Promise<Me>;
+  watchList: () => Promise<WatchListResponse>;
+  watch: (id: string, alertsOn?: boolean) => Promise<WatchItem>;
+  unwatch: (id: string) => Promise<void>;
+  savedList: () => Promise<SavedSearchListResponse>;
+  saveSearch: (body: SavedSearchCreate) => Promise<SavedSearch>;
+  deleteSearch: (id: string) => Promise<void>;
+  deleteAccount: () => Promise<void>;
+  /** The full entry, or null when it is missing or the API still answers `access: 'preview'`. */
+  entryFull: (id: string) => Promise<EntryFullView | null>;
 }
