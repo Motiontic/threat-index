@@ -8,4 +8,5 @@ export default [
   route('sources', 'routes/sources.tsx'),
   route('account', 'routes/account.tsx'),
   route('sitemap.xml', 'routes/sitemap.ts'),
+  route('*', 'routes/not-found.tsx'),
 ] satisfies RouteConfig;

@@ -47,7 +47,8 @@ const PAGES = [
 
 const count = (html, re) => (html.match(re) ?? []).length;
 
-const INDEXED = new Set(['/', '/e/CVE-2025-3248', '/index/c', '/sources']);
+// Pages that carry a robots meta tag of their own (api mode sends no header for them).
+const META_NOINDEX = (path) => path.startsWith('/search') || path === '/account';
 
 function checkDocument(path, res, html, { title, status = 200 }) {
   if (res.status !== status) fail(path, `status ${res.status}, wanted ${status}`);
@@ -61,9 +62,12 @@ function checkDocument(path, res, html, { title, status = 200 }) {
   }
   if (!html.includes(NVD)) fail(path, 'NVD notice missing');
   const robots = res.headers.get('x-robots-tag');
-  const shouldIndex = API_MODE && INDEXED.has(path) && status < 400;
+  const shouldIndex = API_MODE && status < 400;
   if (shouldIndex && robots !== null) fail(path, `X-Robots-Tag is "${robots}", wanted none`);
   if (!shouldIndex && robots !== 'noindex') fail(path, 'X-Robots-Tag is not noindex');
+  const metaNoindex = /<meta[^>]*name="robots"[^>]*content="noindex"/.test(html);
+  if (API_MODE && status < 400 && META_NOINDEX(path) && !metaNoindex) fail(path, 'no robots noindex meta');
+  if (API_MODE && status >= 400 && !metaNoindex) fail(path, 'error page has no robots noindex meta');
   if (API_MODE && html.includes(BAND)) fail(path, 'sample-data band shown in api mode');
   if (!API_MODE && !html.includes(BAND)) fail(path, 'sample-data band missing in fixtures mode');
   const csp = res.headers.get('content-security-policy') ?? '';
