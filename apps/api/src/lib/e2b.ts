@@ -24,7 +24,7 @@ export const E2B_REQUEST_TIMEOUT_MS = 30_000;
 
 /** Kinds that work on one source (`JobRequest['kind']`). */
 export const SOURCE_JOB_KINDS = ['first-load', 'epss-diff', 'big-file'] as const;
-/** Kinds that work on the whole data set: the collector never starts them, ops does. */
+/** Kinds that work on the whole data set: the collector starts them on its daily crons (apps/collector/src/daily-jobs.ts). */
 export const GLOBAL_JOB_KINDS = ['nightly-fold', 'search-index'] as const;
 export type GlobalJobKind = (typeof GLOBAL_JOB_KINDS)[number];
 // `echo` exists only in the API and the sandbox
@@ -34,6 +34,7 @@ export const ENABLED_JOB_KINDS: readonly ApiJobKind[] = [
   'echo',
   'first-load',
   'epss-diff',
+  'big-file',
   'nightly-fold',
   'search-index',
   'deep-query',

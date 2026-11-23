@@ -89,3 +89,56 @@ export function fakeFetch(routes: Record<string, () => Response>): typeof fetch 
 
 export const gz = (text: string): Uint8Array<ArrayBuffer> => new Uint8Array(gzipSync(text));
 export const noSleep = async () => {};
+
+export interface TarSpec {
+  path: string;
+  data?: string;
+  /** '0' file (default), '5' directory, '2' symlink, 'x' pax, 'L' GNU long name. */
+  type?: string;
+  badChecksum?: boolean;
+}
+
+/** A small ustar writer for tests: header blocks, data padded to 512, two zero blocks at the end. */
+export function makeTar(entries: TarSpec[], opts: { end?: boolean } = {}): Buffer {
+  const blocks: Buffer[] = [];
+  const header = (name: string, size: number, type: string, bad: boolean): Buffer => {
+    const h = Buffer.alloc(512);
+    h.write(name.slice(0, 100), 0, 'utf8');
+    h.write('0000644\0', 100);
+    h.write('0000000\0', 108);
+    h.write('0000000\0', 116);
+    h.write(`${size.toString(8).padStart(11, '0')}\0`, 124);
+    h.write('00000000000\0', 136);
+    h.write('        ', 148);
+    h.write(type, 156);
+    h.write('ustar\0', 257);
+    h.write('00', 263);
+    let sum = 0;
+    for (const b of h) sum += b;
+    h.write(`${(bad ? sum + 1 : sum).toString(8).padStart(6, '0')}\0 `, 148);
+    return h;
+  };
+  const body = (data: Buffer) => {
+    blocks.push(data, Buffer.alloc((512 - (data.length % 512)) % 512));
+  };
+  for (const e of entries) {
+    const type = e.type ?? '0';
+    const data = Buffer.from(e.data ?? '');
+    const isFile = type === '0' || type === 'x' || type === 'L';
+    blocks.push(header(e.path, isFile ? data.length : 0, type, e.badChecksum ?? false));
+    if (isFile) body(data);
+  }
+  if (opts.end !== false) blocks.push(Buffer.alloc(1024));
+  return Buffer.concat(blocks);
+}
+
+/** A pax record `<len> <key>=<value>\n` with its self-describing length. */
+export function paxRecord(key: string, value: string): string {
+  const rest = ` ${key}=${value}\n`;
+  let len = rest.length + 1;
+  while (String(len).length + rest.length !== len) len = String(len).length + rest.length;
+  return `${len}${rest}`;
+}
+
+export const bodyOf = (bytes: Uint8Array): ReadableStream<Uint8Array> =>
+  new Response(bytes as BodyInit).body as ReadableStream<Uint8Array>;

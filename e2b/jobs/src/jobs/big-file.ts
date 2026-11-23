@@ -1,6 +1,7 @@
-import { NotImplementedError } from '@ti/core/errors';
-import type { Job, JobContext } from '../types.ts';
+import type { Job, JobContext, JobDeps } from '../types.ts';
+import { runLoad } from './first-load.ts';
 
-export async function run(_job: Job, _ctx: JobContext): Promise<void> {
-  throw new NotImplementedError('job big-file');
+/** A large update: the same load as `first-load`, with update semantics (the change window starts at `from`). */
+export async function run(job: Job, ctx: JobContext, deps: JobDeps = {}): Promise<void> {
+  await runLoad(job, ctx, deps, 'update');
 }

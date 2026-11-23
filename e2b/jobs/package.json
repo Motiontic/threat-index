@@ -8,12 +8,14 @@
     "job": "node build.mjs && node dist/run.mjs",
     "bundle": "node build.mjs",
     "round-trip": "node --experimental-strip-types src/round-trip.ts",
-    "start-job": "node --experimental-strip-types src/start-job.ts"
+    "start-job": "node --experimental-strip-types src/start-job.ts",
+    "bench:first-load": "node build.mjs src/bench-first-load.ts dist/bench-first-load.mjs && node dist/bench-first-load.mjs"
   },
   "dependencies": {
     "@ti/core": "workspace:*",
     "@ti/linker": "workspace:*",
     "@ti/parsers": "workspace:*",
+    "@ti/patterns": "workspace:*",
     "@ti/sources": "workspace:*"
   },
   "devDependencies": {

@@ -310,7 +310,19 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
 
     try {
       const { kind: _k, ...rest } = req;
-      await c.env.BUCKET.put(`${jobPrefix(id)}request.json`, JSON.stringify({ kind: req.kind, ...rest }));
+      // The source's stored cursor: where an update (`big-file`) starts reading from.
+      let from: { kind: string; value: string; etag?: string } | undefined;
+      if (sourceId) {
+        const row = await db
+          .prepare(`SELECT kind, value, etag FROM cursors WHERE source_id = ?1`)
+          .bind(sourceId)
+          .first<{ kind: string; value: string; etag: string | null }>();
+        if (row) from = { kind: row.kind, value: row.value, ...(row.etag ? { etag: row.etag } : {}) };
+      }
+      await c.env.BUCKET.put(
+        `${jobPrefix(id)}request.json`,
+        JSON.stringify({ kind: req.kind, ...rest, ...(from ? { from } : {}) }),
+      );
     } catch {
       return fail('could not store the request');
     }

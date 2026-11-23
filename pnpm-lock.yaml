@@ -156,6 +156,9 @@ importers:
       '@ti/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers
+      '@ti/patterns':
+        specifier: workspace:*
+        version: link:../../packages/patterns
       '@ti/sources':
         specifier: workspace:*
         version: link:../../packages/sources
