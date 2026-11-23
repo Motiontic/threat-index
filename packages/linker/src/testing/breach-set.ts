@@ -8,9 +8,9 @@ import type { NoticeRecord } from '@ti/core/types';
  * the dates, counts, jurisdictions and name variants are not copied from any filing and must not be quoted
  * as facts about those incidents.
  *
- * The CIKs are UNVERIFIED: SEC EDGAR answered 403 (rate-limit page) to every request from the build
- * sandbox, so none could be looked up. They are recalled from memory and must be checked on EDGAR before
- * anyone relies on them outside this test. The test only needs them to be distinct and well-formed.
+ * The CIKs were checked on SEC EDGAR on 2026-11-23: all ten against https://www.sec.gov/files/company_tickers.json
+ * (eight matched by name) and the other two (23andMe Holding Co., now registered as Chrome Holding Co., and
+ * Frontier Communications Parent, Inc.) against https://data.sec.gov/submissions/CIK<cik>.json.
  *
  * `expect.companyKey` is the company the notice should resolve to, `expect.event` a label: notices with the
  * same label belong to one event, notices with different labels to different events. `miss: true` marks a
@@ -22,16 +22,16 @@ export interface LabelledNotice {
 }
 
 const CIK = {
-  unh: '0000731766', // UnitedHealth Group Incorporated (unverified)
-  att: '0000732717', // AT&T Inc. (unverified)
-  ln: '0001335258', // Live Nation Entertainment, Inc. (unverified)
-  w23: '0001804591', // 23andMe Holding Co. (unverified)
-  mgm: '0000789570', // MGM Resorts International (unverified)
-  clx: '0000021076', // The Clorox Company (unverified)
-  czr: '0001590895', // Caesars Entertainment, Inc. (unverified)
-  pru: '0001137774', // Prudential Financial, Inc. (unverified)
-  hpe: '0001645590', // Hewlett Packard Enterprise Company (unverified)
-  ftr: '0000020520', // Frontier Communications Parent, Inc. (unverified)
+  unh: '0000731766', // UnitedHealth Group Incorporated
+  att: '0000732717', // AT&T Inc.
+  ln: '0001335258', // Live Nation Entertainment, Inc.
+  w23: '0001804591', // 23andMe Holding Co.
+  mgm: '0000789570', // MGM Resorts International
+  clx: '0000021076', // The Clorox Company
+  czr: '0001590895', // Caesars Entertainment, Inc.
+  pru: '0001137774', // Prudential Financial, Inc.
+  hpe: '0001645590', // Hewlett Packard Enterprise Company
+  ftr: '0000020520', // Frontier Communications Parent, Inc.
 } as const;
 type Co = keyof typeof CIK;
 const key = (c: Co) => `cik:${CIK[c]}`;
