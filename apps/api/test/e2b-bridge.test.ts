@@ -37,6 +37,7 @@ describe('uploadKeyError', () => {
     ['inbox/01HZX3K9ABCDEFGHJKMNPQRSTW/x', 'other id'],
     ['raw/x', 'raw'],
     [`jobs/${ID}x/y`, 'prefix lookalike'],
+    [`jobs/${ID}/request.json`, 'API-owned request.json'],
   ])('rejects %s (%s)', (key) => {
     expect(uploadKeyError(key, p)).not.toBeNull();
   });

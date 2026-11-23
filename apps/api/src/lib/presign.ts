@@ -30,6 +30,9 @@ export function r2SigningConfig(env: Bindings): R2SigningConfig | null {
   return { accountId, bucket, accessKeyId: id, secretAccessKey: secret };
 }
 
+/** Objects the API writes into a sandbox prefix and later trusts; the sandbox must never overwrite them. */
+export const API_OWNED_NAMES: readonly string[] = ['request.json'];
+
 /** Prefixes a sandbox may write. Jobs that later write `lake/` or `lookup/` add theirs here. */
 export function allowedPrefixes(_kind: ApiJobKind, jobId: string): string[] {
   return [jobPrefix(jobId), `inbox/${jobId}/`];
@@ -44,6 +47,9 @@ export function uploadKeyError(key: string, prefixes: string[]): string | null {
   for (const seg of key.split('/')) if (seg === '' || seg === '.' || seg === '..') return 'bad path segment';
   if (prefixes.includes(key)) return 'bare prefix';
   if (!prefixes.some((p) => key.startsWith(p))) return 'outside allowed prefixes';
+  for (const p of prefixes) {
+    if (key.startsWith(p) && API_OWNED_NAMES.includes(key.slice(p.length))) return 'reserved key';
+  }
   return null;
 }
 
