@@ -130,7 +130,7 @@ describe('loading', () => {
       incidents: 1,
     });
     expect(await exists(KEY)).toBe(false);
-    expect(await meter()).toBe(15);
+    expect(await meter()).toBe(16); // 16: includes the notices_by_name index on breach_notices (0002)
     expect(hasEvent('load_ok')).toBe(true);
     expect(logs.join('\n')).not.toContain('Sample flaw'); // never row contents
   });
@@ -143,7 +143,7 @@ describe('loading', () => {
     const { m } = await run(body());
     expect(m.ack).toHaveBeenCalledOnce();
     expect((await counts()).vulns).toBe(1);
-    expect(await meter()).toBe(90_015);
+    expect(await meter()).toBe(90_016); // 16: includes the notices_by_name index on breach_notices (0002)
   });
 
   it('a missing chunk (already loaded and deleted) is acked', async () => {
@@ -203,7 +203,7 @@ describe('deferral', () => {
     const { m, sent } = await run(body({ priority: 'first-load' }));
     expect(m.ack).toHaveBeenCalledOnce();
     expect(sent).toEqual([]);
-    expect(await meter()).toBe(15);
+    expect(await meter()).toBe(16); // 16: includes the notices_by_name index on breach_notices (0002)
     expect(await exists(KEY)).toBe(false);
   });
 });

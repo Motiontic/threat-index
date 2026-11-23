@@ -52,8 +52,13 @@ export const breachNotices = sqliteTable(
     url: text('url'),
     eventKey: text('event_key'),
     modified: text('modified').notNull(),
+    nameKey: text('name_key'),
   },
-  (t) => [primaryKey({ columns: [t.source, t.noticeId] }), index('notices_by_company').on(t.companyKey)],
+  (t) => [
+    primaryKey({ columns: [t.source, t.noticeId] }),
+    index('notices_by_company').on(t.companyKey),
+    index('notices_by_name').on(t.nameKey),
+  ],
 );
 
 export const breachEvents = sqliteTable('breach_events', {
