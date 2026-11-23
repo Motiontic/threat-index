@@ -269,6 +269,18 @@ select {
   }
 }
 
+/* Narrow: the search box takes its own row so it stays usable. */
+@media (max-width: 899px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+  .topbar-search {
+    order: 3;
+    flex: 1 0 100%;
+    max-width: none;
+  }
+}
+
 /* Wide: two columns. */
 @media (min-width: 900px) {
   .shell {
