@@ -87,5 +87,5 @@ export function fakeFetch(routes: Record<string, () => Response>): typeof fetch 
   return fn;
 }
 
-export const gz = (text: string): Uint8Array => gzipSync(text);
+export const gz = (text: string): Uint8Array<ArrayBuffer> => new Uint8Array(gzipSync(text));
 export const noSleep = async () => {};
