@@ -21,7 +21,7 @@ importers:
         specifier: ^5.8.0
         version: 5.9.3
       vitest:
-        specifier: ^5.1.1
+        specifier: ^5.1.0
         version: 5.1.1(@types/node@22.20.5)(vite@7.3.8(@types/node@22.20.5))
       wrangler:
         specifier: ^4.0.0
