@@ -1,6 +1,7 @@
 import { NotImplementedError } from '@ti/core/errors';
 import { rawReceiptKey } from '@ti/core/r2-keys';
 import type { PatternContext } from '@ti/patterns/types';
+import { SOURCE_BY_ID } from '@ti/sources/registry';
 import { decodeTime } from 'ulid';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runStep } from '../src/step';
@@ -22,6 +23,9 @@ import {
 } from './helpers';
 
 beforeEach(reset);
+
+/** A registry source that has no parser yet; the tests below assert that, so they fail loudly if it changes. */
+const NO_PARSER_SOURCE = 'epss';
 
 const kevRecord = { key: 'CVE-2024-1' } as never;
 
@@ -197,14 +201,15 @@ describe('runStep', () => {
   });
 
   it('no parser: receipt only, found = items, nothing written, no cursor, `more` ignored', async () => {
+    expect(SOURCE_BY_ID.get(NO_PARSER_SOURCE)?.parser).toBeUndefined();
     const jobs = fakeJobs();
-    const body = msgBody('cve-list');
+    const body = msgBody(NO_PARSER_SOURCE);
     const deps = mkDeps({
       patternFor: () => ({ check: async () => 'changed', fetch: async () => result({ more: true }) }),
     });
     expect(await runStep(body, 1, { ...E, JOBS: jobs.queue }, deps)).toEqual({ ack: true, status: 'ok' });
     expect(await getRun(body.runId)).toMatchObject({ status: 'ok', found: 1, written: 0 });
-    expect(await getCursor('cve-list')).toBeNull();
+    expect(await getCursor(NO_PARSER_SOURCE)).toBeNull();
     expect(jobs.sent).toHaveLength(0);
     expect((await E.BUCKET.list()).objects).toHaveLength(1);
   });
@@ -470,13 +475,13 @@ describe('runStep', () => {
   });
 
   it('null nextCursor: no cursor is written, the run is recorded with its counts', async () => {
-    const body = msgBody('cve-list');
+    expect(SOURCE_BY_ID.get(NO_PARSER_SOURCE)?.parser).toBeUndefined();
+    const body = msgBody(NO_PARSER_SOURCE);
     const deps = mkDeps({
       patternFor: () => ({ check: async () => 'changed', fetch: async () => result({ nextCursor: null }) }),
-      loadParser: async () => ({ parse: () => [] }),
     });
     expect(await runStep(body, 1, E, deps)).toMatchObject({ ack: true });
-    expect(await getCursor('cve-list')).toBeNull();
+    expect(await getCursor(NO_PARSER_SOURCE)).toBeNull();
     const run = await getRun(body.runId);
     expect(run?.found).toBe(1);
     expect(run?.finished_at).not.toBeNull();
