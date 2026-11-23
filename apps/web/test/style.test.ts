@@ -7,6 +7,9 @@ const FORBIDDEN_FORM_ATTRS = new RegExp(
   'i',
 );
 
+// Built from pieces so a repo-wide search for the removed names finds only real uses.
+const FORBIDDEN_NAMES = new RegExp(['SAMPLE' + '_DATA', 'changes' + '\\.json'].join('|'));
+
 const entries = appFiles();
 const notTokens = entries.filter(([path]) => path !== 'app/styles/tokens.css');
 
@@ -50,7 +53,7 @@ describe('style rules', () => {
   });
 
   it('has no sample-data constant or changes fixture', () => {
-    const offenders = entries.filter(([, text]) => /SAMPLE_DATA|changes\.json/.test(text)).map(([p]) => p);
+    const offenders = entries.filter(([, text]) => FORBIDDEN_NAMES.test(text)).map(([p]) => p);
     expect(offenders).toEqual([]);
   });
 
