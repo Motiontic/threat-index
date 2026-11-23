@@ -52,7 +52,8 @@
     "ADMIN_USER_IDS": "",
     "API_BASE": "${TI_API_URL}",
     "E2B_TEMPLATE": "threat-index-jobs",
-    "R2_BUCKET_NAME": "threat-index"
+    "R2_BUCKET_NAME": "threat-index",
+    "SITE_ORIGIN": "${TI_APP_URL?}"
   },
   // Secrets: CLERK_SECRET_KEY, CLERK_WEBHOOK_SIGNING_SECRET, RESEND_WEBHOOK_SECRET,
   // UNSUBSCRIBE_SECRET, JOB_HMAC_SECRET, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, E2B_API_KEY
@@ -101,7 +102,8 @@
         "ADMIN_USER_IDS": "",
         "API_BASE": "${TI_API_URL_STAGING}",
         "E2B_TEMPLATE": "threat-index-jobs-staging",
-        "R2_BUCKET_NAME": "threat-index-staging"
+        "R2_BUCKET_NAME": "threat-index-staging",
+        "SITE_ORIGIN": "${TI_APP_URL_STAGING?}"
       }
     }
   }

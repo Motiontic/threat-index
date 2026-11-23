@@ -33,18 +33,55 @@ export function r2SigningConfig(env: Bindings): R2SigningConfig | null {
 /** Objects the API writes into a sandbox prefix and later trusts; the sandbox must never overwrite them. */
 export const API_OWNED_NAMES: readonly string[] = ['request.json'];
 
-/** Prefixes a sandbox may write. Jobs that later write `lake/` or `lookup/` add theirs here. */
-export function allowedPrefixes(_kind: ApiJobKind, jobId: string): string[] {
-  return [jobPrefix(jobId), `inbox/${jobId}/`];
+/** Prefixes a sandbox may write, by kind, on top of its own `jobs/<id>/` and `inbox/<id>/`. */
+export function allowedPrefixes(kind: ApiJobKind, jobId: string, sourceId: string | null = null): string[] {
+  const out = [jobPrefix(jobId), `inbox/${jobId}/`];
+  if (kind === 'first-load' && sourceId) out.push(`lake/records/${sourceId}/`);
+  else if (kind === 'epss-diff') out.push('lake/epss/epss/');
+  else if (kind === 'nightly-fold') out.push('lake/raw/');
+  else if (kind === 'search-index')
+    out.push('lookup/search/', 'lookup/index/', 'lookup/vuln/', 'lookup/pkg/');
+  return out;
 }
 
-/** The reason a key is refused, or null if the key is inside `prefixes` and well formed. */
-export function uploadKeyError(key: string, prefixes: string[]): string | null {
+/** Single objects (not prefixes) a kind may write. */
+export const ALLOWED_EXACT_KEYS: Partial<Record<ApiJobKind, string[]>> = { 'search-index': ['sitemap.xml'] };
+
+/** Prefixes a sandbox may read. */
+export function readPrefixes(jobId: string): string[] {
+  return ['raw/', 'lake/', 'lookup/', jobPrefix(jobId), `inbox/${jobId}/`];
+}
+
+function keyShapeError(key: string): string | null {
   if (key.length === 0) return 'empty key';
   if (key.length > MAX_KEY_LENGTH) return 'key too long';
   if (!/^[A-Za-z0-9._/-]+$/.test(key)) return 'bad character';
   if (key.startsWith('/')) return 'leading slash';
   for (const seg of key.split('/')) if (seg === '' || seg === '.' || seg === '..') return 'bad path segment';
+  return null;
+}
+
+/** The reason a key may not be read, or null if it is inside `prefixes` and well formed. */
+export function readKeyError(key: string, prefixes: string[]): string | null {
+  const shape = keyShapeError(key);
+  if (shape) return shape;
+  return prefixes.some((p) => key.startsWith(p)) ? null : 'outside allowed prefixes';
+}
+
+/** The reason a list prefix is refused, or null. A prefix may end in `/` and may be a read prefix itself. */
+export function listPrefixError(prefix: string, prefixes: string[]): string | null {
+  if (prefix.length === 0) return 'empty prefix';
+  const bare = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  const shape = keyShapeError(bare);
+  if (shape) return shape;
+  return prefixes.some((p) => prefix.startsWith(p)) ? null : 'outside allowed prefixes';
+}
+
+/** The reason a key is refused, or null if the key is inside `prefixes` (or is one of `exact`) and well formed. */
+export function uploadKeyError(key: string, prefixes: string[], exact: string[] = []): string | null {
+  const shape = keyShapeError(key);
+  if (shape) return shape;
+  if (exact.includes(key)) return null;
   if (prefixes.includes(key)) return 'bare prefix';
   if (!prefixes.some((p) => key.startsWith(p))) return 'outside allowed prefixes';
   for (const p of prefixes) {

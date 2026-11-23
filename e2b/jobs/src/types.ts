@@ -1,4 +1,5 @@
 import type { JobApi } from './client.ts';
+import type { LakeDeps } from './lib/lake.ts';
 
 export const JOB_KINDS = [
   'first-load',
@@ -17,7 +18,8 @@ export interface Job {
   kind: JobKind;
   sourceId?: string;
   url?: string;
-  apiBase: string; // ti-api, for upload-urls and complete callbacks (HMAC-signed)
+  day?: string; // YYYY-MM-DD (UTC), for the global jobs
+  apiBase: string; // ti-api, for upload-urls and complete routes (HMAC-signed)
   hmac: string; // per-job signature issued by the API; not a long-lived secret
 }
 
@@ -27,4 +29,13 @@ export interface JobContext {
 }
 
 /** What every `jobs/<kind>.ts` exports. */
-export type RunJob = (job: Job, ctx: JobContext) => Promise<void>;
+export type RunJob = (job: Job, ctx: JobContext, deps?: JobDeps) => Promise<void>;
+
+/** What tests replace: the network, the clock, DuckDB. Jobs take it as an optional third argument. */
+export interface JobDeps {
+  fetch?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => Date;
+  duckdb?: LakeDeps['duckdb'];
+  execFile?: LakeDeps['execFile'];
+}

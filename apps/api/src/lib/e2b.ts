@@ -22,9 +22,21 @@ export const MAX_CHUNKS = 5000;
 export const MAX_MANIFEST_BYTES = 1024 * 1024;
 export const E2B_REQUEST_TIMEOUT_MS = 30_000;
 
-export type ApiJobKind = JobRequest['kind'] | 'echo'; // `echo` exists only in the API and the sandbox
+/** Kinds that work on one source (`JobRequest['kind']`). */
+export const SOURCE_JOB_KINDS = ['first-load', 'epss-diff', 'big-file'] as const;
+/** Kinds that work on the whole data set: the collector never starts them, ops does. */
+export const GLOBAL_JOB_KINDS = ['nightly-fold', 'search-index'] as const;
+export type GlobalJobKind = (typeof GLOBAL_JOB_KINDS)[number];
+// `echo` exists only in the API and the sandbox
+export type ApiJobKind = JobRequest['kind'] | GlobalJobKind | 'echo';
 /** Kinds whose sandbox job is implemented. The work that implements a kind adds it here. */
-export const ENABLED_JOB_KINDS: readonly ApiJobKind[] = ['echo'];
+export const ENABLED_JOB_KINDS: readonly ApiJobKind[] = [
+  'echo',
+  'first-load',
+  'epss-diff',
+  'nightly-fold',
+  'search-index',
+];
 
 /** Mirrors `Job` in e2b/jobs/src/types.ts. */
 export interface SandboxJob {
@@ -32,6 +44,8 @@ export interface SandboxJob {
   kind: ApiJobKind;
   sourceId?: string;
   url?: string;
+  /** `YYYY-MM-DD` (UTC): the day a global job works on. */
+  day?: string;
   apiBase: string;
   hmac: string;
 }
@@ -75,12 +89,19 @@ export function describeE2bError(err: unknown, secrets: (string | undefined)[] =
   return `${name}${status}: ${msg}`;
 }
 
+/** The public site origin passed to sandboxes as `SITE_ORIGIN` (an optional var). Null when unset or unusable. */
+export function siteOriginFromEnv(env: Bindings): string | null {
+  const value = (env as { SITE_ORIGIN?: string }).SITE_ORIGIN;
+  return parseApiBase(value);
+}
+
 export function launcherFromEnv(env: Bindings): JobLauncher | null {
   const apiKey = env.E2B_API_KEY;
   const template = env.E2B_TEMPLATE;
   if (!apiKey || !template || !TEMPLATE_RE.test(template)) return null;
   if (parseApiBase(env.API_BASE) === null) return null;
   const wrap = (err: unknown): Error => new Error(describeE2bError(err, [apiKey]));
+  const siteOrigin = siteOriginFromEnv(env);
   return {
     async create({ timeoutMs, metadata }) {
       // Loaded here so the SDK never runs at Worker start-up or on routes that don't launch.
@@ -102,7 +123,7 @@ export function launcherFromEnv(env: Bindings): JobLauncher | null {
           try {
             const handle = await sbx.commands.run('node /app/run.mjs', {
               background: true,
-              envs: { JOB_JSON: JSON.stringify(job) },
+              envs: { JOB_JSON: JSON.stringify(job), ...(siteOrigin ? { SITE_ORIGIN: siteOrigin } : {}) },
               cwd: '/app',
               timeoutMs: 0,
               requestTimeoutMs: E2B_REQUEST_TIMEOUT_MS,

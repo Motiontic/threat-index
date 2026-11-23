@@ -1,10 +1,8 @@
-import { deriveJobKey, SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyRequest } from '@ti/core/sign';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { JobApi } from '../client.ts';
 import type { Job, JobContext } from '../types.ts';
 import {
   buildIndex,
-  type IndexIo,
-  jobIo,
   MAX_POSTINGS,
   MAX_SHARD_BYTES,
   MAX_SITEMAP_ENTRIES,
@@ -143,26 +141,26 @@ describe('buildIndex', () => {
 
 function fakeIo(vulns: VulnRow[], advisories: VulnRow[], opts: { refuse?: string } = {}) {
   const puts: { key: string; body: string; type: string }[] = [];
-  const calls: { table: string; after: string | null; limit: number }[] = [];
-  const io: IndexIo = {
-    async rows(table, after, limit) {
-      calls.push({ table, after, limit });
+  const calls: { table: string; after: string | null; limit: number | undefined }[] = [];
+  const api = {
+    async rows(table: string, o: { after?: string; limit?: number } = {}) {
+      calls.push({ table, after: o.after ?? null, limit: o.limit });
       const all = table === 'vulns' ? vulns : advisories;
-      const start = after === null ? 0 : Number(after);
+      const start = o.after === undefined ? 0 : Number(o.after);
       const end = start + 2;
       return { rows: all.slice(start, end), next: end >= all.length ? null : String(end) };
     },
-    async put(key, body, type) {
-      if (key === opts.refuse) throw new Error(`put ${key} refused: status 403`);
-      puts.push({ key, body, type });
+    async putObject(key: string, body: string | Uint8Array, type: string) {
+      if (key === opts.refuse) throw new Error(`put-object refused: status 403`);
+      puts.push({ key, body: String(body), type });
     },
-  };
-  return { io, puts, calls };
+  } as unknown as JobApi;
+  return { api, puts, calls };
 }
 const job: Job = { id: 'job1', kind: 'search-index', apiBase: 'https://api.test', hmac: 'k' };
-const ctx = (): JobContext & { logs: string[] } => {
+const ctx = (api: JobApi): JobContext & { logs: string[] } => {
   const logs: string[] = [];
-  return { logs, api: {} as never, log: (m) => void logs.push(m) };
+  return { logs, api, log: (m) => void logs.push(m) };
 };
 
 describe('run', () => {
@@ -173,8 +171,8 @@ describe('run', () => {
     const vulns = ['alpha one', 'bravo two', 'charlie three', 'delta four', 'echo five'].map((t, i) =>
       vuln(`V-${i}`, t),
     );
-    const { io, puts, calls } = fakeIo(vulns, []);
-    await run(job, ctx(), io);
+    const { api, puts, calls } = fakeIo(vulns, []);
+    await run(job, ctx(api));
     expect(calls.filter((c) => c.table === 'vulns').map((c) => c.after)).toEqual([null, '2', '4']);
     expect(calls.every((c) => c.limit === 1000)).toBe(true);
     expect(calls.at(-1)?.table).toBe('advisories');
@@ -191,73 +189,16 @@ describe('run', () => {
 
   it('skips the sitemap without SITE_ORIGIN, with a log line', async () => {
     vi.stubEnv('SITE_ORIGIN', '');
-    const c = ctx();
-    const { io, puts } = fakeIo([vuln('V-1', 'alpha')], []);
-    await run(job, c, io);
+    const { api, puts } = fakeIo([vuln('V-1', 'alpha')], []);
+    const c = ctx(api);
+    await run(job, c);
     expect(puts.map((p) => p.key)).not.toContain('sitemap.xml');
     expect(c.logs.some((l) => l.includes('sitemap skipped'))).toBe(true);
   });
 
   it('fails on a refused PUT and never writes the manifest', async () => {
-    const { io, puts } = fakeIo([vuln('V-1', 'alpha')], [], { refuse: 'lookup/index/a.json' });
-    await expect(run(job, ctx(), io)).rejects.toThrow(/refused/);
+    const { api, puts } = fakeIo([vuln('V-1', 'alpha')], [], { refuse: 'lookup/index/a.json' });
+    await expect(run(job, ctx(api))).rejects.toThrow(/refused/);
     expect(puts.map((p) => p.key)).not.toContain('inbox/job1/manifest.json');
-  });
-});
-
-describe('jobIo', () => {
-  it('signs requests that verifyRequest accepts, and retries a 503', async () => {
-    const secret = 'server-secret';
-    const hmac = await deriveJobKey(secret, 'job1');
-    const seen: { method: string; url: URL; ok: boolean; body: string }[] = [];
-    let first = true;
-    const fakeFetch = (async (input: string, init: RequestInit) => {
-      const url = new URL(input);
-      const headers = init.headers as Record<string, string>;
-      const body = typeof init.body === 'string' ? init.body : '';
-      const ok = await verifyRequest(hmac, {
-        method: init.method ?? 'GET',
-        path: url.pathname,
-        timestamp: headers[TIMESTAMP_HEADER] ?? null,
-        signature: headers[SIGNATURE_HEADER] ?? null,
-        body,
-      });
-      seen.push({ method: init.method ?? 'GET', url, ok, body });
-      if (first && init.method === 'GET') {
-        first = false;
-        return new Response('busy', { status: 503 });
-      }
-      if (init.method === 'GET') return Response.json({ rows: [{ key: 'a' }], next: null });
-      return new Response(null, { status: 204 });
-    }) as unknown as typeof fetch;
-    const sleeps: number[] = [];
-    const io = jobIo(
-      { ...job, hmac },
-      { fetch: fakeFetch, sleep: async (ms) => void sleeps.push(ms), now: () => Date.now() },
-    );
-    expect(await io.rows('vulns', 'abc', 1000)).toEqual({ rows: [{ key: 'a' }], next: null });
-    expect(sleeps).toEqual([500]);
-    expect(seen).toHaveLength(2);
-    expect(seen[1]?.url.pathname).toBe('/internal/jobs/job1/rows/vulns');
-    expect(seen[1]?.url.searchParams.get('after')).toBe('abc');
-    expect(seen[1]?.url.searchParams.get('limit')).toBe('1000');
-    await io.put('lookup/search/ab.json', '{"x":1}', 'application/json');
-    const put = seen[2];
-    expect(put?.url.pathname).toBe('/internal/jobs/job1/objects/lookup/search/ab.json');
-    expect(put?.body).toBe('{"x":1}');
-    expect(seen.every((s) => s.ok)).toBe(true);
-  });
-
-  it('throws at once on a 4xx', async () => {
-    let n = 0;
-    const io = jobIo(job, {
-      fetch: (async () => {
-        n++;
-        return new Response('no', { status: 403 });
-      }) as unknown as typeof fetch,
-      sleep: async () => {},
-    });
-    await expect(io.put('a', 'b', 'text/plain')).rejects.toThrow(/refused: status 403/);
-    expect(n).toBe(1);
   });
 });

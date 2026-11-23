@@ -8,8 +8,8 @@ import type { IndexLetterResponse, SearchHit } from '@ti/core/api';
 import { inboxManifestKey } from '@ti/core/inbox';
 import { indexLetterKey, sitemapKey } from '@ti/core/r2-keys';
 import { type SearchShard, searchShardKey, searchTerms, shardPrefix } from '@ti/core/search';
-import { SIGNATURE_HEADER, signRequest, TIMESTAMP_HEADER } from '@ti/core/sign';
-import type { Job, JobContext } from '../types.ts';
+import type { JobApi } from '../client.ts';
+import type { Job, JobContext, JobDeps } from '../types.ts';
 
 export const MAX_POSTINGS = 2000;
 export const MAX_SHARD_BYTES = 6 * 1024 * 1024;
@@ -17,22 +17,11 @@ export const MAX_LETTER_ITEMS = 20_000;
 export const MAX_SITEMAP_ENTRIES = 49_000;
 export const SUMMARY_CHARS = 160;
 export const PAGE_LIMIT = 1000;
-export const MAX_OBJECT_BYTES = 50 * 1024 * 1024;
-const RETRIES = 3;
 const UPLOAD_CONCURRENCY = 8;
 const LETTERS = [...'abcdefghijklmnopqrstuvwxyz', '0'];
 
 export type VulnRow = Record<string, unknown>;
 export type AdvisoryRow = Record<string, unknown>;
-
-export interface IndexIo {
-  rows(
-    table: 'vulns' | 'advisories',
-    after: string | null,
-    limit: number,
-  ): Promise<{ rows: Record<string, unknown>[]; next: string | null }>;
-  put(key: string, body: string, contentType: string): Promise<void>;
-}
 
 export interface BuildStats {
   rows: number; // hot, well-formed rows seen
@@ -232,83 +221,14 @@ export function buildIndex(
   return { shards, letters, sitemap, stats };
 }
 
-/** A minimal signed client for the sandbox `rows` and `objects` routes, with `client.ts`'s retry rule. */
-export function jobIo(
-  job: Job,
-  deps: { fetch?: typeof fetch; now?: () => number; sleep?: (ms: number) => Promise<void> } = {},
-): IndexIo {
-  const doFetch = deps.fetch ?? fetch;
-  const now = deps.now ?? Date.now;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-
-  async function call(
-    method: 'GET' | 'PUT',
-    path: string,
-    query: string,
-    body: string,
-    contentType: string | undefined,
-    what: string,
-  ): Promise<Response> {
-    let lastError = '';
-    for (let attempt = 0; attempt <= RETRIES; attempt++) {
-      if (attempt > 0) await sleep(500 * 2 ** (attempt - 1));
-      const ts = Math.floor(now() / 1000);
-      const headers: Record<string, string> = {
-        [TIMESTAMP_HEADER]: String(ts),
-        [SIGNATURE_HEADER]: await signRequest(job.hmac, method, path, ts, body),
-      };
-      if (contentType) headers['content-type'] = contentType;
-      let res: Response;
-      try {
-        res = await doFetch(`${job.apiBase}${path}${query}`, {
-          method,
-          headers,
-          ...(method === 'PUT' ? { body } : {}),
-        });
-      } catch {
-        lastError = 'network error';
-        continue;
-      }
-      if (res.ok) return res;
-      if (res.status >= 500) {
-        lastError = `status ${res.status}`;
-        continue;
-      }
-      throw new Error(`${what} refused: status ${res.status}`);
-    }
-    throw new Error(`${what} failed after retries: ${lastError}`);
-  }
-
-  return {
-    async rows(table, after, limit) {
-      const path = `/internal/jobs/${job.id}/rows/${table}`;
-      const q = new URLSearchParams();
-      if (after !== null) q.set('after', after);
-      q.set('limit', String(limit));
-      const res = await call('GET', path, `?${q}`, '', undefined, `rows/${table}`);
-      const data = (await res.json()) as { rows?: unknown; next?: unknown };
-      if (!Array.isArray(data.rows) || !(data.next === null || typeof data.next === 'string'))
-        throw new Error(`rows/${table} reply has the wrong shape`);
-      return { rows: data.rows as Record<string, unknown>[], next: data.next };
-    },
-    async put(key, body, contentType) {
-      if (byteLength(body) > MAX_OBJECT_BYTES)
-        throw new Error(`object ${key} is over ${MAX_OBJECT_BYTES} bytes`);
-      const path = `/internal/jobs/${job.id}/objects/${key.split('/').map(encodeURIComponent).join('/')}`;
-      await call('PUT', path, '', body, contentType, `put ${key}`);
-    },
-  };
-}
-
-async function pageAll(io: IndexIo, table: 'vulns' | 'advisories'): Promise<Record<string, unknown>[]> {
+async function pageAll(api: JobApi, table: 'vulns' | 'advisories'): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
-  let after: string | null = null;
+  let after: string | undefined;
   for (;;) {
-    const page: { rows: Record<string, unknown>[]; next: string | null } = await io.rows(
-      table,
-      after,
-      PAGE_LIMIT,
-    );
+    const page: { rows: Record<string, unknown>[]; next: string | null } = await api.rows(table, {
+      ...(after ? { after } : {}),
+      limit: PAGE_LIMIT,
+    });
     for (const r of page.rows) out.push(r);
     if (page.next === null) return out;
     if (page.next === after) throw new Error(`rows/${table} paging did not advance`);
@@ -329,11 +249,12 @@ function siteOrigin(log: JobContext['log']): string | undefined {
   return origin;
 }
 
-export async function run(job: Job, ctx: JobContext, io: IndexIo = jobIo(job)): Promise<void> {
+export async function run(job: Job, ctx: JobContext, _deps: JobDeps = {}): Promise<void> {
+  const api = ctx.api;
   // Before paging: a row changed while we read is still newer than `builtAt`, so the API's delta covers it.
   const builtAt = new Date().toISOString();
-  const vulns = await pageAll(io, 'vulns');
-  const advisories = await pageAll(io, 'advisories');
+  const vulns = await pageAll(api, 'vulns');
+  const advisories = await pageAll(api, 'advisories');
   const built = buildIndex(vulns, advisories, builtAt, { siteOrigin: siteOrigin(ctx.log) });
   ctx.log('index built', { ...built.stats, advisories: advisories.length, builtAt });
 
@@ -345,10 +266,12 @@ export async function run(job: Job, ctx: JobContext, io: IndexIo = jobIo(job)): 
   if (built.sitemap !== null) files.push({ key: sitemapKey(), body: built.sitemap, type: 'application/xml' });
 
   for (let i = 0; i < files.length; i += UPLOAD_CONCURRENCY)
-    await Promise.all(files.slice(i, i + UPLOAD_CONCURRENCY).map((f) => io.put(f.key, f.body, f.type)));
+    await Promise.all(
+      files.slice(i, i + UPLOAD_CONCURRENCY).map((f) => api.putObject(f.key, f.body, f.type)),
+    );
 
   // Last, so `complete` only sees a manifest once everything above is in place.
-  await io.put(
+  await api.putObject(
     inboxManifestKey(job.id),
     JSON.stringify({ jobId: job.id, createdAt: new Date().toISOString(), chunks: [] }),
     'application/json',
