@@ -9,7 +9,7 @@ pnpm install
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
-Node 22 and pnpm 10 are required. Unit tests run with plain Vitest. From M1, Worker integration tests use `@cloudflare/vitest-pool-workers` against local D1, R2 and Queues. Either way, you don't need a Cloudflare account to contribute.
+Node 22 and pnpm 10 are required. Unit tests run with plain Vitest. From M1, Worker integration tests use `@cloudflare/vitest-plugin` against local D1, R2 and Queues. Either way, you don't need a Cloudflare account to contribute.
 
 ## Ground rules
 

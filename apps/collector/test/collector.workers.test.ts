@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { SOURCE_BY_ID } from '@ti/sources/registry';
 import { expect, it } from 'vitest';
 import worker from '../src/index';
 import { dueSources } from '../src/planner';
@@ -25,6 +26,10 @@ it('scheduled() on the 3-hourly cron sends one job per due source to the queue',
 
   expect(sent.map((m) => m.body.sourceId).sort()).toEqual(due.map((s) => s.id).sort());
   expect(sent.every((m) => m.body.step === 0)).toBe(true);
-  // `wait` sources never run.
-  expect(sent.map((m) => m.body.sourceId)).not.toContain('hhs-ocr-wait');
+  // `wait` sources never run. Statuses come from the real registry, not made-up ids.
+  const ids = sent.map((m) => m.body.sourceId);
+  const waiting = [...SOURCE_BY_ID.values()].filter((s) => s.licence === 'wait' && s.cadence === '3h');
+  expect(waiting.map((s) => s.id)).toContain('ransomware-live'); // guards against a vacuous check
+  for (const id of ids) expect(SOURCE_BY_ID.get(id)?.licence).not.toBe('wait');
+  for (const s of waiting) expect(ids).not.toContain(s.id);
 });

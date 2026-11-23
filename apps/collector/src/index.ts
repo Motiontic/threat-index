@@ -4,7 +4,8 @@ import { runStep } from './step';
 
 /**
  * ti-collector. See docs/IMPLEMENTATION_PLAN.md §5. This file only wires events to modules:
- * scheduled() → planner.ts, queue() → step.ts (watchdog.ts and backoff.ts are used from there).
+ * scheduled() → planner.ts, queue() → step.ts (backoff.ts is used from there).
+ * watchdog.ts is an unwired stub: nothing calls it yet.
  */
 export type { Env, JobMessage } from './env';
 

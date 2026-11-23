@@ -22,12 +22,14 @@ import webhooksResend from './routes/webhooks-resend';
  */
 const app = new Hono<AppEnv>();
 
+// Health is mounted before the Clerk middleware so it answers 200 even when Clerk is misconfigured.
+app.route('/', health);
+
 // Webhook, unsubscribe and internal routes are verified by signature or token, not by session,
 // so they sit outside the Clerk middleware, which covers /v1/* only.
 app.use('/v1/*', clerkMiddleware());
 
 for (const route of [
-  health,
   search,
   entries,
   indexLetter,

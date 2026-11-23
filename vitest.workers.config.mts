@@ -1,4 +1,4 @@
-import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 import { defineConfig, defineProject } from 'vitest/config';
 import { writeTestConfig } from './scripts/wrangler-config.mjs';
 
@@ -8,9 +8,6 @@ import { writeTestConfig } from './scripts/wrangler-config.mjs';
  * section, with its ${VAR} placeholders filled with dummy values (never real ids).
  * Run in loop sandboxes and CI, not in `pnpm build`.
  */
-/** Newest compatibility date the pool's workerd accepts. Raise it when the pool is upgraded. */
-const WORKERD_MAX_COMPAT_DATE = '2026-08-22';
-
 const MIGRATIONS = (db: string) => new URL(`./packages/db/migrations/${db}`, import.meta.url).pathname;
 
 const ALL_DBS = {
@@ -39,8 +36,6 @@ function workerProject(
         return {
           wrangler: { configPath, environment: 'staging' },
           miniflare: {
-            // The workerd bundled with the pool is older than the apps' compatibility_date.
-            compatibilityDate: WORKERD_MAX_COMPAT_DATE,
             bindings: { ...bindings, MIGRATIONS: migrations },
           },
         };
