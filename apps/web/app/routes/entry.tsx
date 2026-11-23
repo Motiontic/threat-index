@@ -138,7 +138,11 @@ export default function Entry({ loaderData }: Route.ComponentProps) {
           ))}
         </ul>
 
-        {signedIn ? <WatchButton entryKey={entry.key} watching={watching} /> : null}
+        {signedIn ? (
+          <WatchButton entryKey={entry.key} watching={watching} />
+        ) : (
+          <LockedWatch entryKey={entry.key} />
+        )}
 
         {tab === null ? (
           <section aria-labelledby="summary-title">
@@ -397,5 +401,26 @@ function ChangesPanel({ entry }: { entry: EntryFullView }) {
         ))}
       </ol>
     </section>
+  );
+}
+
+/** Signed out: remember the intent to watch, open the sign-up modal; the watch runs after sign-in. */
+function LockedWatch({ entryKey }: { entryKey: string }) {
+  const { available } = useAuthState();
+  const open = useOpenSignUp();
+  if (!available) return null;
+  return (
+    <div className="watch-row">
+      <button
+        type="button"
+        className="button button-primary"
+        onClick={() => {
+          saveIntent({ action: 'watch', target: entryKey });
+          open({ fallbackRedirectUrl: window.location.href });
+        }}
+      >
+        Watch
+      </button>
+    </div>
   );
 }
