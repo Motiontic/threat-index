@@ -7,7 +7,7 @@ import type { Env, JobMessage } from './env';
 export const CADENCE_BY_CRON: Record<string, SourceConfig['cadence'][]> = {
   '0 */3 * * *': ['3h', 'with-cve-list'],
   '45 14 * * *': ['daily'],
-  '30 2 * * *': [], // nightly fold + search index: E2B jobs (M1)
+  '30 2 * * *': [], // plans no source: the nightly fold and search index start from daily-jobs.ts
   '0 5 * * 1': ['weekly', 'monthly', 'quarterly'],
 };
 

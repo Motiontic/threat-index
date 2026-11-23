@@ -1,14 +1,16 @@
 import { ulid } from 'ulid';
+import { startDailyJobs } from './daily-jobs';
 import { defaultDeps, logLine } from './deps';
 import { recordDeadLetters } from './dlq';
 import type { Env, JobMessage } from './env';
+import { startHeavyJob } from './heavy';
 import { plan } from './planner';
 import { runStep } from './step';
 import { runWatchdog } from './watchdog';
 
 /**
  * ti-collector. See docs/IMPLEMENTATION_PLAN.md §5. This file only wires events to modules:
- * scheduled() → planner.ts (and watchdog.ts on the daily cron), queue() → step.ts for ti-jobs and
+ * scheduled() → planner.ts, daily-jobs.ts (the nightly and daily E2B jobs) and watchdog.ts on the daily cron, queue() → step.ts for ti-jobs and
  * dlq.ts for ti-jobs-dlq.
  */
 export type { Env, JobMessage } from './env';
@@ -21,6 +23,14 @@ export default {
     const errors: unknown[] = [];
     try {
       await plan(event, env, { newId: ulid });
+    } catch (err) {
+      errors.push(err);
+    }
+    try {
+      await startDailyJobs(event.cron, new Date(event.scheduledTime), env, {
+        startJob: startHeavyJob,
+        log: logLine,
+      });
     } catch (err) {
       errors.push(err);
     }

@@ -5,10 +5,18 @@ import { PermanentError } from './errors';
 
 const JOBS_PATH = '/internal/jobs';
 
+/** A job on the whole data set (no source): started by the daily crons, see daily-jobs.ts. */
+export interface GlobalJobRequest {
+  requestId: string;
+  kind: 'nightly-fold' | 'search-index';
+  reason: string;
+  day?: string;
+}
+
 /** Asks ti-api (over the service binding) to start an E2B job. Signed with JOB_HMAC_SECRET. */
 export async function startHeavyJob(
   env: Pick<Env, 'API' | 'JOB_HMAC_SECRET'>,
-  req: JobRequest,
+  req: JobRequest | GlobalJobRequest,
   now: Date,
 ): Promise<{ jobId?: string }> {
   if (!env.API) throw new PermanentError('API binding is not configured');

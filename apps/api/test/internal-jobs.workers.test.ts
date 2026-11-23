@@ -297,7 +297,37 @@ describe('POST /internal/jobs (start)', () => {
       reason: 'hello',
     });
   });
+  it('big-file starts (no 501) and request.json holds `from` only when a cursor exists', async () => {
+    const call = app();
+    const withCursor = { requestId: ULID(21), kind: 'big-file', sourceId: 'cisa-kev', reason: 'r' };
+    ids.push(ULID(21));
+    await env.DB_CONTROL.prepare(
+      `INSERT INTO cursors (source_id, kind, value, etag, updated_at) VALUES ('cisa-kev','timestamp','["2026-01-01T00:00:00Z","a"]','e1','2026-01-01T00:00:00Z')`,
+    ).run();
+    const res = await ops(call, 'POST', '/internal/jobs', withCursor);
+    expect(res.status).toBe(201);
+    const stored = (await (await env.BUCKET.get(`jobs/${ULID(21)}/request.json`))?.json()) as Record<
+      string,
+      unknown
+    >;
+    expect(stored.from).toEqual({ kind: 'timestamp', value: '["2026-01-01T00:00:00Z","a"]', etag: 'e1' });
+    expect(stored.kind).toBe('big-file');
+
+    await env.DB_CONTROL.exec('DELETE FROM cursors;');
+    const res2 = await ops(call, 'POST', '/internal/jobs', {
+      ...withCursor,
+      requestId: ULID(22),
+      sourceId: 'osv',
+    });
+    expect(res2.status).toBe(201);
+    const stored2 = (await (await env.BUCKET.get(`jobs/${ULID(22)}/request.json`))?.json()) as Record<
+      string,
+      unknown
+    >;
+    expect('from' in stored2).toBe(false);
+  });
   it('400 for a bad body; 501 for a kind that is not enabled', async () => {
+    enabled = ['echo', 'first-load'];
     const call = app();
     expect((await ops(call, 'POST', '/internal/jobs', { kind: 'nope' })).status).toBe(400);
     expect(
