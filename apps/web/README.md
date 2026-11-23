@@ -30,10 +30,10 @@ test/                 Node unit tests, run by the root `pnpm test`
 
 ## Scripts
 
-| Command                              | What it does                                                                                                                   |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `pnpm --filter @ti/web typecheck`    | `react-router typegen && tsc --noEmit`. Part of `pnpm build`.                                                                  |
-| `pnpm --filter @ti/web build`        | `react-router build`: client and server bundles, plus `build/server/wrangler.json`.                                            |
+| Command                              | What it does                                                                                                                                                     |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm --filter @ti/web typecheck`    | `react-router typegen && tsc --noEmit`. Part of `pnpm build`.                                                                                                    |
+| `pnpm --filter @ti/web build`        | `react-router build`: client and server bundles, plus `build/server/wrangler.json`.                                                                              |
 | `pnpm --filter @ti/web test:workers` | Builds, then smoke-checks every route in `workerd` in fixtures mode (port 8710) and api mode against `scripts/stub-api` (port 8711). Loop sandboxes and CI only. |
 
 **Laptops run `pnpm build` only** (lint, typecheck, unit tests). The smoke check starts `wrangler dev`, which
