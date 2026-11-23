@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@ti/core": "workspace:*",
-    "@ti/db": "workspace:*"
+    "@ti/db": "workspace:*",
+    "@ti/sources": "workspace:*"
   }
 }

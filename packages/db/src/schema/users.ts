@@ -55,6 +55,7 @@ export const alertQueue = sqliteTable(
     userId: text('user_id').notNull(),
     changeId: text('change_id').notNull(),
     createdAt: text('created_at').notNull(),
+    via: text('via').notNull().default('watch'),
   },
   (t) => [primaryKey({ columns: [t.userId, t.changeId] })],
 );
@@ -78,4 +79,21 @@ export const webhookEvents = sqliteTable('webhook_events', {
   id: text('id').primaryKey(),
   source: text('source').notNull(),
   receivedAt: text('received_at').notNull(),
+});
+
+export const notifyState = sqliteTable('notify_state', {
+  name: text('name').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const emailSends = sqliteTable('email_sends', {
+  idemKey: text('idem_key').primaryKey(),
+  kind: text('kind').notNull(),
+  changeCount: integer('change_count').notNull(),
+  status: text('status').notNull(),
+  providerId: text('provider_id'),
+  error: text('error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
 });
