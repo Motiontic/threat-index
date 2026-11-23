@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:sec="http://jvn.jp/rss/mod_sec/" xmlns:sy="http://purl.org/rss/1.0/modules/syndication/" xsi:schemaLocation="http://purl.org/rss/1.0/ https://jvndb.jvn.jp/schema/jvnrss_2.0.xsd" xml:lang="ja">
+  <channel rdf:about="https://jvndb.jvn.jp/en/rss/jvndb.rdf">
+    <title>JVNDB RSS Feed - Update Entry</title>
+    <link>https://jvndb.jvn.jp/en/</link>
+    <description>JVN iPedia Update Entry</description>
+    <dc:creator></dc:creator>
+    <dc:date>2026-11-23T17:00:55+09:00</dc:date>
+    <dcterms:modified>2026-11-23T17:00:55+09:00</dcterms:modified>
+    <items>
+      <rdf:Seq>
+        <rdf:li rdf:resource="https://jvndb.jvn.jp/en/contents/2026/JVNDB-2026-000175.html"/>
+        <rdf:li rdf:resource="https://jvndb.jvn.jp/en/contents/2026/JVNDB-2026-042618.html"/>
+        <rdf:li rdf:resource="https://jvndb.jvn.jp/en/contents/2026/JVNDB-2026-099999.html"/>
+      </rdf:Seq>
+    </items>
+  </channel>
+  <item rdf:about="https://jvndb.jvn.jp/en/contents/2026/JVNDB-2026-000175.html">
+    <title>Browser extension &quot;Win Bird JYUGYO SHIEN&quot; vulnerable to cross-site scripting</title>
+    <link>https://jvndb.jvn.jp/en/contents/2026/JVNDB-2026-000175.html</link>
+    <description>The browser extension &quot;Win Bird JYUGYO SHIEN&quot; provided by Win Bird Corporation contains the following vulnerability:&lt;a href='https://cwe.mitre.org/data/definitions/79.html' target='_blank'&gt;&lt;/a&gt;&lt;ul&gt;&lt;li&gt;Cross-site scripting (CWE-79) - CVE-2026-129517&lt;/li&gt;&lt;/ul&gt;So Kaneyuki reported this vulnerability to IPA.&#13;
+JPCERT/CC coordinated with the developer under Information Security Early Warning Partnership.</description>
+    <sec:identifier>JVNDB-2026-000175</sec:identifier>
+    <sec:references source="JVN" id="JVN#29068051">https://jvn.jp/en/jp/JVN29068051/index.html</sec:references>
+    <sec:references source="CVE" id="CVE-2026-129517">https://www.cve.org/CVERecord?id=CVE-2026-129517</sec:references>
+    <sec:references title="Cross-site Scripting(CWE-79)" id="CWE-79">https://www.ipa.go.jp/en/security/vulnerabilities/cwe.html</sec:references>
+    <sec:cpe version="2.2" vendor="Win Bird Corporation" product="Win Bird JYUGYO SHIEN">cpe:/a:misc:win_bird_win_bird_jugyo_shien</sec:cpe>
+    <sec:cvss version="3.0" score="5.4" type="Base" severity="Medium" vector="CVSS:3.0/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N"/>
+    <dc:date>2026-11-19T15:40+09:00</dc:date>
+    <dcterms:issued>2026-11-19T15:40+09:00</dcterms:issued>
+    <dcterms:modified>2026-11-19T15:40+09:00</dcterms:modified>
+  </item>
+  <item rdf:about="https://jvndb.jvn.jp/en/contents/2026/JVNDB-2026-042618.html">
+    <title>Multiple Vulnerabilities in Hitachi Dynamic Link Manager for Windows</title>
+    <link>https://jvndb.jvn.jp/en/contents/2026/JVNDB-2026-042618.html</link>
+    <description>Hitachi Dynamic Link Manager for Windows contain the vulnerabilities.</description>
+    <sec:identifier>JVNDB-2026-042618</sec:identifier>
+    <sec:references source="CVE" id="CVE-2026-86578">https://www.cve.org/CVERecord?id=CVE-2026-86578</sec:references>
+    <sec:references source="CVE" id="CVE-2026-86579">https://www.cve.org/CVERecord?id=CVE-2026-86579</sec:references>
+    <sec:cpe version="2.2" vendor="Hitachi, Ltd" product="Hitachi Dynamic Link Manager">cpe:/a:hitachi:dynamic_link_manager</sec:cpe>
+    <sec:cvss version="3.0" score="7.3" type="Base" severity="High" vector="CVSS:3.0/AV:L/AC:L/PR:H/UI:N/S:C/C:L/I:L/A:H"/>
+    <dc:date>2026-11-11T12:22+09:00</dc:date>
+    <dcterms:issued>2026-11-11T12:22+09:00</dcterms:issued>
+    <dcterms:modified>2026-11-11T12:22+09:00</dcterms:modified>
+  </item>
+  <item rdf:about="https://jvndb.jvn.jp/en/contents/2026/JVNDB-2026-099999.html">
+    <title>KUSANAGI vulnerable to HTTP header injection</title>
+    <link>https://jvndb.jvn.jp/en/contents/2026/JVNDB-2026-099999.html</link>
+    <description>KUSANAGI provided by GMO Prime Strategy Co., Ltd. contains the following vulnerability in a redirect rule included in the Nginx configuration for WordPress:&lt;a href='https://cwe.mitre.org/data/definitions/113.html' target='_blank'&gt;&lt;/a&gt;&lt;ul&gt;&lt;li&gt;Improper Neutralization of CRLF Sequences in HTTP Headers (CWE-113) - &lt;/li&gt;&lt;/ul&gt;GMO Prime Strategy Co., Ltd. reported this vulnerability to JPCERT/CC to notify users of its solution through JVN. GMO Prime Strategy Co., Ltd. and JPCERT/CC coordinated under the Information Security Early Warning Partnership.</description>
+    <sec:identifier>JVNDB-2026-099999</sec:identifier>
+    <sec:references source="JVN" id="JVNVU#92635551">https://jvn.jp/en/vu/JVNVU92635551/index.html</sec:references>
+    <sec:references title="HTTP Response Splitting(CWE-113)" id="CWE-113">https://cwe.mitre.org/data/definitions/113.html</sec:references>
+    <sec:cvss version="3.0" score="6.1" type="Base" severity="Medium" vector="CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"/>
+    <dc:date>2026-11-13T13:54+09:00</dc:date>
+    <dcterms:issued>2026-11-10T15:55+09:00</dcterms:issued>
+    <dcterms:modified>2026-11-13T13:54+09:00</dcterms:modified>
+    <sec:foo>x</sec:foo>
+  </item>
+</rdf:RDF>

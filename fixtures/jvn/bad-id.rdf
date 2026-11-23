@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:sec="http://jvn.jp/rss/mod_sec/" xmlns:sy="http://purl.org/rss/1.0/modules/syndication/" xsi:schemaLocation="http://purl.org/rss/1.0/ https://jvndb.jvn.jp/schema/jvnrss_2.0.xsd" xml:lang="ja">
+  <channel rdf:about="https://jvndb.jvn.jp/en/rss/jvndb.rdf">
+    <title>JVNDB RSS Feed - Update Entry</title>
+    <link>https://jvndb.jvn.jp/en/</link>
+    <description>JVN iPedia Update Entry</description>
+    <dc:creator></dc:creator>
+    <dc:date>2026-11-23T17:00:55+09:00</dc:date>
+    <dcterms:modified>2026-11-23T17:00:55+09:00</dcterms:modified>
+    <items><rdf:Seq/></items>
+  </channel>
+  <item rdf:about="https://jvndb.jvn.jp/en/contents/2026/JVN#1.html">
+    <title>Browser extension &quot;Win Bird JYUGYO SHIEN&quot; vulnerable to cross-site scripting</title>
+    <link>https://jvndb.jvn.jp/en/contents/2026/JVN#1.html</link>
+    <description>The browser extension &quot;Win Bird JYUGYO SHIEN&quot; provided by Win Bird Corporation contains the following vulnerability:&lt;a href='https://cwe.mitre.org/data/definitions/79.html' target='_blank'&gt;&lt;/a&gt;&lt;ul&gt;&lt;li&gt;Cross-site scripting (CWE-79) - CVE-2026-129517&lt;/li&gt;&lt;/ul&gt;So Kaneyuki reported this vulnerability to IPA.&#13;
+JPCERT/CC coordinated with the developer under Information Security Early Warning Partnership.</description>
+    <sec:identifier>JVN#1</sec:identifier>
+    <sec:references source="JVN" id="JVN#29068051">https://jvn.jp/en/jp/JVN29068051/index.html</sec:references>
+    <sec:references source="CVE" id="CVE-2026-129517">https://www.cve.org/CVERecord?id=CVE-2026-129517</sec:references>
+    <sec:references title="Cross-site Scripting(CWE-79)" id="CWE-79">https://www.ipa.go.jp/en/security/vulnerabilities/cwe.html</sec:references>
+    <sec:cpe version="2.2" vendor="Win Bird Corporation" product="Win Bird JYUGYO SHIEN">cpe:/a:misc:win_bird_win_bird_jugyo_shien</sec:cpe>
+    <sec:cvss version="3.0" score="5.4" type="Base" severity="Medium" vector="CVSS:3.0/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N"/>
+    <dc:date>2026-11-19T15:40+09:00</dc:date>
+    <dcterms:issued>2026-11-19T15:40+09:00</dcterms:issued>
+    <dcterms:modified>2026-11-19T15:40+09:00</dcterms:modified>
+  </item>
+</rdf:RDF>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xml:lang="en-us" xmlns="http://www.w3.org/2005/Atom"><title>CERT Recently Published Vulnerability Notes</title><link href="https://kb.cert.org/vuls/" rel="alternate"/><link href="https://kb.cert.org/vuls/atomfeed/" rel="self"/><id>https://kb.cert.org/vuls/</id><updated>2026-11-20T15:42:38.938743+00:00</updated><author><name>CERT</name><email>cert@cert.org</email><uri>https://www.sei.cmu.edu</uri></author><subtitle>CERT publishes vulnerability advisories called "Vulnerability Notes." Vulnerability Notes include summaries, technical details, remediation information, and lists of affected vendors.  Many vulnerability notes are the result of private coordination and disclosure efforts.</subtitle><entry><title>VU#604762: Multiple vendors vulnerable to Unicode Normalization Collision on macOS (APFS)</title><link href="https://kb.cert.org/vuls/id/604762" rel="alternate"/><published>2026-11-16T16:17:31.751246+00:00</published><updated>2026-11-17T17:12:49.354980+00:00</updated><id>https://kb.cert.org/vuls/id/604762</id><summary type="html">
+&lt;p&gt;Short summary of the note. Related bug CVE-2026-49999 is only mentioned here.&lt;/p&gt;
+</summary><content type="html">
+&lt;p&gt;Short summary of the note. Related bug CVE-2026-49999 is only mentioned here.&lt;/p&gt;
+&lt;h3&gt;Other Information&lt;/h3&gt;
+&lt;table&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;b&gt;CVE IDs:&lt;/b&gt;&lt;/td&gt;
+&lt;td&gt;
+&lt;a href="http://web.nvd.nist.gov/view/vuln/detail?vulnId=2026-45110"&gt;CVE-2026-45110  &lt;/a&gt;
+&lt;a href="http://web.nvd.nist.gov/view/vuln/detail?vulnId=2026-49401"&gt;CVE-2026-49401  &lt;/a&gt;
+&lt;a href="http://web.nvd.nist.gov/view/vuln/detail?vulnId=2026-59890"&gt;CVE-2026-59890  &lt;/a&gt;
+&lt;a href="http://web.nvd.nist.gov/view/vuln/detail?vulnId=2026-14978"&gt;CVE-2026-14978  &lt;/a&gt;
+&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+</content></entry><entry><title>VU#644655: TightVNC and UltraVNC Viewer contains a heap-based buffer overflow</title><link href="https://kb.cert.org/vuls/id/644655" rel="alternate"/><published>2026-11-13T00:08:48.263098+00:00</published><updated>2026-11-13T00:08:48.090879+00:00</updated><id>https://kb.cert.org/vuls/id/644655</id><summary type="html">
+&lt;p&gt;Short summary of the note.&lt;/p&gt;
+</summary><content type="html">
+&lt;p&gt;Short summary of the note.&lt;/p&gt;
+&lt;h3&gt;Other Information&lt;/h3&gt;
+&lt;table&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;b&gt;CVE IDs:&lt;/b&gt;&lt;/td&gt;
+&lt;td&gt;
+&lt;a href="http://web.nvd.nist.gov/view/vuln/detail?vulnId=2026-128321"&gt;CVE-2026-128321  &lt;/a&gt;
+&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+</content></entry><entry><title>VU#124705: BaseChat – Audio Dating App, Android version 9.8.1, contains multiple vulnerabilities</title><link href="https://kb.cert.org/vuls/id/124705" rel="alternate"/><published>2026-11-03T15:42:35.704372+00:00</published><updated>2026-11-20T15:42:38.938743+00:00</updated><id>https://kb.cert.org/vuls/id/124705</id><summary type="html">
+&lt;p&gt;Short summary of the note.&lt;/p&gt;
+</summary><content type="html">
+&lt;p&gt;Short summary of the note.&lt;/p&gt;
+&lt;h3&gt;Other Information&lt;/h3&gt;
+&lt;table&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;b&gt;CVE IDs:&lt;/b&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+</content></entry></feed>
