@@ -1,0 +1,11 @@
+// LOCAL ONLY, never deployed: scripts/deploy.mjs deploys only apps/<app>/wrangler.jsonc.
+// A producer for the sandbox proof: `wrangler dev -c apps/loader/dev/wrangler.jsonc -c apps/loader/wrangler.jsonc`.
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "ti-loader-dev-producer",
+  "main": "producer.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "queues": { "producers": [{ "binding": "LOAD", "queue": "ti-load" }] }
+}
