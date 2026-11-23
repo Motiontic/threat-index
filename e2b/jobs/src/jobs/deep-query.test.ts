@@ -51,6 +51,12 @@ describe('buildSql', () => {
       expect(a).toContain('params.json');
     });
   }
+  it('reads params as explicit VARCHAR columns and compares KEV day prefixes', () => {
+    const sql = buildSql('kev-additions', ['p-0.ndjson.gz'], '/d');
+    expect(sql).toContain(`read_json('/d/params.json', columns={'cve': 'VARCHAR'`);
+    expect(sql).toContain(`'from': 'VARCHAR', 'to': 'VARCHAR'}`);
+    expect(sql).toContain(`substr(json_extract_string(record, '$.firstSeen'), 1, 10) BETWEEN`);
+  });
   it('names only generated files', () => {
     const sql = buildSql('kev-additions', ['p-0.ndjson.gz'], "/tmp/a'b");
     expect(sql).toContain("/tmp/a''b/p-0.ndjson.gz");

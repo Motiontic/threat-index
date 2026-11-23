@@ -25,6 +25,8 @@ export const MAX_SCAN_BYTES = 512 * 1024 * 1024;
 export const MAX_RESULT_BYTES = 5 * 1024 * 1024;
 const SQL_ROW_LIMIT = 5000;
 const FETCH_PARALLEL = 8;
+/** Every param stays VARCHAR: auto-detection would turn '2025-05-01' into a DATE. */
+const PARAM_COLS = `{'cve': 'VARCHAR', 'ecosystem': 'VARCHAR', 'package': 'VARCHAR', 'company': 'VARCHAR', 'from': 'VARCHAR', 'to': 'VARCHAR'}`;
 const DUCKDB_TIMEOUT_MS = 120_000;
 const DUCKDB_MAX_BUFFER = 1024 * 1024;
 
@@ -119,7 +121,7 @@ export function buildSql(template: DeepTemplate, files: readonly string[], dir: 
       where = `contains(record, '"noticeId"')`;
       break;
     case 'kev-additions':
-      where = `contains(record, '"exploited_wild"') AND json_extract_string(record, '$.firstSeen') BETWEEN p."from" AND p."to"`;
+      where = `contains(record, '"exploited_wild"') AND substr(json_extract_string(record, '$.firstSeen'), 1, 10) BETWEEN p."from" AND p."to"`;
       break;
     case 'epss-history':
       where = `upper(parts.cve) = p.cve AND substr(score_date, 1, 10) BETWEEN p."from" AND p."to"`;
@@ -129,7 +131,7 @@ export function buildSql(template: DeepTemplate, files: readonly string[], dir: 
   const input = q(join(dir, 'params.json'));
   return [
     `CREATE VIEW parts AS ${parts};`,
-    `CREATE VIEW p AS SELECT * FROM read_json(${input});`,
+    `CREATE VIEW p AS SELECT * FROM read_json(${input}, columns=${PARAM_COLS});`,
     `COPY (SELECT parts.* FROM parts, p WHERE ${where} LIMIT ${SQL_ROW_LIMIT}) TO ${output} (FORMAT json);`,
   ].join('\n');
 }
