@@ -14,7 +14,8 @@
     "hono": "^4.13.0",
     "@hono/clerk-auth": "^3.1.0",
     "@clerk/backend": "^3.31.0",
-    "aws4fetch": "^1.0.20",
+    "aws4fetch": "1.0.20",
+    "e2b": "2.64.0",
     "zod": "^4.6.0"
   }
 }

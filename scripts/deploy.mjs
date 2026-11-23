@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { APPS, loadDotEnv, ROOT, TARGETS, writeDeployConfig } from './wrangler-config.mjs';
 
 export const DATABASES = ['ti_control', 'ti_vulns', 'ti_advisories', 'ti_signals', 'ti_world', 'ti_users'];
-const DEPLOY_ORDER = ['loader', 'notify', 'collector', 'api'];
+const DEPLOY_ORDER = ['loader', 'notify', 'api', 'collector'];
 
 export function wrangler(args) {
   return execFileSync(join(ROOT, 'node_modules', '.bin', 'wrangler'), args, {

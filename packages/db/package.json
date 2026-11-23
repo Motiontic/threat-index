@@ -8,6 +8,7 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
+    "@ti/core": "workspace:*",
     "drizzle-orm": "^0.44.0"
   },
   "scripts": {
