@@ -17,7 +17,15 @@ import {
   guardWatchList,
 } from './guards';
 import type { DataMode } from './mode.server';
-import type { AccountClient, SearchParams, SiteData } from './types';
+import type { AccountClient, SearchParams, SiteData, WorldQuery } from './types';
+import {
+  guardBreachDetail,
+  guardBreachList,
+  guardIncidentDetail,
+  guardIncidentList,
+  guardTechniqueDetail,
+  guardTechniqueList,
+} from './world-guards';
 
 export const API_ORIGIN = 'https://ti-api.internal';
 export const TIMEOUT_MS = 5000;
@@ -76,6 +84,17 @@ export function searchQuery(params: SearchParams): string {
   if (params.year) qs.set('year', params.year);
   if (params.sort) qs.set('sort', params.sort);
   if (params.cursor) qs.set('cursor', params.cursor);
+  const text = qs.toString();
+  return text ? `?${text}` : '';
+}
+
+/** The query string for a world list, built field by field in a fixed order from validated values. */
+export function worldQuery(query: WorldQuery): string {
+  const qs = new URLSearchParams();
+  if (query.q) qs.set('q', query.q);
+  if (query.page && query.page > 1) qs.set('page', String(Math.trunc(query.page)));
+  for (const k of query.kind ?? []) qs.append('kind', k);
+  for (const f of query.framework ?? []) qs.append('framework', f);
   const text = qs.toString();
   return text ? `?${text}` : '';
 }
@@ -167,6 +186,13 @@ export function createSiteData(api: Pick<Fetcher, 'fetch'>, mode: DataMode): Sit
         guardIndexLetter,
       ),
     sources: () => required('/v1/sources', guardSources),
+    breaches: (query) => required(`/v1/breaches${worldQuery(query)}`, guardBreachList),
+    breach: (key) => getJson(`/v1/breaches/${encodeURIComponent(key)}`, guardBreachDetail),
+    incidents: (query) => required(`/v1/incidents${worldQuery(query)}`, guardIncidentList),
+    incident: (source, id) =>
+      getJson(`/v1/incidents/${encodeURIComponent(source)}/${encodeURIComponent(id)}`, guardIncidentDetail),
+    techniques: (query) => required(`/v1/techniques${worldQuery(query)}`, guardTechniqueList),
+    technique: (id) => getJson(`/v1/techniques/${encodeURIComponent(id)}`, guardTechniqueDetail),
     async sitemap() {
       const res = await call('/v1/sitemap.xml', 'application/xml');
       const type = res.headers.get('content-type') ?? '';

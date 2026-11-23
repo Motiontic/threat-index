@@ -1,0 +1,168 @@
+{
+  "_note": "Invented sample records for fixtures mode. Real ATT&CK ids and public facts; every breach and incident is invented and names only Example Co. and example.com.",
+  "breaches": [
+    {
+      "key": "domain:example.com@2025-03-04",
+      "company": {
+        "key": "domain:example.com",
+        "name": "Example Co."
+      },
+      "firstSeen": "2025-03-04",
+      "dates": {
+        "from": "2025-03-01",
+        "to": "2025-03-04"
+      },
+      "notices": [
+        {
+          "source": "ca-ag",
+          "noticeId": "EXAMPLE-CA-1",
+          "name": "Invented sample: Example Co.",
+          "display": "full",
+          "notified": "2025-03-10",
+          "url": "https://example.com/notice/ca",
+          "occurredFrom": "2025-03-01",
+          "occurredTo": "2025-03-04",
+          "discovered": "2025-03-05",
+          "count": 500,
+          "countUnit": "state_residents",
+          "jurisdiction": "CA",
+          "dataTypes": ["name", "email address"]
+        },
+        {
+          "source": "hibp",
+          "noticeId": "EXAMPLE-HIBP-1",
+          "name": "Invented sample: Example Co.",
+          "display": "full",
+          "notified": "2025-03-12",
+          "url": "https://example.com/notice/hibp",
+          "count": 1200,
+          "countUnit": "individuals",
+          "dataTypes": ["email address", "password hash"]
+        }
+      ]
+    },
+    {
+      "key": "domain:example.com@2025-01-15",
+      "company": {
+        "key": "domain:example.com",
+        "name": "Example Co."
+      },
+      "firstSeen": "2025-01-15",
+      "notices": [
+        {
+          "source": "vcdb",
+          "noticeId": "EXAMPLE-VCDB-1",
+          "name": "Invented sample: Example Co. database claim",
+          "display": "full",
+          "notified": "2025-01-20",
+          "url": "https://example.com/notice/claim",
+          "count": 3000000,
+          "countUnit": "claim",
+          "dataTypes": []
+        },
+        {
+          "source": "databreaches-net",
+          "noticeId": "EXAMPLE-DBN-1",
+          "name": "Invented sample: Example Co. reported an incident",
+          "display": "link",
+          "notified": "2025-01-18",
+          "url": "https://example.com/notice/dbn"
+        }
+      ]
+    }
+  ],
+  "incidents": [
+    {
+      "source": "avid",
+      "incidentId": "EXAMPLE-AVID-1",
+      "kind": "ai",
+      "title": "Invented sample: Example Co. assistant revealed hidden instructions",
+      "date": "2025-02-01",
+      "url": "https://example.com/incidents/avid-1",
+      "display": "full",
+      "entities": ["Example Co."],
+      "techniques": [
+        {
+          "id": "AML.T0051",
+          "name": "LLM Prompt Injection"
+        }
+      ]
+    },
+    {
+      "source": "cfr-tracker",
+      "incidentId": "EXAMPLE-CFR-1",
+      "kind": "cyber_op",
+      "title": "Invented sample: Example Co. network intrusion by an unnamed group",
+      "date": "2025-02-20",
+      "url": "https://example.com/incidents/cfr-1",
+      "display": "full",
+      "entities": ["Example Co.", "Unnamed group"],
+      "techniques": [
+        {
+          "id": "T1195.002",
+          "name": "Compromise Software Supply Chain"
+        },
+        {
+          "id": "T1190"
+        }
+      ]
+    },
+    {
+      "source": "databreaches-net",
+      "incidentId": "EXAMPLE-DBN-2",
+      "kind": "cyber_event",
+      "title": "Invented sample: Example Co. says systems were disrupted",
+      "date": "2025-03-01",
+      "url": "https://example.com/incidents/dbn-2",
+      "display": "link",
+      "entities": [],
+      "techniques": []
+    }
+  ],
+  "techniques": [
+    {
+      "id": "T1195",
+      "framework": "attack",
+      "name": "Supply Chain Compromise",
+      "summary": "Adversaries manipulate products or delivery mechanisms before the end consumer receives them.",
+      "vulns": ["CVE-2024-3094"]
+    },
+    {
+      "id": "T1195.001",
+      "framework": "attack",
+      "name": "Compromise Software Dependencies and Development Tools",
+      "parent": "T1195",
+      "summary": "Adversaries manipulate software dependencies or development tools before they reach the consumer.",
+      "vulns": []
+    },
+    {
+      "id": "T1195.002",
+      "framework": "attack",
+      "name": "Compromise Software Supply Chain",
+      "parent": "T1195",
+      "summary": "Adversaries manipulate application software before it is received by a consumer.",
+      "vulns": []
+    },
+    {
+      "id": "T1190",
+      "framework": "attack",
+      "name": "Exploit Public-Facing Application",
+      "summary": "Adversaries use a weakness in an internet-facing system to gain access.",
+      "vulns": ["CVE-2025-3248"]
+    },
+    {
+      "id": "AML.T0051",
+      "framework": "atlas",
+      "name": "LLM Prompt Injection",
+      "summary": "An adversary crafts input that makes a language model follow their instructions.",
+      "vulns": []
+    },
+    {
+      "id": "CWE-306",
+      "framework": "cwe",
+      "name": "Missing Authentication for Critical Function",
+      "summary": "A product does not require authentication for a function that needs it.",
+      "vulns": ["CVE-2025-3248"]
+    }
+  ]
+}

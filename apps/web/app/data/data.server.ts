@@ -35,6 +35,12 @@ export function getData(_request: Request): SiteData {
     search: (p) => bridge(() => site.search(p)),
     index: (l, c) => bridge(() => site.index(l, c)),
     sources: () => bridge(() => site.sources()),
+    breaches: (q) => bridge(() => site.breaches(q)),
+    breach: (k) => bridge(() => site.breach(k)),
+    incidents: (q) => bridge(() => site.incidents(q)),
+    incident: (s, i) => bridge(() => site.incident(s, i)),
+    techniques: (q) => bridge(() => site.techniques(q)),
+    technique: (i) => bridge(() => site.technique(i)),
     sitemap: () => site.sitemap(),
   };
 }
