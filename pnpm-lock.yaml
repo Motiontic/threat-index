@@ -147,9 +147,15 @@ importers:
       '@ti/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@ti/linker':
+        specifier: workspace:*
+        version: link:../../packages/linker
       '@ti/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers
+      '@ti/sources':
+        specifier: workspace:*
+        version: link:../../packages/sources
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
