@@ -1,19 +1,28 @@
 /**
  * Nightly search index (docs/IMPLEMENTATION_PLAN.md §8, "Search design"). Pages the hot set out of the API's
- * sandbox routes, builds an inverted index, and writes it to R2 as `lookup/search/<prefix>.json` plus the A–Z
- * index files and `sitemap.xml`. The API reads one shard per query term and adds a live delta from D1 for rows
+ * sandbox routes, builds an inverted index, and writes it to R2 as `lookup/search/v2/<prefix>.json` plus the A–Z
+ * index pages and `sitemap.xml`. The API reads one shard per query term and adds a live delta from D1 for rows
  * modified after `builtAt`.
  */
 import type { IndexLetterResponse, SearchHit } from '@ti/core/api';
 import { inboxManifestKey } from '@ti/core/inbox';
 import { indexLetterKey, sitemapKey } from '@ti/core/r2-keys';
-import { type SearchShard, searchShardKey, searchTerms, shardPrefix } from '@ti/core/search';
+import {
+  MAX_PREFIX,
+  MIN_PREFIX,
+  type SearchManifest,
+  type SearchShard,
+  searchManifestKey,
+  searchShardKey,
+  searchTerms,
+  shardPrefixAt,
+} from '@ti/core/search';
 import type { JobApi } from '../client.ts';
 import type { Job, JobContext, JobDeps } from '../types.ts';
 
 export const MAX_POSTINGS = 2000;
-export const MAX_SHARD_BYTES = 6 * 1024 * 1024;
-export const MAX_LETTER_ITEMS = 20_000;
+export const MAX_SHARD_BYTES = 3 * 1024 * 1024;
+export const LETTER_PAGE_ITEMS = 500;
 export const MAX_SITEMAP_ENTRIES = 49_000;
 export const SUMMARY_CHARS = 160;
 export const PAGE_LIMIT = 1000;
@@ -29,11 +38,15 @@ export interface BuildStats {
   indexed: number; // vulns that made it into the index
   shards: number;
   largestShardBytes: number;
-  trimmedTerms: number; // posting lists emptied, by either rule
+  truncatedTerms: number; // terms over MAX_POSTINGS that kept only their most recent entries
+  splitPrefixes: number; // prefixes that were too big and moved one character deeper
+  letterPages: number;
+  largestLetterPageItems: number;
 }
 export interface BuiltIndex {
   shards: Map<string, SearchShard>; // prefix → shard
-  letters: Map<string, IndexLetterResponse>; // 'a'..'z', '0' → page (all 27 always present)
+  manifest: SearchManifest;
+  letters: Map<string, IndexLetterResponse[]>; // 'a'..'z', '0' → pages (all 27 always have page 0)
   sitemap: string | null; // null when no site origin is set
   stats: BuildStats;
 }
@@ -107,7 +120,10 @@ export function buildIndex(
     indexed: 0,
     shards: 0,
     largestShardBytes: 0,
-    trimmedTerms: 0,
+    truncatedTerms: 0,
+    splitPrefixes: 0,
+    letterPages: 0,
+    largestLetterPageItems: 0,
   };
 
   // vuln_key → [every advisory is rejected or withdrawn so far, has any]
@@ -119,8 +135,9 @@ export function buildIndex(
     dead.set(vk, (dead.get(vk) ?? true) && gone);
   }
 
-  const postings = new Map<string, Map<string, Set<string>>>(); // prefix → term → keys
+  const postings = new Map<string, string[]>(); // term → entry keys (each row lists a term once)
   const docs = new Map<string, SearchHit>();
+  const modifiedOf = new Map<string, string>();
   const letterItems = new Map<string, { key: string; title: string }[]>(LETTERS.map((l) => [l, []]));
   const sitemapEntries: { key: string; modified: string }[] = [];
   const seen = new Set<string>();
@@ -140,8 +157,8 @@ export function buildIndex(
     if (dead.get(key) === true) continue;
     stats.indexed++;
 
-    const hit = hitFor(row, key, title);
-    docs.set(key, hit);
+    docs.set(key, hitFor(row, key, title));
+    modifiedOf.set(key, modified);
 
     const terms = new Set<string>([
       ...searchTerms(title),
@@ -150,12 +167,9 @@ export function buildIndex(
       ...cweIds(row.cwe).flatMap((c) => searchTerms(c)),
     ]);
     for (const term of terms) {
-      const prefix = shardPrefix(term);
-      const shardTerms = postings.get(prefix) ?? new Map<string, Set<string>>();
-      postings.set(prefix, shardTerms);
-      const keys = shardTerms.get(term) ?? new Set<string>();
-      shardTerms.set(term, keys);
-      keys.add(key);
+      const keys = postings.get(term);
+      if (keys) keys.push(key);
+      else postings.set(term, [key]);
     }
 
     const first = title.toLowerCase().charAt(0);
@@ -163,62 +177,116 @@ export function buildIndex(
     sitemapEntries.push({ key, modified });
   }
 
-  const shards = new Map<string, SearchShard>();
-  for (const [prefix, termMap] of [...postings].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    const lists = new Map<string, string[]>();
-    for (const [term, keys] of termMap) {
-      if (keys.size > MAX_POSTINGS) {
-        lists.set(term, []);
-        stats.trimmedTerms++;
-      } else lists.set(term, [...keys].sort());
-    }
-    const assemble = (): SearchShard => {
-      const shardDocs: Record<string, SearchHit> = {};
-      const terms: Record<string, string[]> = {};
-      for (const term of [...lists.keys()].sort()) {
-        const list = lists.get(term) as string[];
-        terms[term] = list;
-        for (const k of list) shardDocs[k] = docs.get(k) as SearchHit;
-      }
-      return { builtAt, terms, docs: shardDocs };
-    };
-    let shard = assemble();
-    let size = byteLength(JSON.stringify(shard));
-    if (size > MAX_SHARD_BYTES) {
-      // Largest lists first. `estimate` only counts the posting bytes saved (an upper bound on the shard
-      // size), so a verify pass runs once it says we fit, and the loop carries on if the real size disagrees.
-      const order = [...lists].filter(([, l]) => l.length > 0).sort((a, b) => b[1].length - a[1].length);
-      let estimate = size;
-      for (const [term, list] of order) {
-        if (estimate <= MAX_SHARD_BYTES) {
-          shard = assemble();
-          size = byteLength(JSON.stringify(shard));
-          estimate = size;
-          if (size <= MAX_SHARD_BYTES) break;
-        }
-        estimate -= list.reduce((n, k) => n + byteLength(k) + 3, 0);
-        lists.set(term, []);
-        stats.trimmedTerms++;
-      }
-      shard = assemble();
-      size = byteLength(JSON.stringify(shard));
-    }
-    shards.set(prefix, shard);
-    stats.largestShardBytes = Math.max(stats.largestShardBytes, size);
+  // A term over MAX_POSTINGS keeps its most recently modified entries. Never an empty list.
+  const truncated = new Set<string>();
+  for (const [term, keys] of postings) {
+    if (keys.length <= MAX_POSTINGS) continue;
+    const mod = (k: string) => modifiedOf.get(k) as string;
+    keys.sort((x, y) => (mod(x) < mod(y) ? 1 : mod(x) > mod(y) ? -1 : x < y ? -1 : x > y ? 1 : 0));
+    postings.set(term, keys.slice(0, MAX_POSTINGS));
+    truncated.add(term);
+    stats.truncatedTerms++;
   }
+
+  // Bytes each entry costs in a shard: its key inside a posting list, and its doc.
+  const keyBytes = new Map<string, number>();
+  const docBytes = new Map<string, number>();
+  for (const [k, hit] of docs) {
+    keyBytes.set(k, byteLength(k) + 3);
+    docBytes.set(k, byteLength(k) + byteLength(JSON.stringify(hit)) + 4);
+  }
+  const assemble = (terms: string[]): SearchShard => {
+    const shardTerms: Record<string, string[]> = {};
+    const shardDocs: Record<string, SearchHit> = {};
+    const trunc: string[] = [];
+    for (const term of [...terms].sort()) {
+      const list = [...(postings.get(term) as string[])].sort();
+      shardTerms[term] = list;
+      for (const k of list) shardDocs[k] = docs.get(k) as SearchHit;
+      if (truncated.has(term)) trunc.push(term);
+    }
+    const shard: SearchShard = { builtAt, terms: shardTerms, docs: shardDocs };
+    if (trunc.length > 0) shard.truncated = trunc;
+    return shard;
+  };
+  const estimate = (terms: string[]): number => {
+    let n = 80;
+    const inShard = new Set<string>();
+    for (const term of terms) {
+      n += byteLength(term) + 6;
+      for (const k of postings.get(term) as string[]) {
+        n += keyBytes.get(k) as number;
+        if (!inShard.has(k)) {
+          inShard.add(k);
+          n += docBytes.get(k) as number;
+        }
+      }
+    }
+    return n;
+  };
+
+  const shards = new Map<string, SearchShard>();
+  const splits: string[] = [];
+  // Put `terms` (all sharing `prefix` at `depth`) in one shard, or split them one character deeper.
+  const place = (prefix: string, terms: string[], depth: number): void => {
+    let shard: SearchShard | null = null;
+    let size = 0;
+    if (estimate(terms) <= MAX_SHARD_BYTES) {
+      shard = assemble(terms);
+      size = byteLength(JSON.stringify(shard));
+      if (size > MAX_SHARD_BYTES) shard = null;
+    }
+    if (shard) {
+      shards.set(prefix, shard);
+      stats.largestShardBytes = Math.max(stats.largestShardBytes, size);
+      return;
+    }
+    const groups = new Map<string, string[]>();
+    for (const term of terms) {
+      const p = shardPrefixAt(term, depth + 1);
+      const g = groups.get(p);
+      if (g) g.push(term);
+      else groups.set(p, [term]);
+    }
+    if (depth + 1 > MAX_PREFIX || terms.length < 2)
+      throw new Error(
+        `search shard "${prefix}" is over ${MAX_SHARD_BYTES} bytes and cannot be split further`,
+      );
+    splits.push(prefix);
+    for (const [p, g] of [...groups].sort(([x], [y]) => (x < y ? -1 : 1))) place(p, g, depth + 1);
+  };
+  const roots = new Map<string, string[]>();
+  for (const term of postings.keys()) {
+    const p = shardPrefixAt(term, MIN_PREFIX);
+    const g = roots.get(p);
+    if (g) g.push(term);
+    else roots.set(p, [term]);
+  }
+  for (const [p, g] of [...roots].sort(([x], [y]) => (x < y ? -1 : 1))) place(p, g, MIN_PREFIX);
   stats.shards = shards.size;
+  stats.splitPrefixes = splits.length;
+  splits.sort();
+  const manifest: SearchManifest = { builtAt, splits };
 
   const collate = new Intl.Collator(undefined, { sensitivity: 'base' });
-  const letters = new Map<string, IndexLetterResponse>();
+  const letters = new Map<string, IndexLetterResponse[]>();
   for (const letter of LETTERS) {
-    const items = (letterItems.get(letter) ?? [])
-      .sort((a, b) => collate.compare(a.title, b.title) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
-      .slice(0, MAX_LETTER_ITEMS);
-    letters.set(letter, { letter, items });
+    const items = (letterItems.get(letter) ?? []).sort(
+      (a, b) => collate.compare(a.title, b.title) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+    );
+    const pages: IndexLetterResponse[] = [];
+    for (let i = 0; i === 0 || i < items.length; i += LETTER_PAGE_ITEMS) {
+      const page: IndexLetterResponse = { letter, items: items.slice(i, i + LETTER_PAGE_ITEMS) };
+      if (i + LETTER_PAGE_ITEMS < items.length) page.cursor = `p${pages.length + 1}`;
+      pages.push(page);
+      stats.largestLetterPageItems = Math.max(stats.largestLetterPageItems, page.items.length);
+    }
+    stats.letterPages += pages.length;
+    letters.set(letter, pages);
   }
 
   const sitemap = opts.siteOrigin ? buildSitemap(opts.siteOrigin, sitemapEntries) : null;
-  return { shards, letters, sitemap, stats };
+  return { shards, manifest, letters, sitemap, stats };
 }
 
 async function pageAll(api: JobApi, table: 'vulns' | 'advisories'): Promise<Record<string, unknown>[]> {
@@ -261,14 +329,39 @@ export async function run(job: Job, ctx: JobContext, _deps: JobDeps = {}): Promi
   const files: { key: string; body: string; type: string }[] = [];
   for (const [prefix, shard] of built.shards)
     files.push({ key: searchShardKey(prefix), body: JSON.stringify(shard), type: 'application/json' });
-  for (const [letter, page] of built.letters)
-    files.push({ key: indexLetterKey(letter), body: JSON.stringify(page), type: 'application/json' });
+  for (const [letter, pages] of built.letters)
+    for (const [i, page] of pages.entries())
+      files.push({ key: indexLetterKey(letter, i), body: JSON.stringify(page), type: 'application/json' });
   if (built.sitemap !== null) files.push({ key: sitemapKey(), body: built.sitemap, type: 'application/xml' });
 
   for (let i = 0; i < files.length; i += UPLOAD_CONCURRENCY)
     await Promise.all(
       files.slice(i, i + UPLOAD_CONCURRENCY).map((f) => api.putObject(f.key, f.body, f.type)),
     );
+  // After every shard: the API treats a bucket without this file as having no index.
+  const manifestBody = JSON.stringify(built.manifest);
+  await api.putObject(searchManifestKey(), manifestBody, 'application/json');
+  files.push({ key: searchManifestKey(), body: manifestBody, type: 'application/json' });
+
+  // Old-layout shards (lookup/search/<prefix>.json) and letter files (lookup/index/<letter>.json), and any
+  // object this build no longer writes, are deleted so nothing stale can be read.
+  const written = new Set(files.map((f) => f.key));
+  const stale: string[] = [];
+  for (const prefix of ['lookup/search/', 'lookup/index/'])
+    for await (const o of api.list(prefix)) if (!written.has(o.key)) stale.push(o.key);
+  let deleted = 0;
+  for (let i = 0; i < stale.length; i += UPLOAD_CONCURRENCY)
+    await Promise.all(
+      stale.slice(i, i + UPLOAD_CONCURRENCY).map(async (key) => {
+        try {
+          await api.deleteObject(key);
+          deleted++;
+        } catch (err) {
+          ctx.log('stale index object not deleted', { key, error: String(err) });
+        }
+      }),
+    );
+  ctx.log('stale index objects deleted', { found: stale.length, deleted });
 
   // Last, so `complete` only sees a manifest once everything above is in place.
   await api.putObject(

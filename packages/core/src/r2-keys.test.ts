@@ -40,8 +40,8 @@ describe('R2 keys', () => {
 
 describe('seam R2 keys', () => {
   it('indexLetterKey', () => {
-    expect(indexLetterKey('a')).toBe('lookup/index/a.json');
-    expect(indexLetterKey('0')).toBe('lookup/index/0.json');
+    expect(indexLetterKey('a')).toBe('lookup/index/a/0.json');
+    expect(indexLetterKey('0', 12)).toBe('lookup/index/0/12.json');
   });
   it('lakeKey', () => {
     expect(lakeKey('vulns', 'nvd', 2025, 3)).toBe('lake/vulns/nvd/2025/part-3.parquet');

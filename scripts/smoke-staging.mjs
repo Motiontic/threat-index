@@ -18,7 +18,7 @@ export async function runSmoke(fetchImpl, { web, api }) {
     return fetchImpl(`${trim(base)}${path}`, { redirect: 'manual', headers: { Accept: '*/*' } });
   };
 
-  async function check(label, base, path, { status, json = false, web: isWeb = false }) {
+  async function check(label, base, path, { status, json = false, web: isWeb = false, hits = false }) {
     let res;
     try {
       res = await get(base, path);
@@ -39,6 +39,14 @@ export async function runSmoke(fetchImpl, { web, api }) {
     if (!h('referrer-policy')) problems.push('no Referrer-Policy');
     if (isWeb && !h('permissions-policy')) problems.push('no Permissions-Policy');
     if (json && !(h('content-type') ?? '').includes('application/json')) problems.push('not JSON');
+    if (hits && res.status === status) {
+      try {
+        const n = (await res.clone().json()).hits?.length ?? 0;
+        if (n < 1) problems.push('no hits');
+      } catch {
+        problems.push('no hits');
+      }
+    }
     rows.push({
       check: label,
       status: res.status,
@@ -62,6 +70,9 @@ export async function runSmoke(fetchImpl, { web, api }) {
       key = null;
     }
   }
+
+  // A very common term: the nightly index must still return results for it.
+  await check('api /v1/search?q=apache', api, '/v1/search?q=apache', { status: 200, json: true, hits: true });
 
   await check('web /', web, '/', { status: 200, web: true });
   await check('web /search?q=log4j', web, '/search?q=log4j', { status: 200, web: true });

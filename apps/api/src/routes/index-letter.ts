@@ -8,6 +8,7 @@ const route = new Hono<AppEnv>();
 
 const INDEX_TTL = 600;
 const PAGE = 500;
+const MAX_PAGE_OBJECT_BYTES = 1024 * 1024;
 
 function isIndexPage(v: unknown): v is IndexLetterResponse {
   if (typeof v !== 'object' || v === null) return false;
@@ -49,17 +50,20 @@ route.get('/v1/index/:letter', (c) =>
 
     const path = `/v1/index/${letter}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`;
     return cachedPublic(c, INDEX_TTL, path, async () => {
-      if (!cursor) {
-        const obj = await c.env.BUCKET.get(indexLetterKey(letter));
-        if (obj) {
+      // `p<n>` is a page of the R2 index; anything else is a D1 key from the fallback below.
+      const pageNo = cursor === undefined ? 0 : /^p(\d{1,6})$/.test(cursor) ? Number(cursor.slice(1)) : null;
+      if (pageNo !== null) {
+        const obj = await c.env.BUCKET.get(indexLetterKey(letter, pageNo));
+        if (obj && obj.size <= MAX_PAGE_OBJECT_BYTES) {
           let parsed: unknown;
           try {
             parsed = await obj.json();
           } catch {
             parsed = null;
           }
-          if (isIndexPage(parsed)) return c.json(parsed);
+          if (isIndexPage(parsed) && parsed.items.length <= PAGE) return c.json(parsed);
         }
+        if (pageNo > 0) return c.json({ error: 'bad_cursor' }, 400); // the index was rebuilt since
       }
       const [b1, b2] = bands(letter);
       const params: unknown[] = [...(b1 ?? []), ...(b2 ?? [])];

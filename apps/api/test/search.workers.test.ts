@@ -1,7 +1,13 @@
 import { env } from 'cloudflare:workers';
 import type { SearchHit, SearchResponse } from '@ti/core/api';
 import { NVD_NOTICE } from '@ti/core/licence';
-import { type SearchShard, searchShardKey, searchTerms, shardPrefix } from '@ti/core/search';
+import {
+  resolvePrefix,
+  type SearchShard,
+  searchManifestKey,
+  searchShardKey,
+  searchTerms,
+} from '@ti/core/search';
 import { beforeEach, describe, expect, it } from 'vitest';
 import app from '../src/index';
 
@@ -89,7 +95,8 @@ async function clearBucket() {
 }
 
 /** One shard per prefix, built the way the job builds them (titles only here). */
-async function putShards(rows: Seed[], extra: Record<string, string[]> = {}) {
+async function putShards(rows: Seed[], extra: Record<string, string[]> = {}, splitList: string[] = []) {
+  const splits = new Set(splitList);
   const shards = new Map<string, SearchShard>();
   for (const r of rows.filter((s) => s.inShard !== false)) {
     const hit: SearchHit = {
@@ -101,7 +108,7 @@ async function putShards(rows: Seed[], extra: Record<string, string[]> = {}) {
       ...(r.published ? { published: r.published } : {}),
     };
     for (const term of searchTerms(r.title)) {
-      const p = shardPrefix(term);
+      const p = resolvePrefix(term, splits);
       const s = shards.get(p) ?? { builtAt: BUILT, terms: {}, docs: {} };
       shards.set(p, s);
       s.terms[term] = [...(s.terms[term] ?? []), r.key].sort();
@@ -109,12 +116,13 @@ async function putShards(rows: Seed[], extra: Record<string, string[]> = {}) {
     }
   }
   for (const [term, list] of Object.entries(extra)) {
-    const p = shardPrefix(term);
+    const p = resolvePrefix(term, splits);
     const s = shards.get(p) ?? { builtAt: BUILT, terms: {}, docs: {} };
     shards.set(p, s);
     s.terms[term] = list;
   }
   for (const [p, s] of shards) await env.BUCKET.put(searchShardKey(p), JSON.stringify(s));
+  await env.BUCKET.put(searchManifestKey(), JSON.stringify({ builtAt: BUILT, splits: splitList }));
 }
 
 let n = 0;
@@ -171,6 +179,42 @@ describe('GET /v1/search (Workers runtime, local D1 and R2)', () => {
     expect(keys(r)).toEqual(['CVE-2023-2222']);
   });
 
+  it('returns hits for a query of only a too-common (truncated) term', async () => {
+    await putShards(SEEDS);
+    const st = JSON.parse(
+      (await (await env.BUCKET.get(searchShardKey('st')))?.text()) ?? '{}',
+    ) as SearchShard;
+    st.truncated = ['struts'];
+    await env.BUCKET.put(searchShardKey('st'), JSON.stringify(st));
+    const r = await body('/v1/search?q=struts');
+    expect(keys(r)).toEqual(expect.arrayContaining(['CVE-2024-1111', 'CVE-2023-2222']));
+    expect(r.total).toBeGreaterThan(0);
+  });
+
+  it('finds a term that lives in a split (deeper) shard', async () => {
+    await clearBucket();
+    await putShards(SEEDS, {}, ['st', 'str']); // struts → stru, stealer → ste
+    expect(await env.BUCKET.get(searchShardKey('st'))).toBeNull();
+    expect(await env.BUCKET.get(searchShardKey('stru'))).not.toBeNull();
+    expect(keys(await body('/v1/search?q=struts+upload'))).toEqual(['CVE-2023-2222']);
+    expect(keys(await body('/v1/search?q=stealer'))).toEqual(['MAL-2024-0001']);
+  });
+
+  it('treats a bucket with only the old layout as having no index', async () => {
+    await clearBucket();
+    // Old shard: valid shape, but claims nothing matches `upload`. It must be ignored, not believed.
+    await env.BUCKET.put(
+      'lookup/search/up.json',
+      JSON.stringify({ builtAt: BUILT, terms: { upload: [] }, docs: {} }),
+    );
+    await env.BUCKET.put(
+      'lookup/search/st.json',
+      JSON.stringify({ builtAt: BUILT, terms: { struts: ['CVE-2023-2222'] }, docs: {} }),
+    );
+    expect(keys(await body('/v1/search?q=upload'))).toEqual(['CVE-2023-2222']);
+    expect(keys(await body('/v1/search?q=stealer'))).toEqual(['MAL-2024-0001']);
+  });
+
   it('finds a row modified after builtAt without it being in a shard', async () => {
     const r = await body('/v1/search?q=delta');
     expect(keys(r)).toEqual(['CVE-2025-5555']);
@@ -197,8 +241,9 @@ describe('GET /v1/search (Workers runtime, local D1 and R2)', () => {
 
   it('treats a malformed shard as missing', async () => {
     await clearBucket();
+    await env.BUCKET.put(searchManifestKey(), JSON.stringify({ builtAt: BUILT, splits: [] }));
     await env.BUCKET.put(searchShardKey('st'), '{"nope":true}');
-    expect(keys(await body('/v1/search?q=upload+bug'))).toEqual(['CVE-2023-2222']);
+    expect(keys(await body('/v1/search?q=struts+upload'))).toEqual(['CVE-2023-2222']);
   });
 
   it('browses with an empty q and sig=kev', async () => {

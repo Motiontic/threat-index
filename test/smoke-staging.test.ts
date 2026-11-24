@@ -42,6 +42,7 @@ describe('runSmoke', () => {
     const rows = await runSmoke(fetchImpl, cfg);
     expect(rows.filter((r: { result: string }) => r.result !== 'ok')).toEqual([]);
     expect(seen.length).toBeLessThanOrEqual(40);
+    expect(seen.some((u) => u.endsWith('/v1/search?q=apache'))).toBe(true);
     expect(seen.some((u) => u.endsWith('/e/CVE-2025-1'))).toBe(true);
     expect(seen.some((u) => u.endsWith('/v1/entries/CVE-2025-1'))).toBe(true);
   });
@@ -49,7 +50,10 @@ describe('runSmoke', () => {
   it('skips the record checks when search finds nothing', async () => {
     const rows = await runSmoke(fake({ hits: [] }).fetchImpl, cfg);
     expect(rows.filter((r: { result: string }) => r.result.startsWith('skip')).length).toBe(2);
-    expect(rows.some((r: { result: string }) => r.result.startsWith('fail'))).toBe(false);
+    // The only failure is the common-term check, which needs at least one hit.
+    const failed = rows.filter((r: { result: string }) => r.result.startsWith('fail'));
+    expect(failed.map((r: { check: string }) => r.check)).toEqual(['api /v1/search?q=apache']);
+    expect(failed[0].result).toContain('no hits');
   });
 
   it('fails the row whose header is missing', async () => {

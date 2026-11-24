@@ -1,8 +1,10 @@
+import { resolvePrefix, searchShardKey } from '@ti/core/search';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JobApi } from '../client.ts';
 import type { Job, JobContext } from '../types.ts';
 import {
   buildIndex,
+  LETTER_PAGE_ITEMS,
   MAX_POSTINGS,
   MAX_SHARD_BYTES,
   MAX_SITEMAP_ENTRIES,
@@ -51,9 +53,9 @@ describe('buildIndex', () => {
     expect(built.shards.get('ze')?.terms.zebra).toEqual(['GHSA-aaaa-bbbb-cccc']);
     expect(built.shards.get('cw')?.terms['cwe-94']).toEqual(['CVE-2024-1111']);
     expect(built.shards.get('st')?.builtAt).toBe(BUILT);
+    expect(built.manifest).toEqual({ builtAt: BUILT, splits: [] });
     for (const [prefix, shard] of built.shards)
-      for (const term of Object.keys(shard.terms))
-        expect(term.slice(0, 2).replace(/[^a-z0-9]/g, '_')).toBe(prefix);
+      for (const term of Object.keys(shard.terms)) expect(resolvePrefix(term, new Set())).toBe(prefix);
   });
 
   it('never indexes vuln keys or advisory ids as terms', () => {
@@ -80,41 +82,65 @@ describe('buildIndex', () => {
     expect(long.shards.get('lo')?.docs['X-1']?.summary).toHaveLength(160);
   });
 
-  it('writes [] for a term over MAX_POSTINGS', () => {
-    const many = Array.from({ length: MAX_POSTINGS + 1 }, (_, i) => vuln(`K-${i}`, 'overflowing'));
+  it('keeps the MAX_POSTINGS most recent entries of a term over the cap, marked truncated', () => {
+    const many = Array.from({ length: MAX_POSTINGS + 50 }, (_, i) =>
+      vuln(`K-${String(i).padStart(5, '0')}`, 'overflowing', {
+        modified: `2026-01-01T00:00:00.${String(i).padStart(3, '0')}Z`,
+      }),
+    );
     const few = Array.from({ length: MAX_POSTINGS }, (_, i) => vuln(`J-${i}`, 'borderline'));
     const b = buildIndex([...many, ...few], [], BUILT);
-    expect(b.shards.get('ov')?.terms.overflowing).toEqual([]);
+    const ov = b.shards.get('ov');
+    const list = ov?.terms.overflowing ?? [];
+    expect(list).toHaveLength(MAX_POSTINGS);
+    expect(list).toContain(`K-${String(MAX_POSTINGS + 49).padStart(5, '0')}`); // newest kept
+    expect(list).not.toContain('K-00000'); // oldest dropped
+    expect(ov?.truncated).toEqual(['overflowing']);
     expect(b.shards.get('bo')?.terms.borderline).toHaveLength(MAX_POSTINGS);
-    expect(b.shards.get('cv')?.terms.cve).toEqual([]); // the shared kind word is over the cap too
-    expect(b.stats.trimmedTerms).toBe(2);
+    expect(b.shards.get('bo')?.truncated).toBeUndefined();
+    expect(b.shards.get('cv')?.truncated).toEqual(['cve']); // the shared kind word is over the cap too
+    expect(b.stats.truncatedTerms).toBe(2);
+    for (const shard of b.shards.values())
+      for (const l of Object.values(shard.terms)) expect(l.length).toBeGreaterThan(0);
   });
 
-  it('empties the largest lists until a shard fits MAX_SHARD_BYTES', () => {
+  it('splits a prefix that does not fit into deeper shards listed in the manifest', () => {
     const rows: VulnRow[] = [];
-    // 300 terms in shard `zz`, each shared by 1,990 rows (under the posting cap): about 8 MB of postings.
+    // 300 terms under `zz`, each shared by 1,990 rows (under the posting cap): about 8 MB of postings.
     const summary = Array.from({ length: 300 }, (_, i) => `zz${i}`).join(' ');
     for (let i = 0; i < 1990; i++)
       rows.push(vuln(`BIG-${String(i).padStart(6, '0')}`, 'bigdoc', { summary }));
     const b = buildIndex(rows, [], BUILT);
-    const shard = b.shards.get('zz');
-    expect(shard).toBeDefined();
-    expect(new TextEncoder().encode(JSON.stringify(shard)).length).toBeLessThanOrEqual(MAX_SHARD_BYTES);
-    expect(b.stats.trimmedTerms).toBeGreaterThan(0);
-    // Every key in a remaining list has a doc.
-    for (const list of Object.values(shard?.terms ?? {}))
-      for (const k of list) expect(shard?.docs[k]).toBeDefined();
+    expect(b.shards.has('zz')).toBe(false);
+    expect(b.manifest.splits).toContain('zz');
+    const splits = new Set(b.manifest.splits);
+    for (let i = 0; i < 300; i++) {
+      const term = `zz${i}`;
+      const shard = b.shards.get(resolvePrefix(term, splits));
+      expect(shard?.terms[term]).toHaveLength(1990);
+      for (const k of shard?.terms[term] ?? []) expect(shard?.docs[k]).toBeDefined();
+    }
+    for (const shard of b.shards.values())
+      expect(new TextEncoder().encode(JSON.stringify(shard)).length).toBeLessThanOrEqual(MAX_SHARD_BYTES);
   });
 
-  it('always has 27 letters, with digits under 0 and sorted items', () => {
-    expect([...built.letters.keys()]).toHaveLength(27);
-    expect(built.letters.get('0')?.items).toEqual([{ key: 'CVE-2024-4444', title: '9front kernel bug' }]);
-    expect(built.letters.get('a')?.items).toEqual([
-      { key: 'CVE-2024-1111', title: 'Apache Struts remote code execution' },
-    ]);
-    expect(built.letters.get('q')).toEqual({ letter: 'q', items: [] });
-    const sorted = buildIndex([vuln('B-2', 'beta'), vuln('A-1', 'Beta'), vuln('C-3', 'alpha')], [], BUILT);
-    expect(sorted.letters.get('b')?.items.map((i) => i.key)).toEqual(['A-1', 'B-2']);
+  it('fails instead of writing a shard it cannot fit', () => {
+    // One term whose docs alone are over the cap: 1,500 rows, each with a 3 KB summary... capped at 160
+    // chars, so use long keys instead.
+    const rows = Array.from({ length: 1900 }, (_, i) => vuln(`${'k'.repeat(2000)}-${i}`, 'onlyterm'));
+    expect(() => buildIndex(rows, [], BUILT)).toThrow(/cannot be split further/);
+  });
+
+  it('pages each letter at LETTER_PAGE_ITEMS, always with page 0', () => {
+    const rows = Array.from({ length: 1203 }, (_, i) =>
+      vuln(`A-${String(i).padStart(5, '0')}`, `alpha ${i}`),
+    );
+    const b = buildIndex(rows, [], BUILT);
+    const pages = b.letters.get('a') ?? [];
+    expect(pages.map((p) => p.items.length)).toEqual([500, 500, 203]);
+    expect(pages.map((p) => p.cursor)).toEqual(['p1', 'p2', undefined]);
+    expect(b.letters.get('q')).toEqual([{ letter: 'q', items: [] }]);
+    expect(b.stats.largestLetterPageItems).toBe(LETTER_PAGE_ITEMS);
   });
 
   it('writes a sitemap with escaped values, and none without an origin', () => {
@@ -139,7 +165,12 @@ describe('buildIndex', () => {
   });
 });
 
-function fakeIo(vulns: VulnRow[], advisories: VulnRow[], opts: { refuse?: string } = {}) {
+function fakeIo(
+  vulns: VulnRow[],
+  advisories: VulnRow[],
+  opts: { refuse?: string; existing?: string[]; failDelete?: string } = {},
+) {
+  const deletes: string[] = [];
   const puts: { key: string; body: string; type: string }[] = [];
   const calls: { table: string; after: string | null; limit: number | undefined }[] = [];
   const api = {
@@ -154,8 +185,16 @@ function fakeIo(vulns: VulnRow[], advisories: VulnRow[], opts: { refuse?: string
       if (key === opts.refuse) throw new Error(`put-object refused: status 403`);
       puts.push({ key, body: String(body), type });
     },
+    async *list(prefix: string) {
+      for (const key of [...(opts.existing ?? []), ...puts.map((p) => p.key)])
+        if (key.startsWith(prefix)) yield { key, size: 1 };
+    },
+    async deleteObject(key: string) {
+      if (key === opts.failDelete) throw new Error('delete-object refused: status 500');
+      deletes.push(key);
+    },
   } as unknown as JobApi;
-  return { api, puts, calls };
+  return { api, puts, calls, deletes };
 }
 const job: Job = { id: 'job1', kind: 'search-index', apiBase: 'https://api.test', hmac: 'k' };
 const ctx = (api: JobApi): JobContext & { logs: string[] } => {
@@ -179,12 +218,52 @@ describe('run', () => {
     const keys = puts.map((p) => p.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect(keys.filter((k) => k.startsWith('lookup/index/'))).toHaveLength(27);
+    expect(keys).toContain('lookup/index/a/0.json');
     expect(keys).toContain('sitemap.xml');
-    expect(keys).toContain('lookup/search/al.json');
+    expect(keys).toContain(searchShardKey('al'));
+    expect(keys.indexOf('lookup/search/v2/manifest.json')).toBeGreaterThan(
+      keys.indexOf(searchShardKey('al')),
+    );
     expect(keys.at(-1)).toBe('inbox/job1/manifest.json');
     expect(JSON.parse(puts.at(-1)?.body ?? '')).toMatchObject({ jobId: 'job1', chunks: [] });
     expect(puts.find((p) => p.key === 'sitemap.xml')?.type).toBe('application/xml');
-    expect(puts.find((p) => p.key === 'lookup/search/al.json')?.type).toBe('application/json');
+    expect(puts.find((p) => p.key === searchShardKey('al'))?.type).toBe('application/json');
+  });
+
+  it('deletes old-layout objects after the build, keeps what it wrote, survives a failed delete', async () => {
+    const existing = [
+      'lookup/search/al.json', // old shard
+      'lookup/search/zz.json',
+      'lookup/index/a.json', // old letter file
+      'lookup/search/v2/qq.json', // new layout, no longer written
+      'lookup/index/a/7.json', // page beyond the new count
+      searchShardKey('al'), // rewritten by this build
+    ];
+    const { api, puts, deletes } = fakeIo([vuln('V-1', 'alpha')], [], {
+      existing,
+      failDelete: 'lookup/search/zz.json',
+    });
+    await run(job, ctx(api));
+    expect(deletes.sort()).toEqual(
+      [
+        'lookup/search/al.json',
+        'lookup/index/a.json',
+        'lookup/search/v2/qq.json',
+        'lookup/index/a/7.json',
+      ].sort(),
+    );
+    expect(deletes).not.toContain(searchShardKey('al'));
+    expect(deletes).not.toContain('lookup/search/v2/manifest.json');
+    expect(puts.at(-1)?.key).toBe('inbox/job1/manifest.json'); // job still completes
+  });
+
+  it('never deletes anything when the build fails', async () => {
+    const { api, deletes } = fakeIo([vuln('V-1', 'alpha')], [], {
+      existing: ['lookup/search/al.json'],
+      refuse: 'lookup/index/a/0.json',
+    });
+    await expect(run(job, ctx(api))).rejects.toThrow(/refused/);
+    expect(deletes).toEqual([]);
   });
 
   it('skips the sitemap without SITE_ORIGIN, with a log line', async () => {
@@ -197,7 +276,7 @@ describe('run', () => {
   });
 
   it('fails on a refused PUT and never writes the manifest', async () => {
-    const { api, puts } = fakeIo([vuln('V-1', 'alpha')], [], { refuse: 'lookup/index/a.json' });
+    const { api, puts } = fakeIo([vuln('V-1', 'alpha')], [], { refuse: 'lookup/index/a/0.json' });
     await expect(run(job, ctx(api))).rejects.toThrow(/refused/);
     expect(puts.map((p) => p.key)).not.toContain('inbox/job1/manifest.json');
   });
