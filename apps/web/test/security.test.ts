@@ -25,11 +25,13 @@ describe('Content-Security-Policy with Clerk', () => {
   const withClerk = buildCsp('abc', { clerk }).split('; ');
   const directive = (list: string[], name: string) => list.find((d) => d.startsWith(`${name} `));
 
-  it('adds exactly the instance host, the bot challenge host, the avatar host and blob workers', () => {
+  it('adds exactly the instance host, the bot challenge host, Clerk Protect, the avatar host and blob workers', () => {
     expect(directive(withClerk, 'script-src')).toBe(
-      "script-src 'self' 'nonce-abc' https://example.clerk.accounts.dev https://challenges.cloudflare.com",
+      "script-src 'self' 'nonce-abc' https://example.clerk.accounts.dev https://challenges.cloudflare.com https://cdn.protect.clerk.com",
     );
-    expect(directive(withClerk, 'connect-src')).toBe("connect-src 'self' https://example.clerk.accounts.dev");
+    expect(directive(withClerk, 'connect-src')).toBe(
+      "connect-src 'self' https://example.clerk.accounts.dev https://cdn.protect.clerk.com",
+    );
     expect(directive(withClerk, 'img-src')).toBe("img-src 'self' https://img.clerk.com");
     expect(directive(withClerk, 'frame-src')).toBe('frame-src https://challenges.cloudflare.com');
     expect(directive(withClerk, 'worker-src')).toBe("worker-src 'self' blob:");
@@ -67,6 +69,8 @@ describe('Content-Security-Policy with Clerk', () => {
     const hosts = [...csp.matchAll(/https:\/\/[^\s;]+/g)].map((m) => m[0]).sort();
     expect(hosts).toEqual(
       [
+        'https://cdn.protect.clerk.com',
+        'https://cdn.protect.clerk.com',
         'https://challenges.cloudflare.com',
         'https://challenges.cloudflare.com',
         'https://example.clerk.accounts.dev',
