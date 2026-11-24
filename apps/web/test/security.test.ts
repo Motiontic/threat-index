@@ -35,16 +35,34 @@ describe('Content-Security-Policy with Clerk', () => {
     expect(directive(withClerk, 'worker-src')).toBe("worker-src 'self' blob:");
   });
 
-  it('changes nothing else and keeps frame-ancestors, style-src and form-action as they were', () => {
+  it('lets Clerk add its styles: nonce on <style> elements, style attributes allowed', () => {
+    expect(directive(withClerk, 'style-src')).toBe("style-src 'self' 'nonce-abc'");
+    expect(directive(withClerk, 'style-src-elem')).toBe("style-src-elem 'self' 'nonce-abc'");
+    expect(directive(withClerk, 'style-src-attr')).toBe("style-src-attr 'unsafe-inline'");
+    // Without Clerk nothing is relaxed.
+    expect(base).toContain("style-src 'self'");
+    expect(base.join('; ')).not.toMatch(/style-src-(elem|attr)/);
+  });
+
+  it('changes nothing else and keeps frame-ancestors and form-action as they were', () => {
     const changed = withClerk.filter((d) => !base.includes(d)).map((d) => d.split(' ')[0]);
-    expect(changed.sort()).toEqual(['connect-src', 'frame-src', 'img-src', 'script-src', 'worker-src']);
+    expect(changed.sort()).toEqual([
+      'connect-src',
+      'frame-src',
+      'img-src',
+      'script-src',
+      'style-src',
+      'style-src-attr',
+      'style-src-elem',
+      'worker-src',
+    ]);
     expect(withClerk).toContain("frame-ancestors 'none'");
-    expect(withClerk).toContain("style-src 'self'");
     expect(withClerk).toContain("form-action 'self'");
   });
 
   it('has no wildcard, no unsafe source and no other remote host', () => {
-    const csp = withClerk.join('; ');
+    // The one unsafe source is style attributes, which Clerk's widgets set and no nonce can cover.
+    const csp = withClerk.filter((d) => !d.startsWith('style-src-attr ')).join('; ');
     expect(csp).not.toMatch(/\*|unsafe-|data:/);
     const hosts = [...csp.matchAll(/https:\/\/[^\s;]+/g)].map((m) => m[0]).sort();
     expect(hosts).toEqual(
