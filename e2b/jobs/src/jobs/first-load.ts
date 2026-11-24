@@ -25,7 +25,7 @@ import { fetchDocument, readTextLimited } from '../lib/http.ts';
 import { writeInbox } from '../lib/inbox.ts';
 import { lakeObjectKey, writeLakePart } from '../lib/lake.ts';
 import { mapLimited } from '../lib/pool.ts';
-import { readTarGz } from '../lib/tar.ts';
+import { MAX_TOTAL_BYTES, readTarGz } from '../lib/tar.ts';
 import { newUlid } from '../lib/ulid.ts';
 import { lakeDeps, withScratch } from '../lib/work.ts';
 import type { Job, JobContext, JobDeps } from '../types.ts';
@@ -145,7 +145,21 @@ export type LoadMode = 'first-load' | 'update';
 
 /** Data files only, as in the git pattern (`packages/patterns/src/git.ts`). */
 const DATA_EXTENSIONS = new Set(['json', 'csv', 'md', 'xml', 'yaml', 'yml', 'txt']);
-const MAX_KEPT_FILES = 400_000;
+export const DEFAULT_MAX_FILES = 400_000;
+export const HARD_MAX_FILES = 1_000_000;
+export const DEFAULT_MAX_BYTES = MAX_TOTAL_BYTES;
+export const HARD_MAX_BYTES = 20 * 1024 ** 3;
+const PROGRESS_EVERY = 10_000;
+
+/** The archive caps for a source: its own values, kept within the hard ceilings. */
+export function archiveLimits(git: { maxFiles?: number; maxBytes?: number }) {
+  const pick = (v: number | undefined, dflt: number, hard: number) =>
+    v !== undefined && Number.isFinite(v) && v > 0 ? Math.min(Math.floor(v), hard) : dflt;
+  return {
+    maxFiles: pick(git.maxFiles, DEFAULT_MAX_FILES, HARD_MAX_FILES),
+    maxBytes: pick(git.maxBytes, DEFAULT_MAX_BYTES, HARD_MAX_BYTES),
+  };
+}
 const GIT_FILE_HOST = 'https://raw.githubusercontent.com';
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -280,18 +294,26 @@ export async function runLoad(
       if (!git) throw new Error(`source ${source.id} has no git config`);
       const include = git.include.map(globToRegExp);
       const res = (await fetchDocument(url, net)) as Response;
+      const limits = archiveLimits(git);
+      const started = Date.now();
       let kept = 0;
       let filtered = 0;
-      const tar = await readTarGz(res.body as ReadableStream<Uint8Array>, async (entry) => {
-        const rel = entry.path.split('/').slice(1).join('/');
-        const ext = /\.([A-Za-z0-9]+)$/.exec(rel)?.[1]?.toLowerCase();
-        if (!rel || !ext || !DATA_EXTENSIONS.has(ext) || !include.some((re) => re.test(rel))) {
-          filtered++;
-          return;
-        }
-        if (++kept > MAX_KEPT_FILES) throw new Error('archive has too many files');
-        docs.feed({ path: rel, status: 'added', text: await entry.text() });
-      });
+      const tar = await readTarGz(
+        res.body as ReadableStream<Uint8Array>,
+        async (entry) => {
+          const rel = entry.path.split('/').slice(1).join('/');
+          const ext = /\.([A-Za-z0-9]+)$/.exec(rel)?.[1]?.toLowerCase();
+          if (!rel || !ext || !DATA_EXTENSIONS.has(ext) || !include.some((re) => re.test(rel))) {
+            filtered++;
+            return;
+          }
+          if (++kept > limits.maxFiles) throw new Error('archive has too many files');
+          docs.feed({ path: rel, status: 'added', text: await entry.text() });
+          if (kept % PROGRESS_EVERY === 0)
+            ctx.log('archive progress', { files: kept, elapsedMs: Date.now() - started });
+        },
+        { maxTotalBytes: limits.maxBytes },
+      );
       oversize = 0;
       ctx.log('archive read', { entries: tar.files, kept, filtered, skipped: tar.skipped });
     } else {
