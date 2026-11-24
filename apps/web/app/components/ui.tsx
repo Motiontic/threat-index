@@ -68,20 +68,68 @@ export function CompactRow({ item, note }: { item: { key: string; title: string 
   );
 }
 
-export function Panel({ title, children }: { title: string; children: ReactNode }) {
+export function Panel({
+  title,
+  children,
+  seeAll,
+}: {
+  title: string;
+  children: ReactNode;
+  /** A link to the full filtered list. */
+  seeAll?: { to: string; label?: string };
+}) {
   return (
     <section className="panel">
       <h2>{title}</h2>
       {children}
+      {seeAll ? (
+        <p className="see-all">
+          <Link to={seeAll.to}>{seeAll.label ?? 'See all'}</Link>
+        </p>
+      ) : null}
     </section>
   );
 }
 
-export function Tile({ to, label, kev }: { to: string; label: string; kev?: boolean }) {
-  return (
-    <Link to={to} className={kev ? 'tile tile-kev' : 'tile'}>
+/** A count tile. Without `to` it is a plain block (nothing to link to yet). A zero count carries a quiet note. */
+export function Tile({
+  to,
+  label,
+  kev,
+  count,
+  note,
+}: {
+  to?: string;
+  label: string;
+  kev?: boolean;
+  count?: number;
+  note?: string;
+}) {
+  const inner = (
+    <>
       <span className="tile-label">{label}</span>
+      {count === undefined ? null : <span className="tile-count">{count.toLocaleString('en-US')}</span>}
+      {note ? <span className="tile-note">{note}</span> : null}
+    </>
+  );
+  const className = kev ? 'tile tile-kev' : 'tile';
+  return to ? (
+    <Link to={to} className={className}>
+      {inner}
     </Link>
+  ) : (
+    <div className={className}>{inner}</div>
+  );
+}
+
+/** A list or type page whose type has no records at all (as opposed to no match for a query). */
+export function NoRecords({ what }: { what: string }) {
+  return (
+    <EmptyState title={`No ${what} yet`}>
+      <p>
+        The sources for this section are being connected. <Link to="/sources">See the sources</Link>.
+      </p>
+    </EmptyState>
   );
 }
 

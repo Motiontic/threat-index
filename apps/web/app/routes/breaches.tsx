@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { CreditList, EmptyState } from '../components/ui';
+import { CreditList, EmptyState, NoRecords } from '../components/ui';
 import { WorldPager, WorldSearch } from '../components/world';
 import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
@@ -46,7 +46,9 @@ export default function Breaches({ loaderData }: Route.ComponentProps) {
         <h1>Breach notices</h1>
       </div>
       <WorldSearch action="/breaches" params={params} label="Search breaches by company" />
-      {items.length === 0 ? (
+      {items.length === 0 && !params.q && params.page === 1 ? (
+        <NoRecords what="breaches" />
+      ) : items.length === 0 ? (
         <EmptyState title="No matching breaches">
           <p>
             Try a company name or fewer words. <Link to="/breaches">Clear the search</Link>.

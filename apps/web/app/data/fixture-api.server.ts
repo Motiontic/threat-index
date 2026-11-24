@@ -5,6 +5,9 @@ import type {
   Credit,
   EntryFull,
   EntryPreview,
+  HomeChange,
+  HomeItem,
+  HomeResponse,
   IndexLetterResponse,
   SearchHit,
   SearchResponse,
@@ -392,6 +395,88 @@ function techniqueApi(url: URL, id: string | null): Response {
   );
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function dayMonth(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}` : '';
+}
+
+/** The home route over the fixtures: the same shape and rules as ti-api's `/v1/home`, from the sample records. */
+function home(): Response {
+  const newest = (rows: FixtureEntry[], date: (e: FixtureEntry) => string) =>
+    [...rows].sort((a, b) => date(b).localeCompare(date(a)) || a.key.localeCompare(b.key)).slice(0, 10);
+  const vulns = FIXTURE_ENTRIES.filter((e) => e.type === 'vuln');
+  const kev = vulns.filter((e) => e.kev_added);
+  const mal = FIXTURE_ENTRIES.filter((e) => e.type === 'mal');
+  const asItem = (e: FixtureEntry, date: string, signal?: string): HomeItem => {
+    const item: HomeItem = { key: e.key, title: e.title, type: e.type === 'mal' ? 'mal' : 'vuln', date };
+    if (signal) item.signal = signal;
+    return item;
+  };
+  const breaches = WORLD.breaches
+    .map(fixtureBreach)
+    .sort((a, b) => b.firstSeen.localeCompare(a.firstSeen) || b.key.localeCompare(a.key));
+  const incidents = [...WORLD.incidents].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  const ai = incidents.filter((i) => i.kind === 'ai');
+  const changes: HomeChange[] = newest(kev, (e) => e.kev_added ?? '').map((e) => ({
+    key: e.key,
+    title: e.title,
+    kind: 'newly_exploited',
+    at: e.kev_added ?? '',
+    source: 'cisa-kev',
+    type: 'vuln',
+  }));
+  const body: HomeResponse = {
+    counts: {
+      vulnerabilities: vulns.length,
+      exploited: kev.length,
+      exploits: 0,
+      breaches: breaches.length,
+      aiIncidents: ai.length,
+      cyberOperations: incidents.filter((i) => i.kind === 'cyber_op').length,
+      maliciousPackages: mal.length,
+      techniques: WORLD.techniques.length,
+    },
+    lists: {
+      exploited: newest(kev, (e) => e.kev_added ?? '').map((e) =>
+        asItem(e, e.kev_added ?? '', `CISA KEV ${dayMonth(e.kev_added ?? '')}`.trim()),
+      ),
+      vulnerabilities: newest(
+        vulns.filter((e) => e.published),
+        (e) => e.published ?? '',
+      ).map((e) => asItem(e, e.published ?? '', e.cvss === null ? undefined : `CVSS ${e.cvss.toFixed(1)}`)),
+      exploits: [],
+      breaches: breaches.slice(0, 10).map((b) => {
+        const item: HomeItem = {
+          key: b.key,
+          title: b.company?.name ?? b.key,
+          type: 'breach',
+          date: b.firstSeen,
+          signal: `${b.noticeCount} ${b.noticeCount === 1 ? 'notice' : 'notices'}`,
+        };
+        return item;
+      }),
+      aiIncidents: ai.slice(0, 10).map((i) => {
+        const item: HomeItem = {
+          key: i.incidentId,
+          source: i.source,
+          title: i.title,
+          type: 'ai',
+          signal: SOURCE_BY_ID.get(i.source)?.name ?? i.source,
+        };
+        if (i.date) item.date = i.date;
+        return item;
+      }),
+      maliciousPackages: newest(
+        mal.filter((e) => e.published),
+        (e) => e.published ?? '',
+      ).map((e) => asItem(e, e.published ?? '')),
+    },
+    changes,
+  };
+  return json(body);
+}
+
 function decoded(raw: string): string | null {
   try {
     return decodeURIComponent(raw);
@@ -431,6 +516,7 @@ export async function fixtureApi(request: Request): Promise<Response> {
   if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
   if (path === '/v1/search') return search(url);
   if (path === '/v1/sources') return sources();
+  if (path === '/v1/home') return home();
   const worldResponse = worldApi(url, path);
   if (worldResponse) return worldResponse;
   const entry = /^\/v1\/entries\/([^/]+)$/.exec(path)?.[1];

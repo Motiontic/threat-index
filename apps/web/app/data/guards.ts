@@ -14,6 +14,11 @@ import type {
 import type {
   Credit,
   EntryPreview,
+  HomeChange,
+  HomeCounts,
+  HomeItem,
+  HomeLists,
+  HomeResponse,
   IndexLetterResponse,
   SearchHit,
   SearchResponse,
@@ -343,4 +348,63 @@ export function guardEntryFull(value: unknown): EntryFullView | null {
     return out;
   });
   return { ...base, cwe: strList(e, 'cwe', 'entry'), advisories, signals, changes };
+}
+
+const HOME_MAX = 10;
+const HOME_TYPES: HomeItem['type'][] = ['vuln', 'breach', 'ai', 'mal'];
+
+function guardHomeItem(value: unknown): HomeItem {
+  const o = obj(value, 'home item');
+  const type = str(o, 'type', 'home item') as HomeItem['type'];
+  if (!HOME_TYPES.includes(type)) throw new GuardError('home item.type: unknown');
+  const out: HomeItem = { key: str(o, 'key', 'home item'), title: str(o, 'title', 'home item'), type };
+  put(out, 'source', optStr(o, 'source', 'home item'));
+  put(out, 'date', optStr(o, 'date', 'home item'));
+  put(out, 'signal', optStr(o, 'signal', 'home item'));
+  return out;
+}
+
+function guardHomeChange(value: unknown): HomeChange {
+  const o = obj(value, 'home change');
+  const type = str(o, 'type', 'home change');
+  if (type !== 'vuln' && type !== 'breach') throw new GuardError('home change.type: unknown');
+  const out: HomeChange = {
+    key: str(o, 'key', 'home change'),
+    kind: str(o, 'kind', 'home change'),
+    at: str(o, 'at', 'home change'),
+    type,
+  };
+  put(out, 'title', optStr(o, 'title', 'home change'));
+  put(out, 'source', optStr(o, 'source', 'home change'));
+  return out;
+}
+
+const COUNT_KEYS: (keyof HomeCounts)[] = [
+  'vulnerabilities',
+  'exploited',
+  'exploits',
+  'breaches',
+  'aiIncidents',
+  'cyberOperations',
+  'maliciousPackages',
+  'techniques',
+];
+const LIST_KEYS: (keyof HomeLists)[] = [
+  'exploited',
+  'vulnerabilities',
+  'exploits',
+  'breaches',
+  'aiIncidents',
+  'maliciousPackages',
+];
+
+export function guardHome(value: unknown): HomeResponse {
+  const o = obj(value, 'home');
+  const c = obj(o.counts, 'home.counts');
+  const l = obj(o.lists, 'home.lists');
+  const counts = {} as HomeCounts;
+  for (const k of COUNT_KEYS) counts[k] = Math.max(0, Math.trunc(num(c, k, 'home.counts')));
+  const lists = {} as HomeLists;
+  for (const k of LIST_KEYS) lists[k] = arr(l, k, 'home.lists').slice(0, HOME_MAX).map(guardHomeItem);
+  return { counts, lists, changes: arr(o, 'changes', 'home').slice(0, HOME_MAX).map(guardHomeChange) };
 }

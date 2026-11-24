@@ -15,6 +15,7 @@ import type {
   EntryChange,
   EntryPreview,
   EntrySignal,
+  HomeResponse,
   IndexLetterResponse,
   SearchResponse,
   SourcesResponse,
@@ -26,6 +27,11 @@ export type {
   Credit,
   EntryPreview,
   EntryResponse,
+  HomeChange,
+  HomeCounts,
+  HomeItem,
+  HomeLists,
+  HomeResponse,
   IndexLetterResponse,
   SearchHit,
   SearchResponse,
@@ -94,6 +100,7 @@ export interface SiteData {
   incident: (source: string, id: string) => Promise<IncidentDetail | null>;
   techniques: (query: WorldQuery) => Promise<WorldList<TechniqueSummary>>;
   technique: (id: string) => Promise<TechniqueDetail | null>;
+  home: () => Promise<HomeResponse>;
   sitemap: () => Promise<Response | null>;
 }
 
