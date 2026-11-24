@@ -9,6 +9,9 @@ export function makeNonce(): string {
   return btoa(binary);
 }
 
+/** Clerk Protect's Device Intelligence script and its reports. */
+export const CLERK_PROTECT_HOST = 'https://cdn.protect.clerk.com';
+
 export function buildCsp(
   nonce: string,
   options: { dev?: boolean; clerk?: { frontendApi: string } | null } = {},
@@ -29,10 +32,11 @@ export function buildCsp(
     // nonce is passed to ClerkProvider) and a few style attributes, which cannot carry one. Without this
     // the sign-in and sign-up forms render unstyled. Stylesheets and <style> still need 'self' or the nonce.
     styleSrc = `style-src 'self' 'nonce-${nonce}'; style-src-elem 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'`;
-    // Sign-in widgets: exactly the instance host, Cloudflare's bot challenge and Clerk's avatar host.
+    // Sign-in widgets: exactly the instance host, Cloudflare's bot challenge, Clerk Protect's device check
+    // (production instances refuse sign-ups when its script cannot load) and Clerk's avatar host.
     const host = `https://${options.clerk.frontendApi}`;
-    scriptSrc.push(host, 'https://challenges.cloudflare.com');
-    connectSrc.push(host);
+    scriptSrc.push(host, 'https://challenges.cloudflare.com', CLERK_PROTECT_HOST);
+    connectSrc.push(host, CLERK_PROTECT_HOST);
     imgSrc.push('https://img.clerk.com');
     extra.push('frame-src https://challenges.cloudflare.com', "worker-src 'self' blob:");
   }
