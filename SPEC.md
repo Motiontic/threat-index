@@ -31,3 +31,24 @@ Other sources' caps, the loader, migrations, new dependencies.
 1. `pnpm build` and `pnpm test:workers` pass.
 2. The tests in section 6 pass.
 3. `cve-list.ts` sets `pull.git.maxFiles: 400000`, and no other source file changes.
+
+## Changes from the first build of this branch
+
+The premise was wrong in its detail: `MAX_KEPT_FILES` is already 400,000. Yet the real staging job for
+`cve-list` failed with exactly `archive has too many files`. Find the real cause:
+
+1. Grep for every place that emits `archive has too many files` (the tar reader in `e2b/jobs/src/` and the
+   first-load job) and list each cap and what it counts (all tar entries including directories and files the
+   include globs reject, or only kept files).
+2. Download the real archive in the sandbox
+   (`curl -sL https://codeload.github.com/CVEProject/cvelistV5/tar.gz/refs/heads/main -o /tmp/cve.tgz`), count
+   its entries (`tar tzf /tmp/cve.tgz | wc -l`), the entries matching `cve-list`'s include globs, and its
+   unpacked size. Save the numbers as proof.
+3. Fix so that this archive loads: caps that count entries the include globs reject should not count them (or
+   should allow far more of them), the unpacked-size cap must fit it, and a source can raise caps up to the hard
+   ceiling through `pull.git.maxFiles` / `pull.git.maxBytes`. Set `cve-list`'s values from the measured numbers,
+   with headroom. Replace section 6's test with one built from these real numbers on a synthetic archive.
+4. Prove it: run the git-archive path of `first-load` locally in the sandbox against the real downloaded
+   archive with a fake API (no network writes), and show it reads every matching file without hitting a cap.
+
+Re-run every acceptance check (criterion 3 becomes: `cve-list.ts` sets the measured caps).
