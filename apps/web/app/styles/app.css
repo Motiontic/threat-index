@@ -232,7 +232,7 @@ kbd,
   align-items: center;
   gap: var(--space-2);
   min-height: 44px;
-  padding: 0 13px;
+  padding: 0 11px;
   border: 0;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -299,8 +299,9 @@ kbd,
 
 #topForm {
   position: relative;
-  flex: 1 1 200px;
-  max-width: 340px;
+  flex: 1 1 240px;
+  max-width: 380px;
+  min-width: 200px;
   margin-left: auto;
   display: block;
 }
