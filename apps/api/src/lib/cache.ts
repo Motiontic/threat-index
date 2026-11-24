@@ -1,7 +1,17 @@
 import { getAuth } from '@hono/clerk-auth';
 import { logEvent } from '@ti/core/log';
 import type { Context } from 'hono';
-import type { AppEnv } from './env';
+import type { AppEnv, Bindings } from './env';
+
+/**
+ * Cache key for every `caches.default` entry. Production and staging share one zone and so one cache, so the
+ * key names the deployment (`TI_ENV`, set in both sections of wrangler.jsonc). It is never taken from the
+ * request host: service-binding calls use the same `ti-api.internal` origin in every environment.
+ */
+export function publicCacheKey(env: Pick<Bindings, 'TI_ENV'>, pathAndQuery: string): Request {
+  const ns = encodeURIComponent(env.TI_ENV || 'unset');
+  return new Request(`https://cache.internal/${ns}${pathAndQuery}`, { method: 'GET' });
+}
 
 export const isSignedIn = (c: Context<AppEnv>): boolean => Boolean(getAuth(c)?.userId);
 
@@ -21,7 +31,7 @@ export async function cachedPublic(
     res.headers.set('cache-control', 'private, no-store');
     return res;
   }
-  const cacheKey = new Request(`https://cache.internal${path}`);
+  const cacheKey = publicCacheKey(c.env, path);
   const hit = await caches.default.match(cacheKey);
   if (hit) return hit;
   const res = await build();
