@@ -23,7 +23,12 @@ export function buildCsp(
   }
   const imgSrc = ["'self'"];
   const extra: string[] = [];
+  let styleSrc = "style-src 'self'";
   if (options.clerk) {
+    // Clerk's widgets add their CSS at run time: <style> elements that carry this request's nonce (the
+    // nonce is passed to ClerkProvider) and a few style attributes, which cannot carry one. Without this
+    // the sign-in and sign-up forms render unstyled. Stylesheets and <style> still need 'self' or the nonce.
+    styleSrc = `style-src 'self' 'nonce-${nonce}'; style-src-elem 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'`;
     // Sign-in widgets: exactly the instance host, Cloudflare's bot challenge and Clerk's avatar host.
     const host = `https://${options.clerk.frontendApi}`;
     scriptSrc.push(host, 'https://challenges.cloudflare.com');
@@ -34,7 +39,7 @@ export function buildCsp(
   return [
     "default-src 'self'",
     `script-src ${scriptSrc.join(' ')}`,
-    "style-src 'self'",
+    styleSrc,
     `img-src ${imgSrc.join(' ')}`,
     "font-src 'self'",
     `connect-src ${connectSrc.join(' ')}`,
