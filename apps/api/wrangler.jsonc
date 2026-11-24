@@ -62,7 +62,7 @@
     { "name": "RL_DEEP", "namespace_id": "7103", "simple": { "limit": 5, "period": 60 } }
   ],
   "vars": {
-    "CLERK_PUBLISHABLE_KEY": "<pk_live_or_pk_test>",
+    "CLERK_PUBLISHABLE_KEY": "${TI_CLERK_PUBLISHABLE_KEY}",
     "ADMIN_USER_IDS": "${TI_ADMIN_USER_IDS?}",
     "API_BASE": "${TI_API_URL}",
     "E2B_TEMPLATE": "threat-index-jobs",
