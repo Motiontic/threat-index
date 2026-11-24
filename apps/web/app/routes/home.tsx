@@ -1,4 +1,5 @@
 import { PRODUCT_INTRO } from '@ti/core/brand';
+import { SOURCES } from '@ti/sources/registry';
 import { Link } from 'react-router';
 import { SearchForm } from '../components/shell';
 import { Panel, Tile } from '../components/ui';
@@ -16,7 +17,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   } catch {
     // The count tiles and panels are left out; the page is still 200.
   }
-  return { origin: siteOrigin(request), home };
+  return { origin: siteOrigin(request), home, sourceCount: SOURCES.length };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -106,44 +107,72 @@ function ChangeRows({ changes }: { changes: HomeChange[] }) {
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
-  const { home } = loaderData;
+  const { home, sourceCount } = loaderData;
   const panels = home
     ? [
         {
           id: 'exploited',
+          span: 's7',
           title: 'Exploited in the wild, latest',
           items: home.lists.exploited,
           all: '/search?sig=kev',
         },
         {
           id: 'vulnerabilities',
+          span: 's4',
           title: 'Latest vulnerabilities',
           items: home.lists.vulnerabilities,
           all: '/search?type=vuln&sort=new',
         },
-        { id: 'exploits', title: 'Latest public exploits', items: home.lists.exploits, all: undefined },
-        { id: 'breaches', title: 'Recent breaches', items: home.lists.breaches, all: '/breaches' },
-        { id: 'ai', title: 'Recent AI incidents', items: home.lists.aiIncidents, all: '/incidents?kind=ai' },
+        {
+          id: 'exploits',
+          span: 's4',
+          title: 'Latest public exploits',
+          items: home.lists.exploits,
+          all: undefined,
+        },
+        {
+          id: 'breaches',
+          span: 's4',
+          title: 'Recent breaches',
+          items: home.lists.breaches,
+          all: '/breaches',
+        },
+        {
+          id: 'ai',
+          span: 's6',
+          title: 'Recent AI incidents',
+          items: home.lists.aiIncidents,
+          all: '/incidents?kind=ai',
+        },
         {
           id: 'mal',
+          span: 's6',
           title: 'Latest malicious packages',
           items: home.lists.maliciousPackages,
           all: '/search?type=mal&sort=new',
         },
       ].filter((p) => p.items.length > 0)
     : [];
+  const changes = home && home.changes.length > 0 ? home.changes : null;
   return (
     <div className="stack">
       <section className="hero">
+        <p className="live">
+          <i aria-hidden="true" />
+          {sourceCount
+            ? `Updated every 3 hours from ${sourceCount} public sources`
+            : 'Updated every 3 hours from public sources'}
+        </p>
         <h1>
-          Every vulnerability, exploit, breach and AI incident, <em>in one place</em>.
+          Every vulnerability, exploit and breach, <em>as it happens.</em>
         </h1>
         <p className="lede">
           {PRODUCT_INTRO}, keeps one record for each public security issue, with the exploited-in-the-wild
           flag and a credit for every source that reported it.
         </p>
         <SearchForm large />
-        <div className="chips">
+        <div className="chips sugg">
           {SUGGESTIONS.map((s) => (
             <Link key={s.q} className="pill" to={`/search?q=${encodeURIComponent(s.q)}`}>
               {s.label}
@@ -167,23 +196,35 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </section>
       ) : null}
 
-      {panels.length > 0 || (home && home.changes.length > 0) ? (
-        <div className="panel-grid">
-          {panels.map((p) => (
-            <Panel key={p.id} title={p.title} {...(p.all ? { seeAll: { to: p.all } } : {})}>
-              <ItemRows items={p.items} />
-            </Panel>
-          ))}
-          {home && home.changes.length > 0 ? (
-            <Panel title="What changed">
-              <ChangeRows changes={home.changes} />
-            </Panel>
-          ) : null}
-        </div>
+      {panels.length > 0 || changes ? (
+        <section aria-labelledby="latest-title">
+          <div className="sec2">
+            <h2 id="latest-title">Latest</h2>
+          </div>
+          <div className="bento">
+            {panels
+              .filter((p) => p.id === 'exploited')
+              .map((p) => (
+                <HomePanel key={p.id} panel={p} />
+              ))}
+            {changes ? (
+              <div className="s5">
+                <Panel title="What changed">
+                  <ChangeRows changes={changes} />
+                </Panel>
+              </div>
+            ) : null}
+            {panels
+              .filter((p) => p.id !== 'exploited')
+              .map((p) => (
+                <HomePanel key={p.id} panel={p} />
+              ))}
+          </div>
+        </section>
       ) : null}
 
       <Panel title="Browse by type">
-        <div className="chips">
+        <div className="chips browse">
           {(Object.keys(TYPE_PLURALS) as (keyof typeof TYPE_PLURALS)[]).map((t) => (
             <Link key={t} className="pill" to={`/search?type=${t}`}>
               {TYPE_PLURALS[t]}
@@ -193,6 +234,20 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             Exploited in the wild
           </Link>
         </div>
+      </Panel>
+    </div>
+  );
+}
+
+function HomePanel({
+  panel,
+}: {
+  panel: { span: string; title: string; items: HomeItem[]; all: string | undefined };
+}) {
+  return (
+    <div className={panel.span}>
+      <Panel title={panel.title} {...(panel.all ? { seeAll: { to: panel.all } } : {})}>
+        <ItemRows items={panel.items} />
       </Panel>
     </div>
   );

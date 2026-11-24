@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { Link } from 'react-router';
+import { type ReactNode, useEffect, useRef } from 'react';
+import { Link, useLocation } from 'react-router';
 import { displayType } from '../data/display';
 import type { Credit, EntryType, SearchHit } from '../data/types';
 import { formatDate, TYPE_LABELS } from '../lib/format';
@@ -80,13 +80,15 @@ export function Panel({
 }) {
   return (
     <section className="panel">
-      <h2>{title}</h2>
+      <div className="ph">
+        <h2>{title}</h2>
+        {seeAll ? (
+          <Link to={seeAll.to} className="see">
+            {seeAll.label ?? 'See all'}
+          </Link>
+        ) : null}
+      </div>
       {children}
-      {seeAll ? (
-        <p className="see-all">
-          <Link to={seeAll.to}>{seeAll.label ?? 'See all'}</Link>
-        </p>
-      ) : null}
     </section>
   );
 }
@@ -267,5 +269,37 @@ export function CvssMeter({ score }: { score: number }) {
       <rect className="meter-track" width="120" height="8" rx="4" />
       <rect className={score >= 9 ? 'meter-fill-bad' : 'meter-fill'} width={width} height="8" rx="4" />
     </svg>
+  );
+}
+
+/**
+ * The pill segmented control for page tabs. A slider behind the current tab moves to the next one (it is
+ * placed by script; without it the current tab carries its own fill). Children are `<li>`s holding links.
+ */
+export function TabBar({ label, children }: { label: string; children: ReactNode }) {
+  const list = useRef<HTMLUListElement>(null);
+  const { key } = useLocation();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure after every navigation
+  useEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const place = () => {
+      const current = el.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!current) {
+        delete el.dataset.slide;
+        return;
+      }
+      el.style.setProperty('--tx', `${current.offsetLeft}px`);
+      el.style.setProperty('--tw', `${current.offsetWidth}px`);
+      el.dataset.slide = 'true';
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [key]);
+  return (
+    <ul ref={list} className="tabs" aria-label={label}>
+      {children}
+    </ul>
   );
 }

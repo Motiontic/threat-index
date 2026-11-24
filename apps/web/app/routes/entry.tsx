@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { data, Link, redirect, useSearchParams } from 'react-router';
 import { errorText, useAccountFetcher } from '../components/account-bits';
-import { Chip, CreditList, CvssMeter, GateCard, TypeBadge } from '../components/ui';
+import { Chip, CreditList, CvssMeter, GateCard, TabBar, TypeBadge } from '../components/ui';
 import { ApiBadRequest, SignInRequired } from '../data/api.server';
 import { bridge, getAccount, getData } from '../data/data.server';
 import { displayType } from '../data/display';
@@ -112,7 +112,7 @@ export default function Entry({ loaderData }: Route.ComponentProps) {
           </div>
         </header>
 
-        <ul className="tabs" aria-label="Record sections">
+        <TabBar label="Record sections">
           <li>
             <Link
               className="tab"
@@ -137,7 +137,7 @@ export default function Entry({ loaderData }: Route.ComponentProps) {
               )}
             </li>
           ))}
-        </ul>
+        </TabBar>
 
         {signedIn ? (
           <WatchButton entryKey={entry.key} watching={watching} />

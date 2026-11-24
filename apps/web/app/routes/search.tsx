@@ -1,6 +1,7 @@
 import { PRODUCT_SHORT } from '@ti/core/brand';
 import { Form, Link } from 'react-router';
 import { errorText, useAccountFetcher } from '../components/account-bits';
+import { Segmented, Select } from '../components/controls';
 import { EmptyState, NoRecords, ResultCard } from '../components/ui';
 import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
@@ -211,39 +212,38 @@ export default function Search({ loaderData }: Route.ComponentProps) {
             <label className="label" htmlFor="f-sev">
               Severity
             </label>
-            <select id="f-sev" className="input" name="sev" defaultValue={params.sev ?? ''}>
-              <option value="">Any</option>
-              {SEVERITIES.map((s) => (
-                <option key={s} value={s}>
-                  {SEVERITY_LABEL[s]}
-                </option>
-              ))}
-            </select>
+            <Select
+              id="f-sev"
+              name="sev"
+              label="Severity"
+              defaultValue={params.sev ?? ''}
+              options={[
+                { value: '', label: 'Any' },
+                ...SEVERITIES.map((v) => ({ value: v, label: SEVERITY_LABEL[v] })),
+              ]}
+            />
           </div>
           <div>
             <label className="label" htmlFor="f-year">
               Year
             </label>
-            <select id="f-year" className="input" name="year" defaultValue={params.year ?? ''}>
-              <option value="">Any</option>
-              {years.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
+            <Select
+              id="f-year"
+              name="year"
+              label="Year"
+              defaultValue={params.year ?? ''}
+              options={[{ value: '', label: 'Any' }, ...years.map((y) => ({ value: y, label: y }))]}
+            />
           </div>
-          <fieldset>
-            <legend className="label">Sort</legend>
-            <label className="check">
-              <input type="radio" name="sort" value="rel" defaultChecked={sort === 'rel'} />
-              Best match
-            </label>
-            <label className="check">
-              <input type="radio" name="sort" value="new" defaultChecked={sort === 'new'} />
-              Newest
-            </label>
-          </fieldset>
+          <Segmented
+            name="sort"
+            label="Sort"
+            defaultValue={sort}
+            options={[
+              { value: 'rel', label: 'Best match' },
+              { value: 'new', label: 'Newest' },
+            ]}
+          />
           <div className="filter-actions">
             <button type="submit" className="button button-primary">
               Apply
