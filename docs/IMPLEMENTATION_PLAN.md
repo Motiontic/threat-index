@@ -110,15 +110,15 @@ threat-index/
 
 **Free-plan limits this design respects** (Cloudflare docs, 22 Nov 2026):
 
-| Limit                                          | Rule in code                                                                                           |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| 10 ms CPU per invocation                       | ≤ 40 records per queue message; anything over ~1 MB goes to E2B                                        |
-| 50 external subrequests per invocation         | batches of ≤ 40 URLs                                                                                   |
-| 100,000 D1 rows written per day; indexes count | budget meter stops the first load at 90,000; natural-key `WITHOUT ROWID` tables; few secondary indexes |
-| 500 MB per D1 database, 10 databases           | 6 databases, about 0.5 GB in total                                                                     |
-| 10,000 queue operations per day                | one message per batch, not per record (~2,000 operations a day)                                        |
-| 5 cron triggers                                | 4 used                                                                                                 |
-| R2: 10 GB, 1M Class A ops per month            | bundle receipts per run, Parquet files, 180-day raw lifecycle                                          |
+| Limit                                                                               | Rule in code                                                                                                    |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 10 ms CPU per invocation                                                            | ≤ 40 records per queue message; anything over ~1 MB goes to E2B                                                 |
+| 50 external subrequests per invocation                                              | batches of ≤ 40 URLs                                                                                            |
+| D1 on Workers Paid: 50M rows written a month (about 1,600,000 a day); indexes count | budget meter stops the first load at 1,000,000 a day; natural-key `WITHOUT ROWID` tables; few secondary indexes |
+| 500 MB per D1 database, 10 databases                                                | 6 databases, about 0.5 GB in total                                                                              |
+| 10,000 queue operations per day                                                     | one message per batch, not per record (~2,000 operations a day)                                                 |
+| 5 cron triggers                                                                     | 4 used                                                                                                          |
+| R2: 10 GB, 1M Class A ops per month                                                 | bundle receipts per run, Parquet files, 180-day raw lifecycle                                                   |
 
 ---
 
@@ -203,7 +203,7 @@ This table doubles as the alias map. Any ID (GHSA, RHSA, USN, JVNDB, EUVD…) re
 - **Types:** `VulnRecord`, `AdvisoryRecord`, `SignalRecord`, `NoticeRecord`, `IncidentRecord`, `TechniqueRecord`, `Receipt`, `Cursor`.
 - **IDs:** `normaliseId()` handles CVE, GHSA, OSV prefixes, RHSA, USN, DSA, JVNDB, EUVD and GCVE; `isCve()`; `vulnKeyFor(aliases)`.
 - **Licence gates:** `canIngest(source)`, `displayMode(source)` (KV override, else the registry), and `creditsFor(sources)`, which includes the NVD notice.
-- **Budget:** `reserveWrites(db, n, { priority })` does an atomic `UPDATE budget SET d1_writes = d1_writes + ? WHERE day = ? AND d1_writes + ? <= ?`. The first load stops at 90,000; steady updates are always counted but never blocked.
+- **Budget:** `reserveWrites(db, n, { priority })` does an atomic `UPDATE budget SET d1_writes = d1_writes + ? WHERE day = ? AND d1_writes + ? <= ?`. The first load stops at 1,000,000; steady updates are always counted but never blocked.
 - **Time:** UTC helpers and ULIDs.
 
 ### `@ti/sources`
@@ -385,7 +385,7 @@ It emails the ops address through the `send_email` binding. That is free, becaus
 - Splits rows into multi-row `INSERT … ON CONFLICT` statements within the bound-parameter limit, and ≤ 40 statements per invocation.
 - Before writing, it calls `reserveWrites(n, priority)`:
   - **steady-state updates** always proceed;
-  - **first-load chunks** stop at 90,000 for the day, and the message is retried with `delaySeconds` set to midnight UTC. A message can be delayed by at most 12 h **(verify)**, so it may hop twice.
+  - **first-load chunks** stop at 1,000,000 for the day, and the message is retried with `delaySeconds` set to midnight UTC. A message can be delayed by at most 12 h **(verify)**, so it may hop twice.
 - Load order: control → techniques → signals → hot CVEs → advisories → breaches → incidents. This matches the board's first-load timeline (about 2 weeks for about 1M rows).
 - Deletes the inbox chunk once it is written.
 

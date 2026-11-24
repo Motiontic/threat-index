@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { FIRST_LOAD_DAILY_CAP } from '@ti/core/budget';
 import { inboxChunkKey, type LoadMessage } from '@ti/core/inbox';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { consume, type Env } from '../src/consume';
@@ -136,14 +137,14 @@ describe('loading', () => {
   });
 
   it('steady goes through above the first-load cap', async () => {
-    await env.DB_CONTROL.prepare('INSERT INTO budget (day, d1_writes) VALUES (?1, 90000)')
-      .bind(today())
+    await env.DB_CONTROL.prepare('INSERT INTO budget (day, d1_writes) VALUES (?1, ?2)')
+      .bind(today(), FIRST_LOAD_DAILY_CAP)
       .run();
     await put(KEY, await gz(sample));
     const { m } = await run(body());
     expect(m.ack).toHaveBeenCalledOnce();
     expect((await counts()).vulns).toBe(1);
-    expect(await meter()).toBe(90_016); // 16: includes the notices_by_name index on breach_notices (0002)
+    expect(await meter()).toBe(FIRST_LOAD_DAILY_CAP + 16); // 16: includes the notices_by_name index on breach_notices (0002)
   });
 
   it('a missing chunk (already loaded and deleted) is acked', async () => {
@@ -179,8 +180,8 @@ describe('loading', () => {
 
 describe('deferral', () => {
   it('a first-load chunk over the cap is re-sent with a delay, kept, and acked', async () => {
-    await env.DB_CONTROL.prepare('INSERT INTO budget (day, d1_writes) VALUES (?1, 89999)')
-      .bind(today())
+    await env.DB_CONTROL.prepare('INSERT INTO budget (day, d1_writes) VALUES (?1, ?2)')
+      .bind(today(), FIRST_LOAD_DAILY_CAP - 1)
       .run();
     await put(KEY, await gz(sample));
     const b = body({ priority: 'first-load' });
@@ -194,7 +195,7 @@ describe('deferral', () => {
     expect(delay).toBeLessThanOrEqual(86_400);
     expect(await exists(KEY)).toBe(true);
     expect(await total()).toBe(0);
-    expect(await meter()).toBe(89_999);
+    expect(await meter()).toBe(FIRST_LOAD_DAILY_CAP - 1);
     expect(hasEvent('load_deferred')).toBe(true);
   });
 

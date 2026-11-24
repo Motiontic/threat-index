@@ -274,7 +274,7 @@ describe('GET /v1/admin/ops', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('private, no-store');
     const r = await json(res);
-    expect(r.budget).toMatchObject({ d1Writes: 1234, emailsSent: 5, d1Limit: 100000 });
+    expect(r.budget).toMatchObject({ d1Writes: 1234, emailsSent: 5, d1Limit: 1600000 });
     const epss = r.sources.find((s: any) => s.id === 'epss');
     expect(epss).toMatchObject({ failed7d: 1, deadLettered7d: 1 });
     expect(r.sources.find((s: any) => s.id === 'cisa-kev').lastSuccess).not.toBeNull();

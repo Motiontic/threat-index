@@ -46,7 +46,7 @@ async function seedAll() {
     }),
   );
   // budget
-  await E.DB_CONTROL.prepare('INSERT INTO budget (day, d1_writes, emails_sent) VALUES (?1, 85000, 90)')
+  await E.DB_CONTROL.prepare('INSERT INTO budget (day, d1_writes, emails_sent) VALUES (?1, 1300000, 90)')
     .bind('2026-11-23')
     .run();
   // jobs
