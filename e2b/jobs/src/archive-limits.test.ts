@@ -161,3 +161,26 @@ describe.skipIf(!process.env.REAL_ARCHIVE)('the real cvelistV5 archive', () => {
     expect(read.kept).toBe(430_969);
   }, 3_600_000);
 });
+
+describe('a load that fails after lake parts were written', () => {
+  it('removes the parts it wrote, leaving no lake objects', async () => {
+    const git = cve.pull?.git as NonNullable<NonNullable<typeof cve.pull>['git']>;
+    const saved = git.maxFiles;
+    const api = fakeApi();
+    const { ctx, logs } = fakeCtx(api);
+    try {
+      git.maxFiles = 5_010; // one full batch (5000) is written before the cap trips
+      await expect(
+        firstLoad(job({ sourceId: 'cve-list', url: ARCHIVE }), ctx, {
+          ...base,
+          fetch: serve(() => syntheticArchive(5_100, 0)),
+        }),
+      ).rejects.toThrow('archive has too many files');
+    } finally {
+      git.maxFiles = saved;
+    }
+    expect(api.puts.filter((k) => k.startsWith('lake/')).length).toBeGreaterThan(0);
+    expect([...api.store.keys()].filter((k) => k.startsWith('lake/'))).toEqual([]);
+    expect(logs.some((l) => l.msg === 'lake parts removed after failure')).toBe(true);
+  }, 120_000);
+});

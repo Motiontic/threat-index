@@ -24,6 +24,8 @@ export interface JobApi {
   putObject(key: string, body: Uint8Array | string, contentType: string): Promise<void>;
   /** The object's bytes, or null when it does not exist. */
   getObject(key: string): Promise<Uint8Array | null>;
+  /** Removes an object this job may write; deleting a missing key succeeds. */
+  deleteObject(key: string): Promise<void>;
   list(prefix: string): AsyncIterable<{ key: string; size: number }>;
   rows(
     table: RowTable,
@@ -61,7 +63,7 @@ export function createJobApi(job: JobAuth, deps: ClientDeps = {}): JobApi {
    */
   async function send(
     route: string,
-    method: 'GET' | 'POST' | 'PUT',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     target: string,
     opts: {
       body?: string | Uint8Array;
@@ -150,6 +152,10 @@ export function createJobApi(job: JobAuth, deps: ClientDeps = {}): JobApi {
     return res ? new Uint8Array(await res.arrayBuffer()) : null;
   }
 
+  async function deleteObject(key: string) {
+    await send('delete-object', 'DELETE', objectPath(key), { signedBody: '' });
+  }
+
   async function* list(prefix: string) {
     let cursor: string | null = null;
     do {
@@ -184,6 +190,7 @@ export function createJobApi(job: JobAuth, deps: ClientDeps = {}): JobApi {
     uploadUrls,
     putObject,
     getObject,
+    deleteObject,
     list,
     rows,
     allRows,
