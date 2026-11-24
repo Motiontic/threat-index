@@ -182,12 +182,18 @@ export function inputShape(source: SourceConfig, url: string): InputShape {
 
 /** Parses documents one at a time. A throwing document is counted and skipped. */
 function documentParser(parser: ParserModule) {
-  const records: ParsedRecord[] = [];
+  let records: ParsedRecord[] = [];
   let docs = 0;
   let failed = 0;
   let firstError: unknown;
   return {
-    records,
+    /** Takes the records parsed so far and starts an empty buffer. */
+    drain(): ParsedRecord[] {
+      const out = records;
+      records = [];
+      return out;
+    },
+    pending: () => records.length,
     feed(input: unknown): void {
       docs++;
       try {
@@ -250,10 +256,49 @@ export async function runLoad(
   const shape = inputShape(source, url);
   const parser = await loadParser(source.parser);
   ctx.log('input', { shape, mode });
-  let records: ParsedRecord[];
+  const { deps, merge, prime } = sandboxLinkDeps(ctx, now);
+  const rows: InboxRow[] = [];
+  let docsLinked = 0;
+  let skipped = 0;
+  let total = 0;
+  let parts = 0;
+  const hasRecords = () => total > 0;
+
+  /** Links one batch, keeps its hot rows and writes its records as one lake part, so none are held after. */
+  const processBatch = async (batch: ParsedRecord[]): Promise<void> => {
+    if (batch.length === 0) return;
+    await prime(batch);
+    const result = await link(batch, deps);
+    merge(result.rows);
+    for (const r of result.rows) rows.push(r);
+    docsLinked += result.docs.length;
+    skipped += result.skipped;
+    const lakeRows = batch.map((record, i) => ({
+      source: source.id,
+      job_id: job.id,
+      n: total + i,
+      record: JSON.stringify(record),
+    }));
+    total += batch.length;
+    const part = await writeLakePart(
+      lakeRows,
+      { source: 'VARCHAR', job_id: 'VARCHAR', n: 'BIGINT', record: 'VARCHAR' },
+      lakeDeps(job.id, jobDeps, ctx.log),
+    );
+    const name = parts === 0 ? job.id : `${job.id}-p${parts}`;
+    parts++;
+    const key = lakeObjectKey('records', source.id, now().getUTCFullYear(), name, part.format);
+    await ctx.api.putObject(key, part.bytes, 'application/octet-stream');
+    ctx.log('lake part written', {
+      part: parts,
+      records: batch.length,
+      format: part.format,
+      bytes: part.bytes.byteLength,
+    });
+  };
 
   if (shape === 'file') {
-    records = await withScratch(job.id, async (dir) => {
+    const records = await withScratch(job.id, async (dir) => {
       const dest = join(dir, 'source');
       const got = await download(url, dest, net);
       ctx.log('downloaded', { bytes: got.bytes });
@@ -262,6 +307,7 @@ export async function runLoad(
       const parsed = parser.parse(input);
       return (Array.isArray(parsed) ? parsed : parsed.records) as ParsedRecord[];
     });
+    for (let i = 0; i < records.length; i += BATCH) await processBatch(records.slice(i, i + BATCH));
   } else {
     const req = await readRequest(ctx, job.id);
     const target = readPair(req.cursor?.value);
@@ -309,6 +355,7 @@ export async function runLoad(
           }
           if (++kept > limits.maxFiles) throw new Error('archive has too many files');
           docs.feed({ path: rel, status: 'added', text: await entry.text() });
+          while (docs.pending() >= BATCH) await processBatch(docs.drain());
           if (kept % PROGRESS_EVERY === 0)
             ctx.log('archive progress', { files: kept, elapsedMs: Date.now() - started });
         },
@@ -337,42 +384,13 @@ export async function runLoad(
     ctx.log('documents parsed', { documents: stats.docs, failed: stats.failed, oversize });
     if (stats.docs === 0 && oversize > 0) throw new Error('every document was over the size limit');
     docs.finish();
-    records = docs.records;
+    const rest = docs.drain();
+    for (let i = 0; i < rest.length; i += BATCH) await processBatch(rest.slice(i, i + BATCH));
   }
-  ctx.log('parsed', { records: records.length });
+  ctx.log('parsed', { records: total });
 
-  const { deps, merge, prime } = sandboxLinkDeps(ctx, now);
-  const rows: InboxRow[] = [];
-  let docs = 0;
-  let skipped = 0;
-  for (let i = 0; i < records.length; i += BATCH) {
-    const batch = records.slice(i, i + BATCH);
-    await prime(batch);
-    const result = await link(batch, deps);
-    merge(result.rows);
-    for (const r of result.rows) rows.push(r);
-    docs += result.docs.length;
-    skipped += result.skipped;
-  }
-  ctx.log('linked', { rows: rows.length, docs, skipped });
-
-  const lakeRows = records.map((record, n) => ({
-    source: source.id,
-    job_id: job.id,
-    n,
-    record: JSON.stringify(record),
-  }));
-  if (records.length === 0) ctx.log('no records: no lake part');
-  else {
-    const part = await writeLakePart(
-      lakeRows,
-      { source: 'VARCHAR', job_id: 'VARCHAR', n: 'BIGINT', record: 'VARCHAR' },
-      lakeDeps(job.id, jobDeps, ctx.log),
-    );
-    const key = lakeObjectKey('records', source.id, now().getUTCFullYear(), job.id, part.format);
-    await ctx.api.putObject(key, part.bytes, 'application/octet-stream');
-    ctx.log('lake part written', { format: part.format, bytes: part.bytes.byteLength });
-  }
+  ctx.log('linked', { rows: rows.length, docs: docsLinked, skipped });
+  if (!hasRecords()) ctx.log('no records: no lake part');
 
   const { chunks } = await writeInbox(ctx.api, job.id, rows, now);
   ctx.log('inbox written', { chunks, rows: rows.length });

@@ -94,11 +94,30 @@ describe('a CVE-List-sized archive (real counts, synthetic bodies)', () => {
       git.maxFiles = saved.maxFiles;
       git.maxBytes = saved.maxBytes;
     }
-    const { ctx, logs } = fakeCtx(fakeApi());
-    await firstLoad(job({ sourceId: 'cve-list', url: ARCHIVE }), ctx, {
-      ...base,
-      fetch: serve(() => syntheticArchive(REAL.matching, others)),
-    });
+    const api = fakeApi();
+    const { ctx, logs } = fakeCtx(api);
+    let peakRss = 0;
+    const timer = setInterval(() => {
+      peakRss = Math.max(peakRss, process.memoryUsage().rss);
+    }, 200);
+    try {
+      await firstLoad(job({ sourceId: 'cve-list', url: ARCHIVE }), ctx, {
+        ...base,
+        fetch: serve(() => syntheticArchive(REAL.matching, others)),
+      });
+    } finally {
+      clearInterval(timer);
+    }
+    // Records are linked and written in batches, so the lake is several parts, not one.
+    const lakeParts = api.puts.filter((k) => k.startsWith('lake/'));
+    expect(lakeParts.length).toBeGreaterThan(1);
+    evidence(
+      JSON.stringify({
+        evidence: 'archive-limits-peak-rss',
+        peakRssMiB: Math.round(peakRss / 2 ** 20),
+        lakeParts: lakeParts.length,
+      }),
+    );
     const read = logs.find((l) => l.msg === 'archive read')?.extra as Record<string, number>;
     expect(read.kept).toBe(REAL.matching);
     expect(read.filtered).toBe(others);
