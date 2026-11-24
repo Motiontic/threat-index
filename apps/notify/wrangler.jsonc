@@ -19,7 +19,7 @@
     "consumers": [{ "queue": "ti-notify", "max_batch_size": 1, "max_retries": 5, "max_concurrency": 1 }]
   },
   "vars": {
-    "EMAIL_FROM": "Threat Index <alerts@<domain>>",
+    "EMAIL_FROM": "${TI_EMAIL_FROM}",
     "APP_BASE": "${TI_APP_URL}",
     "API_BASE": "${TI_API_URL}"
   },
@@ -39,7 +39,7 @@
         ]
       },
       "vars": {
-        "EMAIL_FROM": "Threat Index staging <alerts@<domain>>",
+        "EMAIL_FROM": "${TI_EMAIL_FROM_STAGING}",
         "APP_BASE": "${TI_APP_URL_STAGING}",
         "API_BASE": "${TI_API_URL_STAGING}"
       }

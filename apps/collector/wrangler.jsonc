@@ -77,9 +77,10 @@
       },
       // Bindings don't inherit into env.staging, so the service is named again.
       "services": [{ "binding": "API", "service": "ti-api-staging" }],
-      // No ops email from staging.
+      // No ops email from staging. TI_OPS_EMAIL is only the contact in the User-Agent (SEC asks for one);
+      // without it the key is dropped and the default User-Agent is used.
       "vars": {
-        "USER_AGENT": "ThreatIndex-staging/0.1 (+https://github.com/Motiontic/threat-index)"
+        "USER_AGENT": "ThreatIndex-staging/0.1 (+https://github.com/Motiontic/threat-index; ${TI_OPS_EMAIL?})"
       }
     }
   }
