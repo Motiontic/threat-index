@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
+import { publicCacheKey } from '../lib/cache';
 import type { AppEnv } from '../lib/env';
 import { searchCredits } from '../lib/search-credits';
 import { search } from '../lib/search-engine';
-import { canonicalUrl, encodeCursor, MAX_OFFSET, parseSearchParams } from '../lib/search-params';
+import { canonicalQuery, encodeCursor, MAX_OFFSET, parseSearchParams } from '../lib/search-params';
 
 const route = new Hono<AppEnv>();
 
@@ -18,7 +19,7 @@ route.get('/v1/search', async (c) => {
   const { params } = parsed;
 
   const cache = defaultCache();
-  const cacheKey = new Request(canonicalUrl(url), { method: 'GET' });
+  const cacheKey = publicCacheKey(c.env, `${url.pathname}?${canonicalQuery(url)}`);
   if (cache) {
     const hit = await cache.match(cacheKey);
     if (hit) {

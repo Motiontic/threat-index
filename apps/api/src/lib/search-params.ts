@@ -125,10 +125,10 @@ export function parseSearchParams(sp: URLSearchParams): ParseResult {
 }
 
 /** The same request, parameters sorted, as a cache key. Nothing from headers goes in. */
-export function canonicalUrl(url: URL): string {
+export function canonicalQuery(url: URL): string {
   const entries = [...url.searchParams].sort(([a, av], [b, bv]) =>
     a === b ? (av < bv ? -1 : av > bv ? 1 : 0) : a < b ? -1 : 1,
   );
   const sorted = new URLSearchParams(entries);
-  return `${url.origin}${url.pathname}?${sorted}`;
+  return sorted.toString();
 }

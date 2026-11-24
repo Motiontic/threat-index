@@ -34,6 +34,8 @@ export type Bindings = {
   API_BASE: string | undefined;
   E2B_TEMPLATE: string | undefined;
   R2_BUCKET_NAME: string | undefined;
+  /** Deployment name (`production` or `staging`); namespaces the shared Cache API keys. */
+  TI_ENV: string | undefined;
   E2B_API_KEY: string | undefined;
   R2_ACCOUNT_ID: string | undefined;
   R2_ACCESS_KEY_ID: string | undefined;
