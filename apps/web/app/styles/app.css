@@ -1654,6 +1654,13 @@ input.switch:checked:active::after {
   border-radius: var(--radius-lg);
   transition: background-color 0.12s var(--e-out);
 }
+.pal [role="option"] a .mono {
+  flex: none;
+  white-space: nowrap;
+}
+.pal [role="option"] a > :last-child {
+  min-width: 0;
+}
 .pal [role="option"].sel a {
   background: var(--hover);
 }
