@@ -315,7 +315,7 @@ describe('7. index', () => {
   });
   it('serves the R2 page when present', async () => {
     await E.BUCKET.put(
-      'lookup/index/q.json',
+      'lookup/index/q/0.json',
       JSON.stringify({ letter: 'q', items: [{ key: 'Q1', title: 'q one' }] }),
     );
     expect(await json(await get('/v1/index/Q'))).toEqual({
@@ -352,6 +352,41 @@ describe('7. index', () => {
     expect(all.filter((k: string) => k.startsWith('pg-'))).toEqual(
       stmts.map((_, i) => `pg-${String(i).padStart(4, '0')}`),
     );
+  });
+  it('pages through an R2 letter, 500 at most per page, with a p<n> cursor', async () => {
+    const all = Array.from({ length: 1203 }, (_, i) => ({
+      key: `R-${String(i).padStart(5, '0')}`,
+      title: `r ${i}`,
+    }));
+    for (let i = 0; i * 500 < all.length; i++) {
+      const page: Record<string, unknown> = { letter: 'r', items: all.slice(i * 500, i * 500 + 500) };
+      if ((i + 1) * 500 < all.length) page.cursor = `p${i + 1}`;
+      await E.BUCKET.put(`lookup/index/r/${i}.json`, JSON.stringify(page));
+    }
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const res = await json(await get(`/v1/index/r${cursor ? `?cursor=${cursor}` : ''}`));
+      expect(res.items.length).toBeLessThanOrEqual(500);
+      seen.push(...res.items.map((i: any) => i.key));
+      cursor = res.cursor;
+      pages++;
+    } while (cursor && pages < 10);
+    expect(pages).toBe(3);
+    expect(seen).toEqual(all.map((a) => a.key));
+    // a page that no longer exists is a bad cursor, not an empty list
+    expect((await get('/v1/index/r?cursor=p9')).status).toBe(400);
+  });
+  it('ignores an old-layout letter file and uses D1', async () => {
+    await E.BUCKET.put(
+      'lookup/index/d.json',
+      JSON.stringify({ letter: 'd', items: [{ key: 'OLD', title: 'old' }] }),
+    );
+    const r = await json(await get('/v1/index/d'));
+    const keys = r.items.map((i: any) => i.key);
+    expect(keys).not.toContain('OLD');
+    expect(keys).toContain('Dx-1');
   });
   it('rejects bad letters and cursors', async () => {
     for (const l of ['ab', '%25']) {

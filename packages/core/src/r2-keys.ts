@@ -46,9 +46,12 @@ export function lookupVulnKey(vulnKey: string): string {
   return `lookup/vuln/${vulnShard(vulnKey)}.json`;
 }
 
-/** lookup/index/<letter>.json, an `IndexLetterResponse`. Letter is `a`–`z`, or `0` for digits. */
-export function indexLetterKey(letter: string): string {
-  return `lookup/index/${letter}.json`;
+/**
+ * lookup/index/<letter>/<page>.json, an `IndexLetterResponse` of at most 500 items. Letter is `a`–`z`, or
+ * `0` for digits; pages count from 0. `cursor` on a page is `p<next page number>`.
+ */
+export function indexLetterKey(letter: string, page = 0): string {
+  return `lookup/index/${letter}/${page}.json`;
 }
 
 /** lake/<table>/<source>/<year>/part-<part>.parquet */

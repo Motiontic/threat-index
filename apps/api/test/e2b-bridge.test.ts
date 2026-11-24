@@ -1,4 +1,6 @@
 import { inboxChunkKey } from '@ti/core/inbox';
+import { indexLetterKey } from '@ti/core/r2-keys';
+import { searchShardKey, shardPrefixAt } from '@ti/core/search';
 import { describe, expect, it } from 'vitest';
 import { launcherFromEnv, newJobId, parseApiBase, parseManifest } from '../src/lib/e2b';
 import type { Bindings } from '../src/lib/env';
@@ -134,5 +136,19 @@ describe('presign', () => {
       new URL(await presignPut(cfg, `jobs/${ID}/a`, n)).searchParams.get('X-Amz-Expires');
     expect(await ttl(0)).toBe('1');
     expect(await ttl(99999)).toBe('3600');
+  });
+});
+
+describe('search-index keys pass the upload route', () => {
+  const p = allowedPrefixes('search-index', ID);
+  it('accepts every shard and letter key, including padded short prefixes', () => {
+    const terms = ['x', '', 'ap', 'apache', 'a.b-c', 'log4j', 'ünï', '~', 'a~b'];
+    for (const t of terms) {
+      for (let depth = 2; depth <= 6; depth++) {
+        const key = searchShardKey(shardPrefixAt(t, depth));
+        expect(uploadKeyError(key, p), key).toBeNull();
+      }
+    }
+    for (const l of ['a', 'z', '0', '_']) expect(uploadKeyError(indexLetterKey(l, 3), p)).toBeNull();
   });
 });

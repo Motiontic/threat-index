@@ -1,6 +1,13 @@
 import type { SearchHit } from '@ti/core/api';
 import { normaliseId } from '@ti/core/ids';
-import { type SearchShard, searchShardKey, searchTerms, shardPrefix } from '@ti/core/search';
+import {
+  resolvePrefix,
+  type SearchManifest,
+  type SearchShard,
+  searchManifestKey,
+  searchShardKey,
+  searchTerms,
+} from '@ti/core/search';
 import { SOURCES } from '@ti/sources/registry';
 import { parseSources } from './search-credits';
 import type { SearchParams, Severity } from './search-params';
@@ -11,6 +18,7 @@ import type { SearchParams, Severity } from './search-params';
  */
 
 export const MAX_SHARD_OBJECT_BYTES = 16 * 1024 * 1024;
+export const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 export const MAX_CANDIDATES = 5000;
 export const DELTA_LIMIT = 500;
 export const NO_INDEX_LIMIT = 1000;
@@ -141,10 +149,42 @@ function validShard(data: unknown, terms: string[]): SearchShard | null {
   return s as unknown as SearchShard;
 }
 
-async function readShards(env: SearchEnv, terms: string[]): Promise<Map<string, SearchShard | null>> {
+/**
+ * The manifest of the current layout. Null when the bucket holds no index, or only the old layout
+ * (`lookup/search/<prefix>.json`, which is never read): the caller then queries D1 live.
+ */
+async function readManifest(env: SearchEnv): Promise<SearchManifest | null> {
+  const obj = await env.BUCKET.get(searchManifestKey()); // an R2 failure propagates: 503
+  if (!obj) return null;
+  if (obj.size > MAX_MANIFEST_BYTES) return null;
+  try {
+    const m = (await obj.json()) as Record<string, unknown> | null;
+    if (!m || typeof m !== 'object') return null;
+    if (typeof m.builtAt !== 'string' || Number.isNaN(Date.parse(m.builtAt))) return null;
+    if (!Array.isArray(m.splits) || !m.splits.every((x) => typeof x === 'string')) return null;
+    return { builtAt: m.builtAt, splits: m.splits as string[] };
+  } catch {
+    return null;
+  }
+}
+
+const UNREADABLE = 'unreadable' as const;
+
+/**
+ * One read per distinct prefix. A prefix with no shard object maps to null: no term there is indexed. An
+ * object that is too large or fails the shape check maps to UNREADABLE: the caller queries live instead.
+ */
+async function readShards(
+  env: SearchEnv,
+  terms: string[],
+  splits: ReadonlySet<string>,
+): Promise<Map<string, SearchShard | null | typeof UNREADABLE>> {
   const byPrefix = new Map<string, string[]>();
-  for (const t of terms) byPrefix.set(shardPrefix(t), [...(byPrefix.get(shardPrefix(t)) ?? []), t]);
-  const out = new Map<string, SearchShard | null>();
+  for (const t of terms) {
+    const prefix = resolvePrefix(t, splits);
+    byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), t]);
+  }
+  const out = new Map<string, SearchShard | null | typeof UNREADABLE>();
   await Promise.all(
     [...byPrefix].map(async ([prefix, ts]) => {
       const key = searchShardKey(prefix);
@@ -152,7 +192,7 @@ async function readShards(env: SearchEnv, terms: string[]): Promise<Map<string, 
       if (!obj) return void out.set(prefix, null);
       if (obj.size > MAX_SHARD_OBJECT_BYTES) {
         console.error(JSON.stringify({ level: 'warn', msg: 'search shard too large', key, size: obj.size }));
-        return void out.set(prefix, null);
+        return void out.set(prefix, UNREADABLE);
       }
       let shard: SearchShard | null = null;
       try {
@@ -162,7 +202,7 @@ async function readShards(env: SearchEnv, terms: string[]): Promise<Map<string, 
       }
       if (!shard)
         console.error(JSON.stringify({ level: 'warn', msg: 'search shard failed shape check', key }));
-      out.set(prefix, shard);
+      out.set(prefix, shard ?? UNREADABLE);
     }),
   );
   return out;
@@ -259,22 +299,23 @@ export async function search(env: SearchEnv, p: SearchParams): Promise<SearchRes
     if (hit) return { hits: [hit.hit], total: 1, sources: [hit.sources] };
   }
 
-  const shards = await readShards(env, p.terms);
+  const manifest = await readManifest(env);
   const candidates = new Map<string, Found>();
-  const present = [...shards.values()].filter((s): s is SearchShard => s !== null);
 
-  if (present.length === 0) {
-    // No index yet (fresh bucket): scan the hot set live.
+  const splits = new Set(manifest?.splits ?? []);
+  const shards = manifest ? await readShards(env, p.terms, splits) : null;
+  if (manifest === null || shards === null || [...shards.values()].includes(UNREADABLE)) {
+    // No index (fresh bucket, or only the old layout), or a shard we cannot trust: scan the hot set live.
     for (const f of await liveQuery(env, p, p.terms, null, NO_INDEX_LIMIT)) candidates.set(f.hit.key, f);
   } else {
-    let keys = null as Set<string> | null; // null = every term ignored so far
-    const active: string[] = [];
+    const present = [...shards.values()].filter((s): s is SearchShard => typeof s === 'object' && s !== null);
+    let keys = null as Set<string> | null; // null until the first term is read
     let empty = false;
     for (const t of p.terms) {
-      const shard = shards.get(shardPrefix(t));
+      const shard = shards.get(resolvePrefix(t, splits)) as SearchShard | null | undefined;
+      // A truncated list (a common term's most recent entries) is a normal list.
       const list = shard && Object.hasOwn(shard.terms, t) ? shard.terms[t] : undefined;
-      if (list && list.length === 0) continue; // too common: ignore this term
-      active.push(t);
+      if (list && list.length === 0) continue; // the writer never emits this; ignore the term if seen
       if (!list) {
         empty = true; // absent from the index: matches nothing built
         continue;
@@ -292,10 +333,8 @@ export async function search(env: SearchEnv, p: SearchParams): Promise<SearchRes
           });
       }
     }
-    if (active.length > 0) {
-      const builtAt = present.map((s) => s.builtAt).sort()[0] as string;
-      for (const f of await liveQuery(env, p, active, builtAt, DELTA_LIMIT)) candidates.set(f.hit.key, f);
-    }
+    for (const f of await liveQuery(env, p, p.terms, manifest.builtAt, DELTA_LIMIT))
+      candidates.set(f.hit.key, f);
   }
 
   const matched = [...candidates.values()].slice(0, MAX_CANDIDATES).filter((f) => passes(f.hit, p));
