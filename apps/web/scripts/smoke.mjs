@@ -153,6 +153,7 @@ async function checkAccounts() {
       const allowed = new Set([
         `https://${CLERK_HOST}`,
         'https://challenges.cloudflare.com',
+        'https://cdn.protect.clerk.com',
         'https://img.clerk.com',
       ]);
       for (const h of hosts) if (!allowed.has(h)) fail(path, `CSP names ${h}`);
