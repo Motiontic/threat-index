@@ -11,6 +11,7 @@ import { useSignOut } from '../lib/auth';
 import { formatDate } from '../lib/format';
 import { savedSearchHref } from '../lib/search-params';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import type { Route } from './+types/account';
 
 const SIGN_IN = '/sign-in?redirect_url=%2Faccount';
@@ -29,7 +30,7 @@ export async function loader(args: Route.LoaderArgs) {
     const [me, watch, saved] = await bridge(() =>
       Promise.all([account.client.me(), account.client.watchList(), account.client.savedList()]),
     );
-    return { origin: new URL(args.request.url).origin, me, watch, saved };
+    return { origin: siteOrigin(args.request), me, watch, saved };
   } catch (err) {
     if (err instanceof SignInRequired) throw redirect(SIGN_IN);
     throw err;

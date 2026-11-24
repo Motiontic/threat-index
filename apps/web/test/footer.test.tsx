@@ -20,7 +20,7 @@ describe('footer', () => {
 
   it('carries the NVD notice and the licence line with its links', () => {
     expect(html).toContain(NVD_NOTICE);
-    expect(html).toContain('Threat Index by Motiontic. Code under Apache-2.0;');
+    expect(html).toContain('MTI, the Motiontic Threat Index. Code under Apache-2.0;');
     expect(html).toContain('DATA_LICENSES.md');
     expect(html).toContain('https://github.com/Motiontic/threat-index');
   });
@@ -37,7 +37,7 @@ describe('footer', () => {
 describe('sample-data band', () => {
   it('uses the spec wording', () => {
     expect(SAMPLE_BAND_TEXT).toBe(
-      'Preview with sample data. Live records arrive when the site is connected to the Threat Index API.',
+      'Preview with sample data. Live records arrive when the site is connected to the MTI API.',
     );
   });
 });

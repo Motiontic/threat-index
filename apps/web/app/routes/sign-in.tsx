@@ -1,17 +1,19 @@
+import { PRODUCT_SHORT } from '@ti/core/brand';
 import { EmptyState } from '../components/ui';
 import { SignInForm, useAuthState, useOpenSignIn } from '../lib/auth';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import type { Route } from './+types/sign-in';
 
 export async function loader({ request }: Route.LoaderArgs) {
-  return { origin: new URL(request.url).origin };
+  return { origin: siteOrigin(request) };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
   if (!loaderData) return [{ title: pageTitle('Not found') }];
   return buildMeta({
     title: pageTitle('Log in'),
-    description: 'Log in to Threat Index.',
+    description: `Log in to ${PRODUCT_SHORT}.`,
     path: '/sign-in',
     origin: loaderData.origin,
     noindex: true,

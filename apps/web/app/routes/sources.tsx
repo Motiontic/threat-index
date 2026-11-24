@@ -1,9 +1,11 @@
+import { PRODUCT_SHORT } from '@ti/core/brand';
 import { Link } from 'react-router';
 import { Table } from '../components/ui';
 import { getData } from '../data/data.server';
 import type { SourceStatus } from '../data/types';
 import { formatDate } from '../lib/format';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import type { Route } from './+types/sources';
 
 type LicenceFilter = SourceStatus['licence'];
@@ -27,7 +29,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const counts = { all: sources.length, on: 0, ask: 0, wait: 0, link: 0 };
   for (const s of sources) counts[s.licence] += 1;
   return {
-    origin: url.origin,
+    origin: siteOrigin(request),
     sample: site.mode === 'fixtures',
     status,
     counts,
@@ -39,7 +41,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
   if (!loaderData) return [{ title: pageTitle('Not found') }];
   return buildMeta({
     title: pageTitle('Sources'),
-    description: 'Every public source behind Threat Index, with how it is fetched and its licence status.',
+    description: `Every public source behind ${PRODUCT_SHORT}, with how it is fetched and its licence status.`,
     path: '/sources',
     origin: loaderData.origin,
   });

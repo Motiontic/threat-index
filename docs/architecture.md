@@ -1,6 +1,6 @@
 # Architecture
 
-A one-page map of how Threat Index fits together. The full design is in
+A one-page map of how MTI (Motiontic Threat Index) fits together. The full design is in
 [the implementation plan](IMPLEMENTATION_PLAN.md); the reasons behind the big choices are in the
 [decision records](decisions/).
 

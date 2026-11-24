@@ -1,10 +1,10 @@
-# Threat Index: technical implementation plan
+# MTI (Motiontic Threat Index): technical implementation plan
 
 **Status:** draft v1, 22 November 2026
 **Product spec:** the PRD on the design board (`prd.html`)
 **Design:** the threat data system board (`index.html`)
 
-This plan covers everything needed to build the Threat Index end to end:
+This plan covers everything needed to build MTI (Motiontic Threat Index) end to end:
 
 - pulling 55 public sources every 3 hours;
 - storing them in Cloudflare (D1 + R2), with E2B doing the heavy work;

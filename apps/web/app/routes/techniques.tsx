@@ -5,13 +5,14 @@ import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
 import type { Credit, TechniqueSummary } from '../data/types';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import { FRAMEWORK_LABELS, FRAMEWORKS, parseWorldParams } from '../lib/world';
 import type { Route } from './+types/techniques';
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const params = parseWorldParams(url.searchParams, { framework: FRAMEWORKS });
-  const base = { origin: url.origin, params };
+  const base = { origin: siteOrigin(request), params };
   try {
     const res = await getData(request).techniques(params);
     return { ...base, items: res.items, next: res.next, credits: res.credits };

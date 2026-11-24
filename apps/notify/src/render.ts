@@ -1,3 +1,4 @@
+import { PRODUCT_INTRO, PRODUCT_SHORT } from '@ti/core/brand';
 import type { EmailKind } from '@ti/core/email';
 import { SOURCE_BY_ID } from '@ti/sources/registry';
 import type { Change } from './collect';
@@ -100,9 +101,9 @@ export function subjectFor(kind: EmailKind, items: RenderItem[]): string {
   if (kind === 'instant')
     s =
       n === 1 && items[0]
-        ? `Threat Index: ${itemTitle(items[0])} ${shortChange(items[0].change)}`
-        : `Threat Index: ${n} updates on your watchlist`;
-  else s = `Threat Index ${kind} digest: ${n} updates`;
+        ? `${PRODUCT_SHORT}: ${itemTitle(items[0])} ${shortChange(items[0].change)}`
+        : `${PRODUCT_SHORT}: ${n} updates on your watchlist`;
+  else s = `${PRODUCT_SHORT} ${kind} digest: ${n} updates`;
   return cut(clean(s), 150);
 }
 
@@ -159,7 +160,7 @@ export function renderEmail(input: RenderInput): Rendered {
     `Manage alerts: ${manage}`,
     `Unsubscribe: ${unsubscribeUrl}`,
     ...(credit ? [`Data: ${credit}`] : []),
-    'Threat Index by Motiontic',
+    PRODUCT_INTRO,
   );
 
   const rows: string[] = [];
@@ -187,7 +188,7 @@ export function renderEmail(input: RenderInput): Rendered {
       `<a href="${escapeHtml(manage)}" style="color:#6b6a64">Manage alerts</a> · <a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b6a64">Unsubscribe</a>`,
     ) +
     (credit ? foot(`Data: ${escapeHtml(credit)}`) : '') +
-    foot('Threat Index by Motiontic') +
+    foot(PRODUCT_INTRO) +
     `</td></tr></table></body></html>`;
 
   return { subject, text: text.join('\n'), html };

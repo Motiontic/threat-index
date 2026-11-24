@@ -10,6 +10,7 @@ import {
   secureRedirect,
   shouldNoindex,
 } from '../app/lib/security.server';
+import { workersDevRedirect } from '../app/lib/site.server';
 
 const requestHandler = createRequestHandler(
   () => import('virtual:react-router/server-build'),
@@ -35,7 +36,10 @@ export default {
     const requestId = crypto.randomUUID();
     const url = new URL(request.url);
     let response: Response;
-    if (await overLimit(request)) {
+    const toSite = workersDevRedirect(request, { tiEnv: env.TI_ENV, siteOrigin: env.SITE_ORIGIN });
+    if (toSite) {
+      response = toSite;
+    } else if (await overLimit(request)) {
       response = rateLimitedResponse(url.pathname.endsWith('.data'));
     } else {
       const headers = new Headers(request.headers);

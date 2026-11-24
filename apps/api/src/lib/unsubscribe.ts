@@ -1,3 +1,4 @@
+import { PRODUCT_SHORT } from '@ti/core/brand';
 import type { UnsubscribePayload } from '@ti/core/unsubscribe';
 
 /** Applies one unsubscribe, always scoped to the token's user. Idempotent; missing rows are not an error. */
@@ -38,7 +39,7 @@ const escapeHtml = (s: string): string =>
 function what(p: UnsubscribePayload): string {
   switch (p.scope) {
     case 'all':
-      return 'all Threat Index alert email';
+      return `all ${PRODUCT_SHORT} alert email`;
     case 'digest':
       return 'digest email';
     case 'watch':
@@ -75,7 +76,7 @@ export function renderPage(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title} · Threat Index</title>
+<title>${title} · ${PRODUCT_SHORT}</title>
 <style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;color:#111}button{font:inherit;padding:.5rem 1rem;cursor:pointer}</style>
 </head>
 <body>

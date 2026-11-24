@@ -1,4 +1,5 @@
 // Security headers for every document response; `.data` responses get them minus the CSP.
+import { PRODUCT_SHORT } from '@ti/core/brand';
 
 /** 128 random bits, base64. A new one per request. */
 export function makeNonce(): string {
@@ -109,7 +110,7 @@ export function applyMissingBaseHeaders(headers: Headers): void {
 /** Static page for an over-limit visitor: no script, no external asset. */
 export const RATE_LIMITED_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex"><title>Too many requests · Threat Index</title>
+<meta name="robots" content="noindex"><title>Too many requests · ${PRODUCT_SHORT}</title>
 <style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem}</style></head>
 <body><h1>Too many requests</h1><p>Too many requests. Wait a minute and try again.</p><p><a href="/">Back to the home page</a></p></body></html>`;
 

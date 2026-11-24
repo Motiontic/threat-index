@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { formatDate, truncate } from '../app/lib/format';
-import { buildMeta, escapeJsonLd, JsonLd, jsonLdString, pageTitle } from '../app/lib/seo';
+import { buildMeta, escapeJsonLd, HOME_TITLE, JsonLd, jsonLdString, pageTitle } from '../app/lib/seo';
 
 describe('JSON-LD', () => {
   it('escapes <, >, & and the two line separators', () => {
@@ -32,7 +32,7 @@ describe('meta', () => {
 
   it('has the title, description, Open Graph tags and a canonical from the request origin', () => {
     expect(meta[0]).toEqual({
-      title: 'CVE-2025-3248: Langflow unauthenticated code execution · Threat Index',
+      title: 'CVE-2025-3248: Langflow unauthenticated code execution · MTI',
     });
     expect(get('name', 'description')?.content).toHaveLength(160);
     expect(get('property', 'og:title')).toBeDefined();
@@ -40,6 +40,12 @@ describe('meta', () => {
     expect(get('property', 'og:type')).toBeDefined();
     expect(get('property', 'og:url')?.content).toBe('https://threatindex.example/e/CVE-2025-3248');
     expect(get('rel', 'canonical')?.href).toBe('https://threatindex.example/e/CVE-2025-3248');
+  });
+
+  it('names the site in Open Graph, and titles pages `<page> · MTI`', () => {
+    expect(get('property', 'og:site_name')?.content).toBe('Motiontic Threat Index');
+    expect(pageTitle('Sources')).toBe('Sources · MTI');
+    expect(HOME_TITLE).toBe('MTI: Motiontic Threat Index');
   });
 
   it('adds noindex only when asked', () => {

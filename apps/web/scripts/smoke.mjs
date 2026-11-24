@@ -37,7 +37,7 @@ const failures = [];
 const fail = (where, what) => failures.push(`${where}: ${what}`);
 
 const PAGES = [
-  ['/', 'Every vulnerability'],
+  ['/', 'MTI: Motiontic Threat Index'],
   ['/search', 'Everything'],
   ['/search?q=log4j', 'Results for “log4j”'],
   ['/search?type=vuln&sig=kev', 'Vulnerabilities'],
@@ -282,7 +282,9 @@ async function main() {
     // Dummy keys, no network: they only switch Clerk on so the CSP and routes can be checked.
     args.push('--var', `CLERK_PUBLISHABLE_KEY:${CLERK_KEY}`, '--var', `CLERK_SECRET_KEY:${CLERK_SECRET}`);
   } else args.push('--var', 'DATA_SOURCE:fixtures');
-  args.push('--ip', '127.0.0.1', '--port', String(PORT));
+  // The production config has a custom-domain route, and `wrangler dev` would otherwise present requests as
+  // coming from that host. The smoke test talks to 127.0.0.1, so say so.
+  args.push('--ip', '127.0.0.1', '--port', String(PORT), '--local-upstream', `127.0.0.1:${PORT}`);
   const child = spawn(join(ROOT, 'node_modules', '.bin', 'wrangler'), args, {
     cwd: ROOT,
     detached: true,

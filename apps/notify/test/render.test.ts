@@ -39,11 +39,16 @@ describe('describeChange', () => {
 });
 
 describe('subjects', () => {
+  it('starts every subject with the short name', () => {
+    for (const kind of ['instant', 'daily', 'weekly'] as const)
+      expect(subjectFor(kind, [item()]).startsWith('MTI')).toBe(true);
+  });
+
   it('one item, many items, digests', () => {
-    expect(subjectFor('instant', [item()])).toBe('Threat Index: Acme Gateway RCE exploited in the wild');
-    expect(subjectFor('instant', [item(), item()])).toBe('Threat Index: 2 updates on your watchlist');
-    expect(subjectFor('daily', [item(), item()])).toBe('Threat Index daily digest: 2 updates');
-    expect(subjectFor('weekly', [item()])).toBe('Threat Index weekly digest: 1 updates');
+    expect(subjectFor('instant', [item()])).toBe('MTI: Acme Gateway RCE exploited in the wild');
+    expect(subjectFor('instant', [item(), item()])).toBe('MTI: 2 updates on your watchlist');
+    expect(subjectFor('daily', [item(), item()])).toBe('MTI daily digest: 2 updates');
+    expect(subjectFor('weekly', [item()])).toBe('MTI weekly digest: 1 updates');
   });
   it('is one line of at most 150 characters', () => {
     const s = subjectFor('instant', [item({ title: `${'x'.repeat(300)}\r\nBcc: evil@example.com` })]);
@@ -102,7 +107,7 @@ describe('renderEmail', () => {
     });
     for (const part of [r.text, r.html]) {
       expect(part).toContain('https://api.example/unsubscribe?t=tok');
-      expect(part).toContain('Threat Index by Motiontic');
+      expect(part).toContain('MTI, the Motiontic Threat Index');
       expect(part).toContain('Source: nope');
       expect(part).toContain('https://app.example/account');
     }

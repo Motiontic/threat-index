@@ -3,6 +3,7 @@ import { Chip, CreditList, EmptyState, Panel } from '../components/ui';
 import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import { FRAMEWORK_LABELS } from '../lib/world';
 import type { Route } from './+types/technique';
 
@@ -19,7 +20,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw err;
   }
   if (!technique) throw data(null, { status: 404 });
-  return { origin: new URL(request.url).origin, technique };
+  return { origin: siteOrigin(request), technique };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {

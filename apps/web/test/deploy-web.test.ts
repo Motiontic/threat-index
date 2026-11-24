@@ -100,6 +100,20 @@ describe('webDeployArgs', () => {
     ]);
   });
 
+  it('passes the site URL as SITE_ORIGIN (an https origin) from the matching variable', () => {
+    build(prod);
+    expect(
+      webDeployArgs('production', path(), {
+        TI_CLERK_PUBLISHABLE_KEY: LIVE,
+        TI_APP_URL: 'https://mti.motiontic.com/',
+        TI_APP_URL_STAGING: 'https://staging.example',
+      }),
+    ).toEqual(['--var', `CLERK_PUBLISHABLE_KEY:${LIVE}`, '--var', 'SITE_ORIGIN:https://mti.motiontic.com']);
+    expect(() =>
+      webDeployArgs('production', path(), { TI_CLERK_PUBLISHABLE_KEY: LIVE, TI_APP_URL: 'http://x.test' }),
+    ).toThrow(/TI_APP_URL must be an https/);
+  });
+
   it('refuses a missing or empty key, and a value that is not a publishable key', () => {
     build(staging);
     expect(() => webDeployArgs('staging', path(), {})).toThrow(/not set/);

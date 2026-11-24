@@ -1,3 +1,4 @@
+import { PRODUCT_SHORT } from '@ti/core/brand';
 import { Form, Link } from 'react-router';
 import { errorText, useAccountFetcher } from '../components/account-bits';
 import { EmptyState, ResultCard } from '../components/ui';
@@ -15,6 +16,7 @@ import {
   SEVERITIES,
 } from '../lib/search-params';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import { FRAMEWORK_LABELS, parseWorldParams, pluralise, worldHref } from '../lib/world';
 import type { Route } from './+types/search';
 
@@ -104,7 +106,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const site = getData(request);
   const year = new Date().getUTCFullYear();
   const base = {
-    origin: url.origin,
+    origin: siteOrigin(request),
     params,
     mode: site.mode,
     years: Array.from({ length: 10 }, (_, i) => String(year - i)),
@@ -161,7 +163,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
   const { params, origin } = loaderData;
   return buildMeta({
     title: pageTitle(heading(params.q, params.type)),
-    description: 'Search results from the Threat Index.',
+    description: `Search results from ${PRODUCT_SHORT}.`,
     path: '/search',
     origin,
     noindex: true,

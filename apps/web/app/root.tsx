@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { rootAuthLoader } from '@clerk/react-router/server';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
+import { PRODUCT_SHORT } from '@ti/core/brand';
 import { SOURCES } from '@ti/sources/registry';
 import {
   isRouteErrorResponse,
@@ -107,7 +108,7 @@ export function ErrorBoundary() {
 
   const page = (
     <Shell sample={root?.sample ?? true} sourceCount={root?.sourceCount ?? null}>
-      <title>{`${status === 404 ? 'Not found' : title} · Threat Index`}</title>
+      <title>{`${status === 404 ? 'Not found' : title} · ${PRODUCT_SHORT}`}</title>
       {root?.noindex === false ? <meta name="robots" content="noindex" /> : null}
       <div className="page-head">
         <h1>{title}</h1>

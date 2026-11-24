@@ -1,6 +1,6 @@
 # apps/web
 
-The public Threat Index site (`ti-web`): React Router 8 in framework mode, server-rendered on Cloudflare Workers
+The public MTI (Motiontic Threat Index) site (`ti-web`): React Router 8 in framework mode, server-rendered on Cloudflare Workers
 through `@cloudflare/vite-plugin`. Plan: `docs/IMPLEMENTATION_PLAN.md` §9.
 
 Pages read live records from `ti-api` through the `API` service binding (`DATA_SOURCE=api`, set in

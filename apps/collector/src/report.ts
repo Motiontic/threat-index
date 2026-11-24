@@ -1,4 +1,5 @@
 /** Pure formatting of the watchdog report and its raw email. No bindings, so Node tests cover it. */
+import { PRODUCT_SHORT } from '@ti/core/brand';
 
 export type FindingKind = 'late' | 'drop' | 'unknown-fields' | 'budget' | 'failed-runs' | 'jobs';
 
@@ -32,7 +33,7 @@ function clean(s: string): string {
 
 export function formatReport(findings: readonly Finding[], now: Date): { subject: string; text: string } {
   const day = now.toISOString().slice(0, 10);
-  const subject = `Threat Index watchdog ${day}: ${findings.length === 0 ? 'all clear' : `${findings.length} issues`}`;
+  const subject = `${PRODUCT_SHORT} watchdog ${day}: ${findings.length === 0 ? 'all clear' : `${findings.length} issues`}`;
   if (findings.length === 0) return { subject, text: 'All clear: nothing to report in the last 24 hours.\n' };
 
   const lines: string[] = [`${findings.length} issues in the last 24 hours.`, ''];

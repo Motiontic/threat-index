@@ -162,7 +162,7 @@ describe('digests', () => {
     await runNotify(withKey(), new Date('2026-11-30T03:00:00.000Z'), f.deps);
     expect(f.sent.map((s) => s.body.to[0])).toEqual(['d@example.com', 'w@example.com']);
     expect((await sends()).map((s) => s.kind).sort()).toEqual(['daily', 'weekly']);
-    expect(f.sent[0]?.body.subject).toBe('Threat Index daily digest: 1 updates');
+    expect(f.sent[0]?.body.subject).toBe('MTI daily digest: 1 updates');
     const p = await verifyUnsubscribeToken(
       'test-unsubscribe-secret',
       new URL((f.sent[0]?.body.headers['List-Unsubscribe'] ?? '').slice(1, -1)).searchParams.get('t'),

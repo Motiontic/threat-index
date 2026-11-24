@@ -1,3 +1,4 @@
+import { PRODUCT_INTRO, PRODUCT_NAME, PRODUCT_SHORT } from '@ti/core/brand';
 import { NVD_NOTICE } from '@ti/core/licence';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Form, Link, useLocation } from 'react-router';
@@ -6,8 +7,7 @@ import { SignInButtons } from './account-bits';
 
 const REPO = 'https://github.com/Motiontic/threat-index';
 
-export const SAMPLE_BAND_TEXT =
-  'Preview with sample data. Live records arrive when the site is connected to the Threat Index API.';
+export const SAMPLE_BAND_TEXT = `Preview with sample data. Live records arrive when the site is connected to the ${PRODUCT_SHORT} API.`;
 
 export function SkipLink() {
   return (
@@ -115,10 +115,10 @@ function Rail({ sourceCount, onNavigate }: { sourceCount: number | null; onNavig
   const { isSignedIn, available } = useAuthState();
   return (
     <div className="rail" id="site-rail">
-      <Link to="/" className="brand" onClick={onNavigate}>
+      <Link to="/" className="brand" aria-label={PRODUCT_NAME} onClick={onNavigate}>
         <span className="brand-dot" aria-hidden="true" />
         <span>
-          <span className="brand-name">Threat Index</span>
+          <span className="brand-name">{PRODUCT_SHORT}</span>
           <br />
           <span className="brand-by">by Motiontic</span>
         </span>
@@ -196,7 +196,7 @@ export function Footer({ sourceCount }: { sourceCount: number | null }) {
       </p>
       <p>{NVD_NOTICE}</p>
       <p>
-        Threat Index by Motiontic. Code under Apache-2.0;{' '}
+        {PRODUCT_INTRO}. Code under Apache-2.0;{' '}
         <a href={`${REPO}/blob/main/DATA_LICENSES.md`}>each source’s data keeps its own licence</a>.{' '}
         <a href={REPO}>Code on GitHub</a>.
       </p>

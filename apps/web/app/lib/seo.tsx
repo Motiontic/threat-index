@@ -1,6 +1,11 @@
+import { PRODUCT_NAME, PRODUCT_SHORT } from '@ti/core/brand';
 import { truncate } from './format';
 
-export const SITE_NAME = 'Threat Index';
+/** The site name for Open Graph and JSON-LD. */
+export const SITE_NAME = PRODUCT_NAME;
+
+/** The home page's title: `MTI: Motiontic Threat Index`. */
+export const HOME_TITLE = `${PRODUCT_SHORT}: ${PRODUCT_NAME}`;
 
 export interface PageMeta {
   title: string;
@@ -22,6 +27,7 @@ export function buildMeta(page: PageMeta): MetaDescriptor[] {
     { property: 'og:title', content: page.title },
     { property: 'og:description', content: description },
     { property: 'og:type', content: 'website' },
+    { property: 'og:site_name', content: SITE_NAME },
     { property: 'og:url', content: url },
     { tagName: 'link', rel: 'canonical', href: url },
   ];
@@ -29,9 +35,9 @@ export function buildMeta(page: PageMeta): MetaDescriptor[] {
   return tags;
 }
 
-/** `title · Threat Index` */
+/** `title · MTI` */
 export function pageTitle(title: string): string {
-  return `${title} · ${SITE_NAME}`;
+  return `${title} · ${PRODUCT_SHORT}`;
 }
 
 /** Escapes characters that could end a script element or break a JS string, inside JSON. */

@@ -61,7 +61,7 @@ export function builtWebConfig(target, dir = WEB_DIR) {
 /**
  * The extra `wrangler deploy` arguments for ti-web: the Clerk publishable key as a plain var, read from
  * TI_CLERK_PUBLISHABLE_KEY_STAGING (staging) or TI_CLERK_PUBLISHABLE_KEY (production), in the environment or the
- * repo's .env, and the /ops admin list from TI_ADMIN_USER_IDS (optional). Refuses to deploy when the key is missing, when production would get a `pk_test_` key, or when the
+ * repo's .env, the site URL from TI_APP_URL_STAGING / TI_APP_URL (optional), and the /ops admin list from TI_ADMIN_USER_IDS (optional). Refuses to deploy when the key is missing, when production would get a `pk_test_` key, or when the
  * built config has an `AUTH_MODE` var (fake sign-in must never ship). The secret key is a Worker secret, set once
  * with `wrangler secret put CLERK_SECRET_KEY`; it never passes through here.
  */
@@ -81,6 +81,18 @@ export function webDeployArgs(target, builtConfigPath, env = process.env) {
     throw new Error('production needs a pk_live_ Clerk key, but TI_CLERK_PUBLISHABLE_KEY is a pk_test_ key');
   }
   const args = ['--var', `CLERK_PUBLISHABLE_KEY:${key}`];
+  // The public site URL: canonical links point at it, and production redirects workers.dev to it. Optional.
+  const siteName = target === 'staging' ? 'TI_APP_URL_STAGING' : 'TI_APP_URL';
+  const site = (env[siteName] ?? '').trim();
+  if (site) {
+    let origin = '';
+    try {
+      const u = new URL(site);
+      if (u.protocol === 'https:' && !u.username && !u.password) origin = u.origin;
+    } catch {}
+    if (!origin) throw new Error(`${siteName} must be an https:// URL`);
+    args.push('--var', `SITE_ORIGIN:${origin}`);
+  }
   // The admin list for /ops: user ids, never secrets. Optional: with none, /ops is a 404 for everyone.
   const admins = (env.TI_ADMIN_USER_IDS ?? '').trim();
   if (admins) {

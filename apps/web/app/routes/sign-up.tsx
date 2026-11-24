@@ -1,17 +1,19 @@
+import { PRODUCT_SHORT } from '@ti/core/brand';
 import { EmptyState } from '../components/ui';
 import { SignUpForm, useAuthState, useOpenSignUp } from '../lib/auth';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import type { Route } from './+types/sign-up';
 
 export async function loader({ request }: Route.LoaderArgs) {
-  return { origin: new URL(request.url).origin };
+  return { origin: siteOrigin(request) };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
   if (!loaderData) return [{ title: pageTitle('Not found') }];
   return buildMeta({
     title: pageTitle('Sign up'),
-    description: 'Sign up for a free Threat Index account.',
+    description: `Sign up for a free ${PRODUCT_SHORT} account.`,
     path: '/sign-up',
     origin: loaderData.origin,
     noindex: true,

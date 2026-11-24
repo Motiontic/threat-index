@@ -9,6 +9,8 @@ declare namespace Cloudflare {
     /** Comma list of Clerk user ids who may see /ops (a var set at deploy). */
     ADMIN_USER_IDS?: string;
     TI_ENV: string;
+    /** The public site URL (a var set at deploy from TI_APP_URL[_STAGING]). Canonical links and the workers.dev redirect use it. */
+    SITE_ORIGIN?: string;
     DATA_SOURCE?: string;
     /** Clerk's public key (a var, set at deploy) and secret key (a Worker secret). */
     CLERK_PUBLISHABLE_KEY?: string;
