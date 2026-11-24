@@ -30,7 +30,7 @@ const template = Template({ fileContextPath: `${root}e2b` }).fromDockerfile(
 await Template.build(template, name, {
   apiKey,
   cpuCount: 2,
-  memoryMB: 4096,
+  memoryMB: 4096, // JOB_HEAP_MB (e2b/jobs/src/launch.ts) stays below this, leaving room for DuckDB and the OS
   onBuildLogs: defaultBuildLogger(),
 });
 console.log(`built template ${name}`);

@@ -43,8 +43,20 @@ export interface BuildStats {
   letterPages: number;
   largestLetterPageItems: number;
 }
+/**
+ * The shards of a build, read-only. Each one is assembled from the posting lists when asked for and is not
+ * kept, so walking all of them never holds more than one serialised shard (the writer relies on this).
+ */
+export interface ShardView {
+  readonly size: number;
+  has(prefix: string): boolean;
+  get(prefix: string): SearchShard | undefined;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<SearchShard>;
+  [Symbol.iterator](): IterableIterator<[string, SearchShard]>;
+}
 export interface BuiltIndex {
-  shards: Map<string, SearchShard>; // prefix → shard
+  shards: ShardView; // prefix → shard, assembled on demand
   manifest: SearchManifest;
   letters: Map<string, IndexLetterResponse[]>; // 'a'..'z', '0' → pages (all 27 always have page 0)
   sitemap: string | null; // null when no site origin is set
@@ -225,20 +237,19 @@ export function buildIndex(
     return n;
   };
 
-  const shards = new Map<string, SearchShard>();
+  const placed = new Map<string, string[]>(); // prefix → the terms its shard holds
   const splits: string[] = [];
   // Put `terms` (all sharing `prefix` at `depth`) in one shard, or split them one character deeper.
   const place = (prefix: string, terms: string[], depth: number): void => {
-    let shard: SearchShard | null = null;
-    let size = 0;
-    if (estimate(terms) <= MAX_SHARD_BYTES) {
-      shard = assemble(terms);
-      size = byteLength(JSON.stringify(shard));
-      if (size > MAX_SHARD_BYTES) shard = null;
+    const est = estimate(terms);
+    let fits = est <= MAX_SHARD_BYTES;
+    // The estimate tracks the real size within a few percent; only a close call pays for a real serialisation.
+    if (fits && est > MAX_SHARD_BYTES * 0.95) {
+      const size = byteLength(JSON.stringify(assemble(terms)));
+      fits = size <= MAX_SHARD_BYTES;
     }
-    if (shard) {
-      shards.set(prefix, shard);
-      stats.largestShardBytes = Math.max(stats.largestShardBytes, size);
+    if (fits) {
+      placed.set(prefix, terms);
       return;
     }
     const groups = new Map<string, string[]>();
@@ -263,7 +274,23 @@ export function buildIndex(
     else roots.set(p, [term]);
   }
   for (const [p, g] of [...roots].sort(([x], [y]) => (x < y ? -1 : 1))) place(p, g, MIN_PREFIX);
-  stats.shards = shards.size;
+  const order = [...placed.keys()].sort();
+  const shards: ShardView = {
+    size: placed.size,
+    has: (prefix) => placed.has(prefix),
+    get: (prefix) => {
+      const terms = placed.get(prefix);
+      return terms ? assemble(terms) : undefined;
+    },
+    keys: () => placed.keys(),
+    *values() {
+      for (const prefix of order) yield assemble(placed.get(prefix) as string[]);
+    },
+    *[Symbol.iterator]() {
+      for (const prefix of order) yield [prefix, assemble(placed.get(prefix) as string[])];
+    },
+  };
+  stats.shards = placed.size;
   stats.splitPrefixes = splits.length;
   splits.sort();
   const manifest: SearchManifest = { builtAt, splits };
@@ -317,6 +344,47 @@ function siteOrigin(log: JobContext['log']): string | undefined {
   return origin;
 }
 
+interface IndexObject {
+  key: string;
+  body: string;
+  type: string;
+}
+
+/** Every object but the manifest, one at a time: each body exists only while its consumer holds it. */
+function* indexObjects(built: BuiltIndex): Generator<IndexObject> {
+  for (const [prefix, shard] of built.shards) {
+    const body = JSON.stringify(shard);
+    const size = byteLength(body);
+    if (size > MAX_SHARD_BYTES) throw new Error(`search shard "${prefix}" is ${size} bytes, over the cap`);
+    built.stats.largestShardBytes = Math.max(built.stats.largestShardBytes, size);
+    yield { key: searchShardKey(prefix), body, type: 'application/json' };
+  }
+  for (const [letter, pages] of built.letters)
+    for (const [i, page] of pages.entries())
+      yield { key: indexLetterKey(letter, i), body: JSON.stringify(page), type: 'application/json' };
+  if (built.sitemap !== null) yield { key: sitemapKey(), body: built.sitemap, type: 'application/xml' };
+}
+
+/** Runs `work` over `items` with at most `limit` in flight; the iterator is pulled only as slots free up. */
+async function pool<T>(items: Iterator<T>, limit: number, work: (item: T) => Promise<void>): Promise<void> {
+  let failure: unknown;
+  let failed = false;
+  const worker = async () => {
+    while (!failed) {
+      const next = items.next();
+      if (next.done) return;
+      try {
+        await work(next.value);
+      } catch (err) {
+        failed = true;
+        failure = err;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: limit }, worker));
+  if (failed) throw failure;
+}
+
 export async function run(job: Job, ctx: JobContext, _deps: JobDeps = {}): Promise<void> {
   const api = ctx.api;
   // Before paging: a row changed while we read is still newer than `builtAt`, so the API's delta covers it.
@@ -324,43 +392,37 @@ export async function run(job: Job, ctx: JobContext, _deps: JobDeps = {}): Promi
   const vulns = await pageAll(api, 'vulns');
   const advisories = await pageAll(api, 'advisories');
   const built = buildIndex(vulns, advisories, builtAt, { siteOrigin: siteOrigin(ctx.log) });
-  ctx.log('index built', { ...built.stats, advisories: advisories.length, builtAt });
+  vulns.length = 0; // the index holds what it needs; the raw rows are not read again
+  advisories.length = 0;
 
-  const files: { key: string; body: string; type: string }[] = [];
-  for (const [prefix, shard] of built.shards)
-    files.push({ key: searchShardKey(prefix), body: JSON.stringify(shard), type: 'application/json' });
-  for (const [letter, pages] of built.letters)
-    for (const [i, page] of pages.entries())
-      files.push({ key: indexLetterKey(letter, i), body: JSON.stringify(page), type: 'application/json' });
-  if (built.sitemap !== null) files.push({ key: sitemapKey(), body: built.sitemap, type: 'application/xml' });
-
-  for (let i = 0; i < files.length; i += UPLOAD_CONCURRENCY)
-    await Promise.all(
-      files.slice(i, i + UPLOAD_CONCURRENCY).map((f) => api.putObject(f.key, f.body, f.type)),
-    );
+  const written = new Set<string>();
+  let bytes = 0;
+  await pool(indexObjects(built), UPLOAD_CONCURRENCY, async (f) => {
+    await api.putObject(f.key, f.body, f.type);
+    written.add(f.key);
+    bytes += byteLength(f.body);
+  });
+  ctx.log('index built', { ...built.stats, builtAt });
   // After every shard: the API treats a bucket without this file as having no index.
   const manifestBody = JSON.stringify(built.manifest);
   await api.putObject(searchManifestKey(), manifestBody, 'application/json');
-  files.push({ key: searchManifestKey(), body: manifestBody, type: 'application/json' });
+  written.add(searchManifestKey());
+  bytes += byteLength(manifestBody);
 
   // Old-layout shards (lookup/search/<prefix>.json) and letter files (lookup/index/<letter>.json), and any
   // object this build no longer writes, are deleted so nothing stale can be read.
-  const written = new Set(files.map((f) => f.key));
   const stale: string[] = [];
   for (const prefix of ['lookup/search/', 'lookup/index/'])
     for await (const o of api.list(prefix)) if (!written.has(o.key)) stale.push(o.key);
   let deleted = 0;
-  for (let i = 0; i < stale.length; i += UPLOAD_CONCURRENCY)
-    await Promise.all(
-      stale.slice(i, i + UPLOAD_CONCURRENCY).map(async (key) => {
-        try {
-          await api.deleteObject(key);
-          deleted++;
-        } catch (err) {
-          ctx.log('stale index object not deleted', { key, error: String(err) });
-        }
-      }),
-    );
+  await pool(stale[Symbol.iterator](), UPLOAD_CONCURRENCY, async (key) => {
+    try {
+      await api.deleteObject(key);
+      deleted++;
+    } catch (err) {
+      ctx.log('stale index object not deleted', { key, error: String(err) });
+    }
+  });
   ctx.log('stale index objects deleted', { found: stale.length, deleted });
 
   // Last, so `complete` only sees a manifest once everything above is in place.
@@ -369,5 +431,9 @@ export async function run(job: Job, ctx: JobContext, _deps: JobDeps = {}): Promi
     JSON.stringify({ jobId: job.id, createdAt: new Date().toISOString(), chunks: [] }),
     'application/json',
   );
-  ctx.log('index uploaded', { objects: files.length + 1 });
+  ctx.log('index uploaded', {
+    objects: written.size + 1,
+    bytes,
+    heapUsedMB: Math.round(process.memoryUsage().heapUsed / 2 ** 20),
+  });
 }
