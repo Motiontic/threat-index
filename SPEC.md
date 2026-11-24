@@ -56,3 +56,14 @@ The visual redesign, new dependencies, migrations unless an index is missing for
 2. The tests in section 4 pass.
 3. QA in the browser against the fixtures: the home page shows count tiles and at least the exploited,
    vulnerabilities and breaches panels; the incidents page with no data shows the "no records yet" state.
+
+## Changes from the first build of this branch
+
+The first round was blocked only by `pnpm test:workers`: the web smoke check (`apps/web/scripts/smoke.mjs`)
+failed four checks on `/sign-in` and `/sign-up`. That was a fault on `main`, not in this branch: a sign-in
+fix added `https://cdn.protect.clerk.com` to the page security policy without updating the smoke check's
+allowed hosts. `main` now has that fix (commit 07a94ac).
+
+1. `git fetch origin && git rebase origin/main`, resolving any conflict in favour of keeping both changes.
+2. Re-run `pnpm build` and `pnpm test:workers`; both must pass.
+3. Do not change `apps/web/scripts/smoke.mjs` or `apps/web/app/lib/security.server.ts`.
