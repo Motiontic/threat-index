@@ -38,8 +38,8 @@ describe('shardPrefix', () => {
     expect(shardPrefix('Apache')).toBe('ap');
   });
   it('handles short terms', () => {
-    expect(shardPrefix('x')).toBe('x~');
-    expect(shardPrefix('')).toBe('~~');
+    expect(shardPrefix('x')).toBe('x-');
+    expect(shardPrefix('')).toBe('--');
   });
   it('replaces odd characters with _', () => {
     expect(shardPrefix('-a')).toBe('_a');
@@ -50,16 +50,16 @@ describe('shardPrefix', () => {
 });
 
 describe('shardPrefixAt and resolvePrefix', () => {
-  it('goes deeper and pads short terms with ~', () => {
+  it('goes deeper and pads short terms with -', () => {
     expect(shardPrefixAt('apache', 4)).toBe('apac');
-    expect(shardPrefixAt('ap', 4)).toBe('ap~~');
+    expect(shardPrefixAt('ap', 4)).toBe('ap--');
     expect(shardPrefixAt('a.b-c', 5)).toBe('a_b_c');
   });
   it('follows splits one character at a time', () => {
     const splits = new Set(['ap', 'apa']);
     expect(resolvePrefix('apache', splits)).toBe('apac');
     expect(resolvePrefix('api', splits)).toBe('ap'.concat('i'));
-    expect(resolvePrefix('ap', splits)).toBe('ap~');
+    expect(resolvePrefix('ap', splits)).toBe('ap-');
     expect(resolvePrefix('log4j', splits)).toBe('lo');
   });
   it('is bounded when every prefix claims to be split', () => {

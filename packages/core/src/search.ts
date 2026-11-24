@@ -19,14 +19,14 @@ export const MAX_PREFIX = 64;
 
 /**
  * The first `depth` characters of the term, lowercase, anything outside [a-z0-9] replaced by `_`, padded
- * with `~` when the term is shorter. A busy prefix is split by asking for one more character.
+ * with `-` when the term is shorter. A busy prefix is split by asking for one more character.
  */
 export function shardPrefixAt(term: string, depth: number): string {
   return term
     .toLowerCase()
     .slice(0, depth)
     .replace(/[^a-z0-9]/g, '_')
-    .padEnd(depth, '~');
+    .padEnd(depth, '-');
 }
 
 /** Two-character prefix: where every term starts before any split. */
