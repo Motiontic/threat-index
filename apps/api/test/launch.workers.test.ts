@@ -277,6 +277,12 @@ describe('GET /v1/admin/ops', () => {
     expect(r.budget).toMatchObject({ d1Writes: 1234, emailsSent: 5, d1Limit: 1600000 });
     const epss = r.sources.find((s: any) => s.id === 'epss');
     expect(epss).toMatchObject({ failed7d: 1, deadLettered7d: 1 });
+    // the last run's status and reason are listed, so the next gap is visible without SQL
+    expect(epss.lastRun).toMatchObject({ status: 'failed', reason: 'dead-lettered after 6 attempts: boom' });
+    expect(r.sources.find((s: any) => s.id === 'cisa-kev').lastRun).toMatchObject({
+      status: 'ok',
+      reason: null,
+    });
     expect(r.sources.find((s: any) => s.id === 'cisa-kev').lastSuccess).not.toBeNull();
     expect(r.deadLetters).toHaveLength(1);
     expect(r.deadLetters[0]).toMatchObject({ runId: 'r2', sourceId: 'epss' });

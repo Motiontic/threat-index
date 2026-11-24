@@ -55,7 +55,7 @@ export async function buildOpsReport(env: OpsEnv, now: Date): Promise<OpsReport>
          FROM runs GROUP BY source_id`,
       )
       .bind(since),
-    db.prepare('SELECT source_id, status, MAX(started_at) AS started_at FROM runs GROUP BY source_id'),
+    db.prepare('SELECT source_id, status, error, MAX(started_at) AS started_at FROM runs GROUP BY source_id'),
     db.prepare('SELECT d1_writes, queue_ops, r2_class_a FROM budget WHERE day = ?1').bind(day),
     db.prepare('SELECT status, COUNT(*) AS n FROM jobs WHERE created_at >= ?1 GROUP BY status').bind(since),
     db.prepare(
@@ -82,9 +82,14 @@ export async function buildOpsReport(env: OpsEnv, now: Date): Promise<OpsReport>
 
   const stats = new Map(((perSource?.results ?? []) as unknown as SourceRow[]).map((r) => [r.source_id, r]));
   const lastRuns = new Map(
-    ((latest?.results ?? []) as unknown as { source_id: string; status: string; started_at: string }[]).map(
-      (r) => [r.source_id, r],
-    ),
+    (
+      (latest?.results ?? []) as unknown as {
+        source_id: string;
+        status: string;
+        error: string | null;
+        started_at: string;
+      }[]
+    ).map((r) => [r.source_id, r]),
   );
   const sources: OpsReport['sources'] = SOURCES.map((s) => {
     const st = stats.get(s.id);
@@ -98,7 +103,9 @@ export async function buildOpsReport(env: OpsEnv, now: Date): Promise<OpsReport>
       cadence: s.cadence,
       ingest,
       lastSuccess,
-      lastRun: run ? { status: run.status, startedAt: run.started_at } : null,
+      lastRun: run
+        ? { status: run.status, startedAt: run.started_at, reason: run.error?.slice(0, 200) ?? null }
+        : null,
       failed7d: st?.failed ?? 0,
       deadLettered7d: st?.dead ?? 0,
       late,

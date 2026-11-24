@@ -19,6 +19,8 @@ export interface Env {
   OPS_EMAIL_TO?: string;
   OPS_EMAIL_FROM?: string;
   USER_AGENT?: string;
+  /** Contact address for sources that demand one (SEC). Falls back to the one inside USER_AGENT. */
+  CONTACT_EMAIL?: string;
   /** Optional credentials, handed to patterns as `PatternContext.credentials`. */
   GITHUB_TOKEN?: string;
   NVD_API_KEY?: string;

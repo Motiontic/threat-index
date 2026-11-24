@@ -14,6 +14,21 @@ export const CADENCE_BY_CRON: Record<string, SourceConfig['cadence'][]> = {
 
 export { CADENCE_MS };
 
+/** The cron whose ticks also start sources that have never had a successful run, whatever their cadence. */
+export const FIRST_RUN_CRON = '0 */3 * * *';
+
+/**
+ * Most never-run heavy sources one tick starts. Heavy sources go to E2B jobs and ti-api allows
+ * MAX_ACTIVE_JOBS (5) active jobs, two of them kept for deep queries, so 2 per tick leaves room: a new
+ * environment starts its ~25 heavy sources within two days of ticks at most, while the others run at once.
+ */
+export const FIRST_RUN_HEAVY_PER_TICK = 2;
+
+/** A source whose first load goes to an E2B job: `heavy`, the `heavy` pattern, or a git archive load. */
+export function isHeavySource(s: SourceConfig): boolean {
+  return s.heavy === true || s.pattern === 'heavy' || s.pattern === 'git';
+}
+
 /** Cron ticks drift a little; without this slack a 3-hourly source would run on every other tick. */
 export const DUE_SLACK_MS = 30 * 60_000;
 
@@ -54,7 +69,12 @@ export async function dueSources(
   at: Date,
 ): Promise<DueSource[]> {
   const cadences = CADENCE_BY_CRON[cron] ?? [];
-  const candidates = SOURCES.filter((s) => cadences.includes(s.cadence));
+  const firstRunTick = cron === FIRST_RUN_CRON;
+  // On the 3-hourly tick a source that can be fetched (it has a pull config) is also a candidate whatever
+  // its cadence; the success check below keeps it out once it has had a first success.
+  const candidates = SOURCES.filter(
+    (s) => cadences.includes(s.cadence) || (firstRunTick && s.pull !== undefined),
+  );
   if (candidates.length === 0) return [];
 
   const overrides = await readSourceSettings(
@@ -89,21 +109,32 @@ export async function dueSources(
   const cursors = new Map(((cursorRes?.results ?? []) as CursorRow[]).map((r) => [r.source_id, r]));
 
   const due: DueSource[] = [];
+  const firstRunHeavy: string[] = [];
   for (const source of allowed) {
+    const inCadence = cadences.includes(source.cadence);
     const run = latest.get(source.id);
     if (run?.status === 'running') {
       const age = at.getTime() - Date.parse(run.started_at);
-      if (age < 2 * CADENCE_MS[source.cadence]) continue; // two runs must never share a cursor
+      // two runs must never share a cursor; a stuck first run of a slow-cadence source must not block it for months
+      const hold = 2 * CADENCE_MS[inCadence ? source.cadence : '3h'];
+      if (age < hold) continue;
     }
     const last = success.get(source.id);
+    if (!inCadence && last) continue; // off-cadence candidates are only here for a first run
     if (!isDue(source.cadence, last ? new Date(last) : null, at)) continue;
+    if (!last && !run && firstRunTick && isHeavySource(source)) {
+      firstRunHeavy.push(source.id);
+    }
     const c = cursors.get(source.id);
     const from: Cursor | null = c
       ? { kind: c.kind, value: c.value ?? '', ...(c.etag === null ? {} : { etag: c.etag }) }
       : null;
     due.push({ source, from });
   }
-  return due;
+  // Cap the heavy sources that were never even attempted. One that already ran and failed before its job
+  // started holds no job slot, so it is retried every tick and cannot hold the cap either.
+  const keep = new Set(firstRunHeavy.slice(0, FIRST_RUN_HEAVY_PER_TICK));
+  return due.filter(({ source }) => !firstRunHeavy.includes(source.id) || keep.has(source.id));
 }
 
 /** Queues one step-0 job per due source, then tells ti-notify when the 3-hourly run has been queued. */

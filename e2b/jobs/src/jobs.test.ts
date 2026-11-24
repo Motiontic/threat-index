@@ -81,7 +81,7 @@ describe('first-load', () => {
     await expect(firstLoad(job({ sourceId: 'epss', url: KEV_URL }), ctx, noDuckdb)).rejects.toThrow(
       'source epss has no parser',
     );
-    await expect(firstLoad(job({ sourceId: 'cisa-kev' }), ctx, noDuckdb)).rejects.toThrow(/no URL/);
+    await expect(firstLoad(job({ sourceId: 'cisa-vulnrichment' }), ctx, noDuckdb)).rejects.toThrow(/no URL/);
     await expect(firstLoad(job(), ctx, noDuckdb)).rejects.toThrow(/sourceId/);
     expect(api.puts).toEqual([]);
   });

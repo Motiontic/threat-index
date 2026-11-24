@@ -74,6 +74,18 @@ The `git` pattern pulls what changed since the last commit it saw. On a source's
 repository archive to the first-load job, which owns unpacking it; a source file only configures the steady
 state.
 
+When the collector runs a source:
+
+- On the 3-hourly tick, a source that has a `pull` block, whose ingest is allowed and that has never had a
+  successful run is due at once, whatever its `cadence`. After that first success its `cadence` applies. Never-run
+  heavy sources (`heavy`, the `heavy` pattern, `git`) start at most `FIRST_RUN_HEAVY_PER_TICK` (2) per tick, so a
+  new environment stays under the E2B job limit and fills within a day.
+- A source with no `pull` is recorded as `skipped` on its cadence: `link only: not ingested` for `link` sources,
+  `read from CVE List records` for `cisa-vulnrichment`, otherwise `source has no pull config yet`.
+- A source on `sec.gov` is sent `Motiontic Threat Index <contact>`, the contact being `CONTACT_EMAIL`
+  (`TI_CONTACT_EMAIL`) or the address inside `USER_AGENT`. With no contact it is skipped, not sent.
+- A run that reaches `MAX_STEPS_PER_RUN` ends `ok` with a note, keeps its cursor and carries on next tick.
+
 ## 4. New source, or wiring an existing entry?
 
 If the id is already listed in `packages/sources/src/registry.ts`, you only fill in its file (`parser`, `pull`)
