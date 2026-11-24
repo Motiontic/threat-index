@@ -43,6 +43,10 @@ export function fakeApi(tables: Partial<Record<RowTable, Record<string, unknown>
     async getObject(key) {
       return store.get(key) ?? null;
     },
+    async deleteObject(key) {
+      store.delete(key);
+      types.delete(key);
+    },
     async *list(prefix) {
       for (const [key, bytes] of [...store].sort(([a], [b]) => a.localeCompare(b)))
         if (key.startsWith(prefix)) yield { key, size: bytes.byteLength };

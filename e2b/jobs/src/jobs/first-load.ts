@@ -25,7 +25,7 @@ import { fetchDocument, readTextLimited } from '../lib/http.ts';
 import { writeInbox } from '../lib/inbox.ts';
 import { lakeObjectKey, writeLakePart } from '../lib/lake.ts';
 import { mapLimited } from '../lib/pool.ts';
-import { readTarGz } from '../lib/tar.ts';
+import { MAX_TOTAL_BYTES, readTarGz } from '../lib/tar.ts';
 import { newUlid } from '../lib/ulid.ts';
 import { lakeDeps, withScratch } from '../lib/work.ts';
 import type { Job, JobContext, JobDeps } from '../types.ts';
@@ -145,7 +145,21 @@ export type LoadMode = 'first-load' | 'update';
 
 /** Data files only, as in the git pattern (`packages/patterns/src/git.ts`). */
 const DATA_EXTENSIONS = new Set(['json', 'csv', 'md', 'xml', 'yaml', 'yml', 'txt']);
-const MAX_KEPT_FILES = 400_000;
+export const DEFAULT_MAX_FILES = 400_000;
+export const HARD_MAX_FILES = 1_000_000;
+export const DEFAULT_MAX_BYTES = MAX_TOTAL_BYTES;
+export const HARD_MAX_BYTES = 20 * 1024 ** 3;
+const PROGRESS_EVERY = 10_000;
+
+/** The archive caps for a source: its own values, kept within the hard ceilings. */
+export function archiveLimits(git: { maxFiles?: number; maxBytes?: number }) {
+  const pick = (v: number | undefined, dflt: number, hard: number) =>
+    v !== undefined && Number.isFinite(v) && v > 0 ? Math.min(Math.floor(v), hard) : dflt;
+  return {
+    maxFiles: pick(git.maxFiles, DEFAULT_MAX_FILES, HARD_MAX_FILES),
+    maxBytes: pick(git.maxBytes, DEFAULT_MAX_BYTES, HARD_MAX_BYTES),
+  };
+}
 const GIT_FILE_HOST = 'https://raw.githubusercontent.com';
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -168,12 +182,18 @@ export function inputShape(source: SourceConfig, url: string): InputShape {
 
 /** Parses documents one at a time. A throwing document is counted and skipped. */
 function documentParser(parser: ParserModule) {
-  const records: ParsedRecord[] = [];
+  let records: ParsedRecord[] = [];
   let docs = 0;
   let failed = 0;
   let firstError: unknown;
   return {
-    records,
+    /** Takes the records parsed so far and starts an empty buffer. */
+    drain(): ParsedRecord[] {
+      const out = records;
+      records = [];
+      return out;
+    },
+    pending: () => records.length,
     feed(input: unknown): void {
       docs++;
       try {
@@ -236,124 +256,164 @@ export async function runLoad(
   const shape = inputShape(source, url);
   const parser = await loadParser(source.parser);
   ctx.log('input', { shape, mode });
-  let records: ParsedRecord[];
-
-  if (shape === 'file') {
-    records = await withScratch(job.id, async (dir) => {
-      const dest = join(dir, 'source');
-      const got = await download(url, dest, net);
-      ctx.log('downloaded', { bytes: got.bytes });
-      const text = await readFile(dest, 'utf8');
-      const input = isJsonPath(url) || /json/i.test(got.contentType) ? (JSON.parse(text) as unknown) : text;
-      const parsed = parser.parse(input);
-      return (Array.isArray(parsed) ? parsed : parsed.records) as ParsedRecord[];
-    });
-  } else {
-    const req = await readRequest(ctx, job.id);
-    const target = readPair(req.cursor?.value);
-    const docs = documentParser(parser);
-    let oversize = 0;
-
-    if (shape === 'changelist') {
-      const cfg = source.pull?.changelist;
-      if (!cfg) throw new Error(`source ${source.id} has no changelist config`);
-      const from = mode === 'update' ? readPair(req.from?.value) : null;
-      const listed = await withScratch(job.id, async (dir) => {
-        const dest = join(dir, 'list');
-        const got = await download(url, dest, net);
-        ctx.log('downloaded', { bytes: got.bytes });
-        return readChangeList(dest, cfg, { from, to: target });
-      });
-      const { lines, older } = applyCap(listed.lines, mode, MAX_LIST_DOCS);
-      ctx.log('change list read', { lines: lines.length, older, unreadable: listed.unreadable });
-      const out = await fetchItems(cfg, lines, { ...net, now }, (item) => docs.feed(item));
-      oversize = out.oversize;
-    } else if (shape === 'change-item') {
-      const cfg = source.pull?.changelist;
-      if (!cfg) throw new Error(`source ${source.id} has no changelist config`);
-      if (!target) throw new Error('change-item needs a [time, ref] cursor in the request');
-      const item = await fetchItem({ itemUrl: url }, { time: target[0], ref: target[1] }, net);
-      if (item) docs.feed(item);
-      else oversize = 1;
-    } else if (shape === 'archive') {
-      const git = source.pull?.git;
-      if (!git) throw new Error(`source ${source.id} has no git config`);
-      const include = git.include.map(globToRegExp);
-      const res = (await fetchDocument(url, net)) as Response;
-      let kept = 0;
-      let filtered = 0;
-      const tar = await readTarGz(res.body as ReadableStream<Uint8Array>, async (entry) => {
-        const rel = entry.path.split('/').slice(1).join('/');
-        const ext = /\.([A-Za-z0-9]+)$/.exec(rel)?.[1]?.toLowerCase();
-        if (!rel || !ext || !DATA_EXTENSIONS.has(ext) || !include.some((re) => re.test(rel))) {
-          filtered++;
-          return;
-        }
-        if (++kept > MAX_KEPT_FILES) throw new Error('archive has too many files');
-        docs.feed({ path: rel, status: 'added', text: await entry.text() });
-      });
-      oversize = 0;
-      ctx.log('archive read', { entries: tar.files, kept, filtered, skipped: tar.skipped });
-    } else {
-      const git = source.pull?.git;
-      if (!git) throw new Error(`source ${source.id} has no git config`);
-      const marker = `/${git.repo}/`;
-      const u = new URL(url);
-      if (`${u.protocol}//${u.host}` !== GIT_FILE_HOST || !u.pathname.startsWith(marker))
-        throw new Error('unexpected git file URL');
-      // /<owner>/<name>/<sha>/<path…>
-      const rest = u.pathname.slice(marker.length).split('/');
-      const path = decodeURIComponent(rest.slice(1).join('/'));
-      if (!path) throw new Error('unexpected git file URL');
-      const res = (await fetchDocument(url, net)) as Response;
-      const text = await readTextLimited(res);
-      if (text === null) oversize = 1;
-      else docs.feed({ path, status: 'modified', text });
-    }
-
-    const stats = docs.stats();
-    ctx.log('documents parsed', { documents: stats.docs, failed: stats.failed, oversize });
-    if (stats.docs === 0 && oversize > 0) throw new Error('every document was over the size limit');
-    docs.finish();
-    records = docs.records;
-  }
-  ctx.log('parsed', { records: records.length });
-
   const { deps, merge, prime } = sandboxLinkDeps(ctx, now);
   const rows: InboxRow[] = [];
-  let docs = 0;
+  let docsLinked = 0;
   let skipped = 0;
-  for (let i = 0; i < records.length; i += BATCH) {
-    const batch = records.slice(i, i + BATCH);
+  let total = 0;
+  let parts = 0;
+  /** Lake keys this attempt has written, removed again if the load fails before the inbox is written. */
+  const written: string[] = [];
+  const hasRecords = () => total > 0;
+
+  /** Links one batch, keeps its hot rows and writes its records as one lake part, so none are held after. */
+  const processBatch = async (batch: ParsedRecord[]): Promise<void> => {
+    if (batch.length === 0) return;
     await prime(batch);
     const result = await link(batch, deps);
     merge(result.rows);
     for (const r of result.rows) rows.push(r);
-    docs += result.docs.length;
+    docsLinked += result.docs.length;
     skipped += result.skipped;
-  }
-  ctx.log('linked', { rows: rows.length, docs, skipped });
-
-  const lakeRows = records.map((record, n) => ({
-    source: source.id,
-    job_id: job.id,
-    n,
-    record: JSON.stringify(record),
-  }));
-  if (records.length === 0) ctx.log('no records: no lake part');
-  else {
+    const lakeRows = batch.map((record, i) => ({
+      source: source.id,
+      job_id: job.id,
+      n: total + i,
+      record: JSON.stringify(record),
+    }));
+    total += batch.length;
     const part = await writeLakePart(
       lakeRows,
       { source: 'VARCHAR', job_id: 'VARCHAR', n: 'BIGINT', record: 'VARCHAR' },
       lakeDeps(job.id, jobDeps, ctx.log),
     );
-    const key = lakeObjectKey('records', source.id, now().getUTCFullYear(), job.id, part.format);
+    const name = parts === 0 ? job.id : `${job.id}-p${parts}`;
+    parts++;
+    const key = lakeObjectKey('records', source.id, now().getUTCFullYear(), name, part.format);
+    written.push(key);
     await ctx.api.putObject(key, part.bytes, 'application/octet-stream');
-    ctx.log('lake part written', { format: part.format, bytes: part.bytes.byteLength });
-  }
+    ctx.log('lake part written', {
+      part: parts,
+      records: batch.length,
+      format: part.format,
+      bytes: part.bytes.byteLength,
+    });
+  };
 
-  const { chunks } = await writeInbox(ctx.api, job.id, rows, now);
-  ctx.log('inbox written', { chunks, rows: rows.length });
+  const load = async (): Promise<void> => {
+    if (shape === 'file') {
+      const records = await withScratch(job.id, async (dir) => {
+        const dest = join(dir, 'source');
+        const got = await download(url, dest, net);
+        ctx.log('downloaded', { bytes: got.bytes });
+        const text = await readFile(dest, 'utf8');
+        const input = isJsonPath(url) || /json/i.test(got.contentType) ? (JSON.parse(text) as unknown) : text;
+        const parsed = parser.parse(input);
+        return (Array.isArray(parsed) ? parsed : parsed.records) as ParsedRecord[];
+      });
+      for (let i = 0; i < records.length; i += BATCH) await processBatch(records.slice(i, i + BATCH));
+    } else {
+      const req = await readRequest(ctx, job.id);
+      const target = readPair(req.cursor?.value);
+      const docs = documentParser(parser);
+      let oversize = 0;
+
+      if (shape === 'changelist') {
+        const cfg = source.pull?.changelist;
+        if (!cfg) throw new Error(`source ${source.id} has no changelist config`);
+        const from = mode === 'update' ? readPair(req.from?.value) : null;
+        const listed = await withScratch(job.id, async (dir) => {
+          const dest = join(dir, 'list');
+          const got = await download(url, dest, net);
+          ctx.log('downloaded', { bytes: got.bytes });
+          return readChangeList(dest, cfg, { from, to: target });
+        });
+        const { lines, older } = applyCap(listed.lines, mode, MAX_LIST_DOCS);
+        ctx.log('change list read', { lines: lines.length, older, unreadable: listed.unreadable });
+        const out = await fetchItems(cfg, lines, { ...net, now }, (item) => docs.feed(item));
+        oversize = out.oversize;
+      } else if (shape === 'change-item') {
+        const cfg = source.pull?.changelist;
+        if (!cfg) throw new Error(`source ${source.id} has no changelist config`);
+        if (!target) throw new Error('change-item needs a [time, ref] cursor in the request');
+        const item = await fetchItem({ itemUrl: url }, { time: target[0], ref: target[1] }, net);
+        if (item) docs.feed(item);
+        else oversize = 1;
+      } else if (shape === 'archive') {
+        const git = source.pull?.git;
+        if (!git) throw new Error(`source ${source.id} has no git config`);
+        const include = git.include.map(globToRegExp);
+        const res = (await fetchDocument(url, net)) as Response;
+        const limits = archiveLimits(git);
+        const started = Date.now();
+        let kept = 0;
+        let filtered = 0;
+        const tar = await readTarGz(
+          res.body as ReadableStream<Uint8Array>,
+          async (entry) => {
+            const rel = entry.path.split('/').slice(1).join('/');
+            const ext = /\.([A-Za-z0-9]+)$/.exec(rel)?.[1]?.toLowerCase();
+            if (!rel || !ext || !DATA_EXTENSIONS.has(ext) || !include.some((re) => re.test(rel))) {
+              filtered++;
+              return;
+            }
+            if (++kept > limits.maxFiles) throw new Error('archive has too many files');
+            docs.feed({ path: rel, status: 'added', text: await entry.text() });
+            while (docs.pending() >= BATCH) await processBatch(docs.drain());
+            if (kept % PROGRESS_EVERY === 0)
+              ctx.log('archive progress', { files: kept, elapsedMs: Date.now() - started });
+          },
+          { maxTotalBytes: limits.maxBytes },
+        );
+        oversize = 0;
+        ctx.log('archive read', { entries: tar.files, kept, filtered, skipped: tar.skipped });
+      } else {
+        const git = source.pull?.git;
+        if (!git) throw new Error(`source ${source.id} has no git config`);
+        const marker = `/${git.repo}/`;
+        const u = new URL(url);
+        if (`${u.protocol}//${u.host}` !== GIT_FILE_HOST || !u.pathname.startsWith(marker))
+          throw new Error('unexpected git file URL');
+        // /<owner>/<name>/<sha>/<path…>
+        const rest = u.pathname.slice(marker.length).split('/');
+        const path = decodeURIComponent(rest.slice(1).join('/'));
+        if (!path) throw new Error('unexpected git file URL');
+        const res = (await fetchDocument(url, net)) as Response;
+        const text = await readTextLimited(res);
+        if (text === null) oversize = 1;
+        else docs.feed({ path, status: 'modified', text });
+      }
+
+      const stats = docs.stats();
+      ctx.log('documents parsed', { documents: stats.docs, failed: stats.failed, oversize });
+      if (stats.docs === 0 && oversize > 0) throw new Error('every document was over the size limit');
+      docs.finish();
+      const rest = docs.drain();
+      for (let i = 0; i < rest.length; i += BATCH) await processBatch(rest.slice(i, i + BATCH));
+    }
+    ctx.log('parsed', { records: total });
+
+    ctx.log('linked', { rows: rows.length, docs: docsLinked, skipped });
+    if (!hasRecords()) ctx.log('no records: no lake part');
+
+    const { chunks } = await writeInbox(ctx.api, job.id, rows, now);
+    ctx.log('inbox written', { chunks, rows: rows.length });
+  };
+
+  try {
+    await load();
+  } catch (err) {
+    // Parts are written while the archive streams; a failed load must not leave them in the lake.
+    for (const key of written) {
+      try {
+        await ctx.api.deleteObject(key);
+      } catch {
+        ctx.log('lake part cleanup failed', { key });
+      }
+    }
+    if (written.length > 0) ctx.log('lake parts removed after failure', { parts: written.length });
+    throw err;
+  }
 }
 
 /** Downloads a source's input, parses it, links it into hot-set rows and writes the lake part and the inbox. */

@@ -539,6 +539,26 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
     }
   });
 
+  /** Removes an object this job could have written (same key rules as put), so a failed load can undo its parts. */
+  route.delete('/internal/jobs/:id/objects/*', async (c) => {
+    const auth = await dataAuth(c, '');
+    if (auth instanceof Response) return auth;
+    const key = objectKey(c);
+    const prefixes = allowedPrefixes(auth.kind, auth.id, auth.source_id);
+    if (uploadKeyError(key, prefixes, ALLOWED_EXACT_KEYS[auth.kind] ?? []) !== null) {
+      log('object delete refused', { jobId: auth.id, route: 'delete-object', key, status: 'invalid_key' });
+      return c.json({ error: 'invalid_key' }, 400);
+    }
+    try {
+      await c.env.BUCKET.delete(key);
+    } catch {
+      log('object delete failed', { jobId: auth.id, route: 'delete-object', key, status: 'storage_error' });
+      return c.json({ error: 'storage_error' }, 502);
+    }
+    log('object delete', { jobId: auth.id, route: 'delete-object', key, status: 'ok' });
+    return c.json({ key });
+  });
+
   route.get('/internal/jobs/:id/objects/*', async (c) => {
     const auth = await dataAuth(c, '');
     if (auth instanceof Response) return auth;

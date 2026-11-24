@@ -7,7 +7,15 @@ import type { CredentialName } from '@ti/core/types';
  */
 export interface PullConfig {
   /** GitHub only. `repo` is 'owner/name'; `branch` defaults to 'main'; `include` takes globs. */
-  git?: { repo: string; branch?: string; include: string[] };
+  git?: {
+    repo: string;
+    branch?: string;
+    include: string[];
+    /** Most files matching `include` an archive load reads. Default 400,000; hard ceiling 1,000,000. */
+    maxFiles?: number;
+    /** Most uncompressed bytes an archive load reads. Default 4 GiB; hard ceiling 20 GiB. */
+    maxBytes?: number;
+  };
   /** A newest-first CSV list. Columns are zero-based; `itemUrl` has a `{ref}` placeholder. */
   changelist?: {
     listUrl: string;
