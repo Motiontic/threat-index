@@ -98,6 +98,53 @@ export interface SourcesResponse {
   sources: SourceStatus[];
 }
 
+/** `GET /v1/home`: counts per type and the newest items of each kind, in one cached response. */
+export type HomeItemType = 'vuln' | 'breach' | 'ai' | 'mal';
+export interface HomeItem {
+  key: string;
+  /** Incidents only: the source id, which with `key` (the incident id) names the record. */
+  source?: string;
+  title: string;
+  type: HomeItemType;
+  /** The date that orders the list (ISO). */
+  date?: string;
+  /** The one thing that makes the item notable, for example "CISA KEV 22 Nov" or "CVSS 9.8". */
+  signal?: string;
+}
+export interface HomeChange {
+  key: string;
+  title?: string;
+  /** `signals.changes.kind` (newly_exploited, public_exploit, ...) or `signal:<kind>` when from a signal. */
+  kind: string;
+  at: string;
+  source?: string;
+  /** What the change links to. */
+  type: 'vuln' | 'breach';
+}
+export interface HomeCounts {
+  vulnerabilities: number;
+  exploited: number;
+  exploits: number;
+  breaches: number;
+  aiIncidents: number;
+  cyberOperations: number;
+  maliciousPackages: number;
+  techniques: number;
+}
+export interface HomeLists {
+  exploited: HomeItem[];
+  vulnerabilities: HomeItem[];
+  exploits: HomeItem[];
+  breaches: HomeItem[];
+  aiIncidents: HomeItem[];
+  maliciousPackages: HomeItem[];
+}
+export interface HomeResponse {
+  counts: HomeCounts;
+  lists: HomeLists;
+  changes: HomeChange[];
+}
+
 export interface ApiError {
   error: string;
 }

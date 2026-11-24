@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { Chip, CreditList, EmptyState } from '../components/ui';
+import { Chip, CreditList, EmptyState, NoRecords } from '../components/ui';
 import { FilterChips, WorldPager, WorldSearch } from '../components/world';
 import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
@@ -41,6 +41,13 @@ export function meta({ loaderData }: Route.MetaArgs) {
   });
 }
 
+/** What an unfiltered-by-query empty list is called: the kind chip that is selected, or all incidents. */
+function noRecordsWhat(kind: string[] | undefined): string {
+  if (kind?.length === 1 && kind[0] === 'ai') return 'AI incidents';
+  if (kind?.length && kind.every((k) => k.startsWith('cyber'))) return 'cyber operations or events';
+  return 'incidents';
+}
+
 export default function Incidents({ loaderData }: Route.ComponentProps) {
   const { params, items, next, credits } = loaderData;
   return (
@@ -59,7 +66,9 @@ export default function Incidents({ loaderData }: Route.ComponentProps) {
           { label: 'Cyber operations and events', values: ['cyber'] },
         ]}
       />
-      {items.length === 0 ? (
+      {items.length === 0 && !params.q && params.page === 1 ? (
+        <NoRecords what={noRecordsWhat(params.kind)} />
+      ) : items.length === 0 ? (
         <EmptyState title="No matching incidents">
           <p>
             Try fewer words. <Link to="/incidents">Clear the search</Link>.

@@ -60,6 +60,7 @@ export function getData(request: Request): SiteData {
     search: (p) => bridge(() => site.search(p)),
     index: (l, c) => bridge(() => site.index(l, c)),
     sources: () => bridge(() => site.sources()),
+    home: () => bridge(() => site.home()),
     breaches: (q) => bridge(() => site.breaches(q)),
     breach: (k) => bridge(() => site.breach(k)),
     incidents: (q) => bridge(() => site.incidents(q)),

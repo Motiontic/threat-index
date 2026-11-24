@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { Chip, CreditList, EmptyState } from '../components/ui';
+import { Chip, CreditList, EmptyState, NoRecords } from '../components/ui';
 import { FilterChips, WorldPager, WorldSearch } from '../components/world';
 import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
@@ -57,7 +57,9 @@ export default function Techniques({ loaderData }: Route.ComponentProps) {
           ...FRAMEWORKS.map((f) => ({ label: FRAMEWORK_LABELS[f], values: [f] })),
         ]}
       />
-      {items.length === 0 ? (
+      {items.length === 0 && !params.q && params.page === 1 ? (
+        <NoRecords what="techniques" />
+      ) : items.length === 0 ? (
         <EmptyState title="No matching techniques">
           <p>
             Try an ID such as T1190 or fewer words. <Link to="/techniques">Clear the search</Link>.

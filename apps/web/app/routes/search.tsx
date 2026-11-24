@@ -1,7 +1,7 @@
 import { PRODUCT_SHORT } from '@ti/core/brand';
 import { Form, Link } from 'react-router';
 import { errorText, useAccountFetcher } from '../components/account-bits';
-import { EmptyState, ResultCard } from '../components/ui';
+import { EmptyState, NoRecords, ResultCard } from '../components/ui';
 import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
 import type { EntryType, SearchHit, SiteData } from '../data/types';
@@ -264,6 +264,14 @@ export default function Search({ loaderData }: Route.ComponentProps) {
             </EmptyState>
           ) : outcome === 'bad-request' ? (
             <EmptyState title="Add a word or an ID to search" />
+          ) : hits.length === 0 &&
+            sections.every((x) => x.rows.length === 0) &&
+            !params.q &&
+            params.type?.length === 1 &&
+            !params.sig &&
+            !params.sev &&
+            !params.year ? (
+            <NoRecords what={(TYPE_PLURALS[params.type[0] as EntryType] ?? 'records').toLowerCase()} />
           ) : hits.length === 0 && sections.every((x) => x.rows.length === 0) ? (
             <EmptyState title="No matching records">
               <p>
