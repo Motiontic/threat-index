@@ -9,11 +9,18 @@ const fromWrangler = createRequire(fromHere.resolve('wrangler/package.json'));
 const { build } = fromWrangler('esbuild');
 
 // `node build.mjs` bundles the runner; `node build.mjs <entry> <outfile>` bundles another script (the bench).
-const [entry = 'src/run.ts', out = 'dist/run.mjs'] = process.argv.slice(2);
+// With no arguments it also bundles launch.ts (the process the template starts, which runs run.mjs).
+const [entry, out] = process.argv.slice(2);
+const target = entry
+  ? { entryPoints: [`${here}${entry}`], outfile: `${here}${out}` }
+  : {
+      entryPoints: [`${here}src/run.ts`, `${here}src/launch.ts`],
+      outdir: `${here}dist`,
+      outExtension: { '.js': '.mjs' },
+    };
 
 await build({
-  entryPoints: [`${here}${entry}`],
-  outfile: `${here}${out}`,
+  ...target,
   bundle: true,
   platform: 'node',
   target: 'node22',

@@ -17,6 +17,11 @@ import type { Bindings } from './env';
 
 export const JOB_TIMEOUT_MS = 50 * 60 * 1000; // hard limit; E2B Hobby sandboxes live at most 1 h
 export const STALE_AFTER_MS = 55 * 60 * 1000; // active rows older than this become timed_out
+/**
+ * The launch command. The SDK does not pass the image's `ENV`, so nothing set in the Dockerfile reaches it:
+ * `launch.mjs` sets the job process's heap (`JOB_HEAP_MB` in e2b/jobs/src/launch.ts) and reports a crash.
+ */
+export const JOB_COMMAND = 'node /app/launch.mjs';
 export const MAX_ACTIVE_JOBS = 5;
 export const MAX_CHUNKS = 5000;
 export const MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -123,7 +128,7 @@ export function launcherFromEnv(env: Bindings): JobLauncher | null {
         sandboxId: sbx.sandboxId,
         async start(job) {
           try {
-            const handle = await sbx.commands.run('node /app/run.mjs', {
+            const handle = await sbx.commands.run(JOB_COMMAND, {
               background: true,
               envs: { JOB_JSON: JSON.stringify(job), ...(siteOrigin ? { SITE_ORIGIN: siteOrigin } : {}) },
               cwd: '/app',

@@ -385,6 +385,41 @@ describe('POST /internal/jobs (start)', () => {
     expect(await row(ULID(16))).toMatchObject({ status: 'timed_out' });
     expect(fake.killed).toContain('sbxOLD');
   });
+  it('a running day-scoped job past JOB_TIMEOUT_MS is failed as timed out and a new one starts', async () => {
+    enabled = ['echo', 'search-index'];
+    const old = new Date(clock.getTime() - JOB_TIMEOUT_MS - 60_000).toISOString();
+    // the hung job's own request id (the daily id is deterministic), then another day's id
+    for (const [n, requestId] of [ULID(21), ULID(23)].entries()) {
+      await env.DB_CONTROL.exec('DELETE FROM jobs');
+      fake.killed.length = 0;
+      await seed(ULID(21), 'search-index', 'running', null, old, 'sbxHUNG');
+      ids.push(ULID(30 + n));
+      const res = await ops(app(), 'POST', '/internal/jobs', {
+        requestId,
+        kind: 'search-index',
+        reason: 'nightly',
+      });
+      expect(res.status).toBe(201);
+      expect(await row(ULID(21))).toMatchObject({ status: 'failed', error: 'timed out' });
+      expect(fake.killed).toContain('sbxHUNG');
+      const id = ((await res.json()) as { jobId: string }).jobId;
+      expect(await row(id)).toMatchObject({ status: 'running' });
+    }
+  });
+  it('a fresh running day-scoped job still blocks a new one', async () => {
+    enabled = ['echo', 'search-index'];
+    const recent = new Date(clock.getTime() - JOB_TIMEOUT_MS + 60_000).toISOString();
+    await seed(ULID(25), 'search-index', 'running', null, recent);
+    const res = await ops(app(), 'POST', '/internal/jobs', {
+      requestId: ULID(26),
+      kind: 'search-index',
+      reason: 'nightly',
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ jobId: ULID(25), status: 'running', existing: true });
+    expect(await row(ULID(25))).toMatchObject({ status: 'running' });
+    expect(fake.created).toHaveLength(0);
+  });
   it('the same requestId twice makes one row and one sandbox', async () => {
     enabled = ['echo', 'first-load'];
     const call = app();

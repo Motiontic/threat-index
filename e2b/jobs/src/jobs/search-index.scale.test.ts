@@ -1,6 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { resolvePrefix } from '@ti/core/search';
 import { describe, expect, it } from 'vitest';
+import { synthetic } from './search-index.synth.ts';
 import {
   buildIndex,
   LETTER_PAGE_ITEMS,
@@ -13,42 +16,9 @@ const ENTRIES = 250_000;
 const BUILT = '2026-11-24T00:00:00.000Z';
 const enc = new TextEncoder();
 
-// A deterministic LCG, so the skew is the same on every run.
-let seed = 12345;
-const rnd = () => {
-  seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-  return seed / 2 ** 32;
-};
-
-function synthetic(): VulnRow[] {
-  const rows: VulnRow[] = [];
-  const letters = 'abcdefghijklmnopqrstuvwxyz';
-  for (let i = 0; i < ENTRIES; i++) {
-    const words: string[] = [];
-    if (rnd() < 0.6) words.push('apache'); // a few terms in more than half the titles
-    if (rnd() < 0.55) words.push('vulnerability');
-    if (rnd() < 0.52) words.push('log4j');
-    if (rnd() < 0.5) words.push(`ap${Math.floor(rnd() * 40_000).toString(36)}`); // many terms sharing `ap`
-    if (rnd() < 0.5) words.push(`la${Math.floor(rnd() * 40_000).toString(36)}`);
-    if (rnd() < 0.4) words.push(`lo${Math.floor(rnd() * 40_000).toString(36)}`);
-    words.push(`prod${Math.floor(rnd() * 5000)}`);
-    words.push(`${letters[i % 26]}item`);
-    rows.push({
-      key: `CVE-2026-${String(i).padStart(6, '0')}`,
-      kind: 'cve',
-      title: `${words.join(' ')} flaw ${i}`,
-      summary: '',
-      modified: new Date(Date.UTC(2026, 0, 1) + i * 60_000).toISOString(),
-      hot: 1,
-      published: '2026-01-01',
-    });
-  }
-  return rows;
-}
-
 describe('buildIndex at 250,000 entries with a skewed vocabulary', () => {
   it('writes no shard over the cap, no empty list, and letter pages of at most 500', () => {
-    const rows = synthetic();
+    const rows = synthetic(ENTRIES);
     const b = buildIndex(rows, [], BUILT);
     expect(b.stats.indexed).toBe(ENTRIES);
 
@@ -90,4 +60,37 @@ describe('buildIndex at 250,000 entries with a skewed vocabulary', () => {
     console.log(line);
     if (process.env.TI_PROOF_FILE) appendFileSync(process.env.TI_PROOF_FILE, `${line}\n`);
   }, 120_000);
+});
+
+const jobsDir = fileURLToPath(new URL('../..', import.meta.url));
+
+describe('the whole search-index job with the Node heap capped at 1,536 MB', () => {
+  it('finishes on 250,000 entries: bounded heap, objects written one at a time', () => {
+    execFileSync(
+      process.execPath,
+      ['build.mjs', 'src/jobs/search-index.heap-run.ts', 'dist/search-index.heap-run.mjs'],
+      {
+        cwd: jobsDir,
+        stdio: 'pipe',
+      },
+    );
+    const out = execFileSync(
+      process.execPath,
+      ['--max-old-space-size=1536', 'dist/search-index.heap-run.mjs', String(ENTRIES)],
+      { cwd: jobsDir, encoding: 'utf8', maxBuffer: 1 << 20 },
+    );
+    const r = JSON.parse(out) as {
+      peakHeapMB: number;
+      heapLimitMB: number;
+      objects: number;
+      totalBytes: number;
+    };
+    expect(r.heapLimitMB).toBeLessThanOrEqual(1600); // the cap really applied to the child
+    expect(r.peakHeapMB).toBeLessThan(1200);
+    expect(r.objects).toBeGreaterThan(100);
+    expect(r.totalBytes).toBeLessThan(1024 ** 3); // the layout decision in SPEC.md §2
+    const line = `job at the 1536 MB cap, ${ENTRIES} entries: ${out.trim().replace(/,"log":.*$/, '}')}`;
+    console.log(line);
+    if (process.env.TI_PROOF_FILE) appendFileSync(process.env.TI_PROOF_FILE, `${line}\n`);
+  }, 300_000);
 });

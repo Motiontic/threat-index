@@ -19,9 +19,10 @@ RUN curl -fsSL -o /tmp/duckdb.tar.gz \
  && rm /tmp/duckdb.tar.gz
 RUN duckdb --version
 
-# Heavy jobs hold a day of EPSS scores or a first load in memory; the template has 4 GB.
-ENV NODE_OPTIONS=--max-old-space-size=3072
+# No NODE_OPTIONS here: commands started through the E2B SDK do not get this image's ENV. The heap limit is set
+# by /app/launch.mjs, which runs the job (run.mjs) as a child with --max-old-space-size (JOB_HEAP_MB in
+# e2b/jobs/src/launch.ts; the template has 4 GB, see build-template.mjs).
 
 WORKDIR /app
-# The jobs bundle (dist/run.mjs, built by `pnpm --filter @ti/e2b-jobs bundle`).
+# The jobs bundle (dist/launch.mjs and dist/run.mjs, built by `pnpm --filter @ti/e2b-jobs bundle`).
 COPY jobs/dist/ /app/
