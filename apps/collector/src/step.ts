@@ -11,6 +11,7 @@ import { DEFAULT_USER_AGENT, type Env, type JobMessage, MAX_STEPS_PER_RUN, parse
 import { describeError, isNotConfigured, isPermanent, PermanentError } from './errors';
 import { linkDeps } from './link-deps';
 import { writeReceipt } from './receipt';
+import { isSecSource, secUserAgent } from './user-agent';
 
 export type StepOutcome =
   | { ack: true; status: RunStatus | 'duplicate' | 'stale' | 'invalid' }
@@ -139,6 +140,12 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
     return { ack: true, status: 'stale' };
   }
 
+  // 4b. SEC answers 403 unless the User-Agent names the sender and gives a contact.
+  if (isSecSource(source) && !secUserAgent(env)) {
+    await finishRun(env, msg, deps, 'skipped', 'no contact email configured (SEC requires one)');
+    return { ack: true, status: 'skipped' };
+  }
+
   // 5.
   if (!run) {
     await db
@@ -163,7 +170,7 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
     result = await pattern.fetch(ctx);
   } catch (err) {
     if (isNotConfigured(err)) {
-      await finishRun(env, msg, deps, 'skipped', 'source has no pull config yet');
+      await finishRun(env, msg, deps, 'skipped', notConfiguredReason(source));
       return { ack: true, status: 'skipped' };
     }
     throw err;
@@ -286,9 +293,18 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
   }
   if (last) return { ack: true, status: 'ok' };
 
-  // 14.
+  // 14. The step limit is not a failure: the cursor is committed, so the next tick continues from it.
+  if (msg.step + 1 > MAX_STEPS_PER_RUN) {
+    await finishRun(
+      env,
+      msg,
+      deps,
+      'ok',
+      `step limit reached after ${msg.step + 1} steps; continues on the next run from the saved cursor`,
+    );
+    return { ack: true, status: 'ok' };
+  }
   try {
-    if (msg.step + 1 > MAX_STEPS_PER_RUN) throw new Error('step limit');
     await env.JOBS.send({
       sourceId: source.id,
       runId: msg.runId,
@@ -300,6 +316,13 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
     return { ack: true, status: 'failed' };
   }
   return { ack: true, status: 'ok' };
+}
+
+/** Why a source with no pull config is skipped: say what the source is, not that something is missing. */
+function notConfiguredReason(source: SourceConfig): string {
+  if (source.licence === 'link') return 'link only: not ingested';
+  if (source.id === 'cisa-vulnrichment') return 'read from CVE List records';
+  return 'source has no pull config yet';
 }
 
 function storedFromCursor(c: Cursor | null): StoredCursor | null {
@@ -314,7 +337,7 @@ function patternContext(source: SourceConfig, msg: JobMessage, env: Env, deps: S
   return {
     source,
     cursor: msg.from,
-    userAgent: env.USER_AGENT || DEFAULT_USER_AGENT,
+    userAgent: (isSecSource(source) ? secUserAgent(env) : null) ?? (env.USER_AGENT || DEFAULT_USER_AGENT),
     fetch: deps.fetch,
     signal: AbortSignal.timeout(PATTERN_TIMEOUT_MS),
     wait: deps.wait,

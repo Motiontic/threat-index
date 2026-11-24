@@ -6,7 +6,8 @@ export interface OpsReport {
     cadence: string;
     ingest: boolean;
     lastSuccess: string | null;
-    lastRun: { status: string; startedAt: string } | null;
+    /** `reason` is the run's error or skip reason (first 200 characters). */
+    lastRun: { status: string; startedAt: string; reason?: string | null } | null;
     failed7d: number;
     deadLettered7d: number;
     late: boolean;
