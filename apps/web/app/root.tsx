@@ -89,8 +89,13 @@ export default function App() {
   const { sourceCount, sample, auth, theme } = data;
   return (
     <AuthProvider auth={auth} loaderData={data}>
-      <Shell sample={sample} sourceCount={sourceCount} query={useQuery()} theme={theme}>
-        <IntentRunner />
+      <Shell
+        sample={sample}
+        sourceCount={sourceCount}
+        query={useQuery()}
+        theme={theme}
+        persistent={<IntentRunner />}
+      >
         <Outlet />
       </Shell>
     </AuthProvider>

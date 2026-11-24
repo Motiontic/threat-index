@@ -1755,6 +1755,19 @@ input.switch:checked:active::after {
 }
 
 /* Narrow: the bar wraps. Row one: brand, theme, account, menu. Row two: search. Then the links panel. */
+/* Between the mobile bar and full width the single row can be too narrow: drop the tagline and let the
+   search box wrap onto its own row rather than overflow. */
+@media (min-width: 900px) and (max-width: 1279.98px) {
+  .bar {
+    flex-wrap: wrap;
+  }
+  .brand small {
+    display: none;
+  }
+  #topForm {
+    min-width: 160px;
+  }
+}
 @media (max-width: 899.98px) {
   .bar {
     flex-wrap: wrap;

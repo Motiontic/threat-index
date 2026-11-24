@@ -381,12 +381,15 @@ export function Shell({
   sourceCount,
   query,
   theme = null,
+  persistent,
   children,
 }: {
   sample: boolean;
   sourceCount: number | null;
   query?: string;
   theme?: Theme | null;
+  /** Rendered in `main` outside the route-keyed wrapper, so it keeps its state across navigations. */
+  persistent?: ReactNode;
   children: ReactNode;
 }) {
   const location = useLocation();
@@ -468,6 +471,7 @@ export function Shell({
         </header>
         <main id="content" className="main">
           {/* Only the page content fades up on navigation; the bar above stays put. */}
+          {persistent}
           <div className="page rise" key={location.pathname}>
             {children}
           </div>

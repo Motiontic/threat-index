@@ -68,7 +68,12 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       e.preventDefault();
       submit();
     } else if (e.key === 'Tab') {
-      const focusable = [...(dialog.current?.querySelectorAll<HTMLElement>('input, a[href], button') ?? [])];
+      const focusable = [
+        ...(dialog.current?.querySelectorAll<HTMLElement>(
+          // Tab stops only: the result links are tabIndex -1 and reached with the arrow keys.
+          "input, button, a[href]:not([tabindex='-1'])",
+        ) ?? []),
+      ];
       const next = trapTarget(focusable, document.activeElement as HTMLElement | null, e.shiftKey);
       if (next) {
         e.preventDefault();
