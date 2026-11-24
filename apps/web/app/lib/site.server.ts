@@ -42,8 +42,11 @@ export function workersDevRedirect(
   const url = new URL(request.url);
   if (!url.hostname.endsWith('.workers.dev')) return null;
   if (url.pathname.startsWith('/assets/') || url.pathname.endsWith('.data')) return null;
-  return new Response(null, {
-    status: 301,
-    headers: { Location: new URL(`${url.pathname}${url.search}`, site).toString() },
-  });
+  // Set pathname/search on a copy of the site URL. Resolving the path as a relative reference would let
+  // '//evil.com/x' replace the host.
+  const target = new URL(site);
+  target.pathname = url.pathname;
+  target.search = url.search;
+  if (target.origin !== new URL(site).origin) return null;
+  return new Response(null, { status: 301, headers: { Location: target.toString() } });
 }

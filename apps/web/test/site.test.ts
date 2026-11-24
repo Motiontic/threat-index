@@ -47,4 +47,14 @@ describe('workersDevRedirect', () => {
       workersDevRedirect(req('https://other.example/'), { tiEnv: 'production', siteOrigin: site }),
     ).toBeNull();
   });
+
+  it('keeps protocol-relative and backslash paths on the site host', () => {
+    for (const path of ['//evil.com/x', '/\\evil.com/x', '///evil.com', '//evil.com@x/?a=1']) {
+      const r = workersDevRedirect(req(`https://ti-web.a.workers.dev${path}`), {
+        tiEnv: 'production',
+        siteOrigin: site,
+      });
+      expect(new URL(r?.headers.get('Location') ?? '').origin).toBe(site);
+    }
+  });
 });
