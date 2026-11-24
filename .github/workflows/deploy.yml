@@ -45,7 +45,7 @@ jobs:
       TI_APP_URL_STAGING: ${{ vars.TI_APP_URL_STAGING }}
       TI_CLERK_PUBLISHABLE_KEY_STAGING: ${{ vars.TI_CLERK_PUBLISHABLE_KEY_STAGING }}
       TI_ADMIN_USER_IDS: ${{ vars.TI_ADMIN_USER_IDS }}
-      TI_OPS_EMAIL: ${{ vars.TI_OPS_EMAIL }}
+      TI_CONTACT_EMAIL: ${{ vars.TI_CONTACT_EMAIL }}
       TI_EMAIL_FROM_STAGING: ${{ vars.TI_EMAIL_FROM_STAGING }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,6 +81,7 @@ jobs:
       TI_CLERK_PUBLISHABLE_KEY: ${{ vars.TI_CLERK_PUBLISHABLE_KEY }}
       TI_ADMIN_USER_IDS: ${{ vars.TI_ADMIN_USER_IDS }}
       TI_EMAIL_FROM: ${{ vars.TI_EMAIL_FROM }}
+      TI_CONTACT_EMAIL: ${{ vars.TI_CONTACT_EMAIL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1

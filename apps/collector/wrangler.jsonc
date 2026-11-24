@@ -40,10 +40,11 @@
   // TI_OPS_EMAIL the binding is left out and the report is only logged.
   "send_email": [{ "name": "OPS_EMAIL", "destination_address": "${TI_OPS_EMAIL?}" }],
   "vars": {
-    // TI_OPS_EMAIL_FROM: an address on the Email Routing domain.
+    // TI_OPS_EMAIL_FROM: an address on the Email Routing domain. TI_CONTACT_EMAIL is only the contact shown
+    // in the User-Agent; it adds no email binding, so it can be set without Email Routing.
     "OPS_EMAIL_TO": "${TI_OPS_EMAIL?}",
     "OPS_EMAIL_FROM": "${TI_OPS_EMAIL_FROM?}",
-    "USER_AGENT": "ThreatIndex/0.1 (+https://github.com/Motiontic/threat-index; ${TI_OPS_EMAIL?})"
+    "USER_AGENT": "ThreatIndex/0.1 (+https://github.com/Motiontic/threat-index; ${TI_CONTACT_EMAIL?})"
   },
   // Secrets (wrangler secret put): JOB_HMAC_SECRET (signs calls to ti-api; the same value ti-api holds),
   // GITHUB_TOKEN and NVD_API_KEY (optional, passed to patterns that need them), GITLAB_TOKEN, E2B_API_KEY,
@@ -77,10 +78,10 @@
       },
       // Bindings don't inherit into env.staging, so the service is named again.
       "services": [{ "binding": "API", "service": "ti-api-staging" }],
-      // No ops email from staging. TI_OPS_EMAIL is only the contact in the User-Agent (SEC asks for one);
+      // No ops email from staging. TI_CONTACT_EMAIL is the contact in the User-Agent (SEC asks for one);
       // without it the key is dropped and the default User-Agent is used.
       "vars": {
-        "USER_AGENT": "ThreatIndex-staging/0.1 (+https://github.com/Motiontic/threat-index; ${TI_OPS_EMAIL?})"
+        "USER_AGENT": "ThreatIndex-staging/0.1 (+https://github.com/Motiontic/threat-index; ${TI_CONTACT_EMAIL?})"
       }
     }
   }
