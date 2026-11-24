@@ -27,6 +27,7 @@ import { authMiddleware, currentAuth } from './lib/auth.server';
 import { readFakeUser } from './lib/fake-auth.server';
 import { useNonce } from './lib/nonce';
 import { shouldNoindex } from './lib/security.server';
+import { parseTheme } from './lib/theme';
 import styles from './styles/app.css?url';
 import tokens from './styles/tokens.css?url';
 
@@ -44,6 +45,7 @@ export async function loader(args: Route.LoaderArgs) {
   const fields = () => ({
     sourceCount: SOURCES.length,
     sample: mode === 'fixtures',
+    theme: parseTheme(args.request.headers.get('Cookie')),
     noindex: shouldNoindex({ mode, tiEnv: env.TI_ENV, status: 200 }),
     auth: {
       kind: auth.kind,
@@ -59,9 +61,13 @@ export async function loader(args: Route.LoaderArgs) {
 export function Layout({ children }: { children: React.ReactNode }) {
   const nonce = useNonce();
   // Unknown (the root loader failed): stay out of search engines.
-  const noindex = useRouteLoaderData<typeof loader>('root')?.noindex ?? true;
+  const root = useRouteLoaderData<typeof loader>('root');
+  const noindex = root?.noindex ?? true;
+  // The stored theme choice is rendered by the server, so the first paint is already right. No choice:
+  // no attribute, and the CSS follows prefers-color-scheme.
+  const theme = root?.theme ?? undefined;
   return (
-    <html lang="en">
+    <html lang="en" data-theme={theme}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -80,10 +86,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const data = useLoaderData<typeof loader>();
-  const { sourceCount, sample, auth } = data;
+  const { sourceCount, sample, auth, theme } = data;
   return (
     <AuthProvider auth={auth} loaderData={data}>
-      <Shell sample={sample} sourceCount={sourceCount} query={useQuery()}>
+      <Shell sample={sample} sourceCount={sourceCount} query={useQuery()} theme={theme}>
         <IntentRunner />
         <Outlet />
       </Shell>
@@ -107,7 +113,7 @@ export function ErrorBoundary() {
   const searchTo = entryId ? `/search?q=${encodeURIComponent(entryId.slice(0, 200))}` : '/search';
 
   const page = (
-    <Shell sample={root?.sample ?? true} sourceCount={root?.sourceCount ?? null}>
+    <Shell sample={root?.sample ?? true} sourceCount={root?.sourceCount ?? null} theme={root?.theme ?? null}>
       <title>{`${status === 404 ? 'Not found' : title} · ${PRODUCT_SHORT}`}</title>
       {root?.noindex === false ? <meta name="robots" content="noindex" /> : null}
       <div className="page-head">

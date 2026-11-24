@@ -168,6 +168,27 @@ async function checkAccounts() {
   }
 }
 
+// The redesigned shell: a floating bar (no sidebar), a themed first paint from the cookie, the quick-search route.
+async function checkShell() {
+  const plain = await get('/');
+  if (!/<header class="bar"/.test(plain.html)) fail('/', 'no top bar');
+  if (/class="rail/.test(plain.html)) fail('/', 'the sidebar is still there');
+  if (/<html[^>]*data-theme=/.test(plain.html)) fail('/', 'data-theme set without a stored choice');
+  for (const theme of ['dark', 'light']) {
+    const { res, html } = await get('/', { headers: { Cookie: `ti-theme=${theme}` } });
+    if (!new RegExp(`<html[^>]*data-theme="${theme}"`).test(html)) fail('/', `cookie ${theme} not rendered`);
+    if (!/private/.test(res.headers.get('cache-control') ?? '')) fail('/', 'themed page is cacheable');
+  }
+  const bad = await get('/', { headers: { Cookie: 'ti-theme=%3Cx%3E' } });
+  if (/<html[^>]*data-theme=/.test(bad.html)) fail('/', 'an unknown theme cookie value was rendered');
+  const quick = await get('/quick?q=log4j');
+  if (quick.res.status !== 200) fail('/quick', `status ${quick.res.status}`);
+  else {
+    const data = JSON.parse(quick.html);
+    if (!Array.isArray(data.hits) || data.hits.length > 8) fail('/quick', 'bad hits list');
+  }
+}
+
 async function runChecks() {
   let stylesheet;
   for (const [path, title] of PAGES) {
@@ -192,6 +213,7 @@ async function runChecks() {
   }
 
   await checkAccounts();
+  await checkShell();
 
   for (const from of ['/e/cve-2025-3248', '/e/GHSA-c995-4fw3-j39m']) {
     const { res } = await get(from);

@@ -52,7 +52,9 @@ const EMPTY: HomeResponse = {
 const homeHtml = (home: HomeResponse | null) =>
   render(
     <Home
-      {...({ loaderData: { origin: 'https://x.test', home } } as unknown as ComponentProps<typeof Home>)}
+      {...({ loaderData: { origin: 'https://x.test', home, sourceCount: 55 } } as unknown as ComponentProps<
+        typeof Home
+      >)}
     />,
   );
 
@@ -107,7 +109,8 @@ describe('home page', () => {
 
   it('still renders the hero and search when the API is down', () => {
     const html = homeHtml(null);
-    expect(html).toContain('in one place');
+    expect(html).toContain('as it happens.');
+    expect(html).toContain('Updated every 3 hours from 55 public sources');
     expect(html).not.toContain('tile-count');
     expect(html).toContain('Browse by type');
   });

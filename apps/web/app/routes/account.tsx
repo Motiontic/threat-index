@@ -2,7 +2,8 @@ import { MAX_DISPLAY_NAME_CHARS } from '@ti/core/account';
 import { useEffect, useState } from 'react';
 import { Link, redirect, useSearchParams } from 'react-router';
 import { errorText, useAccountFetcher } from '../components/account-bits';
-import { EmptyState } from '../components/ui';
+import { Select, Switch } from '../components/controls';
+import { EmptyState, TabBar } from '../components/ui';
 import { SignInRequired } from '../data/api.server';
 import { bridge, getAccount } from '../data/data.server';
 import type { Me, SavedSearch, WatchItem } from '../data/types';
@@ -60,7 +61,7 @@ export default function Account({ loaderData }: Route.ComponentProps) {
         <h1>Account</h1>
         <span className="muted">{me.email}</span>
       </div>
-      <ul className="tabs" aria-label="Account sections">
+      <TabBar label="Account sections">
         {TABS.map((t) => (
           <li key={t.id}>
             <Link
@@ -72,7 +73,7 @@ export default function Account({ loaderData }: Route.ComponentProps) {
             </Link>
           </li>
         ))}
-      </ul>
+      </TabBar>
       {tab === 'profile' ? <ProfileTab me={me} /> : null}
       {tab === 'watch' ? <WatchTab items={watch.items} limit={watch.limit} /> : null}
       {tab === 'saved' ? <SavedTab items={saved.items} limit={saved.limit} /> : null}
@@ -106,42 +107,39 @@ function ProfileTab({ me }: { me: Me }) {
           autoComplete="nickname"
         />
       </div>
-      <label className="check">
-        <input type="checkbox" name="instant" defaultChecked={me.alerts.instant} />
-        Instant alerts when a watched record changes
-      </label>
+      <Switch
+        name="instant"
+        defaultChecked={me.alerts.instant}
+        label="Instant alerts when a watched record changes"
+      />
       <div>
         <label className="label" htmlFor="digest">
           Email digest
         </label>
-        <select
+        <Select
           id="digest"
-          className="input"
           name="digest"
-          value={digest}
-          onChange={(e) => setDigest(e.target.value as typeof digest)}
-        >
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="off">Off</option>
-        </select>
+          label="Email digest"
+          defaultValue={digest}
+          onValueChange={(v) => setDigest(v as typeof digest)}
+          options={[
+            { value: 'daily', label: 'Daily' },
+            { value: 'weekly', label: 'Weekly' },
+            { value: 'off', label: 'Off' },
+          ]}
+        />
       </div>
       <div hidden={digest !== 'weekly'}>
         <label className="label" htmlFor="digestWeekday">
           Weekly digest day (UTC)
         </label>
-        <select
+        <Select
           id="digestWeekday"
-          className="input"
           name="digestWeekday"
+          label="Weekly digest day (UTC)"
           defaultValue={String(me.alerts.digestWeekday)}
-        >
-          {DAYS.map((d, i) => (
-            <option key={d} value={String(i)}>
-              {d}
-            </option>
-          ))}
-        </select>
+          options={DAYS.map((d, i) => ({ value: String(i), label: d }))}
+        />
       </div>
       <div className="filter-actions">
         <button type="submit" className="button button-primary" disabled={fetcher.state !== 'idle'}>
@@ -193,16 +191,13 @@ function WatchRow({ item }: { item: WatchItem }) {
         {result && !result.ok ? <span className="muted"> · {errorText(result.error)}</span> : null}
       </div>
       <div className="row-actions">
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={alertsOn}
-            onChange={(e) =>
-              submit({ intent: 'watch-alerts', id: item.entryKey, alertsOn: String(e.target.checked) })
-            }
-          />
-          Alerts
-        </label>
+        <Switch
+          checked={alertsOn}
+          onChange={(e) =>
+            submit({ intent: 'watch-alerts', id: item.entryKey, alertsOn: String(e.target.checked) })
+          }
+          label="Alerts"
+        />
         <button
           type="button"
           className="button"
