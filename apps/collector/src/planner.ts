@@ -18,7 +18,7 @@ export { CADENCE_MS };
 export const FIRST_RUN_CRON = '0 */3 * * *';
 
 /**
- * Most never-run heavy sources one tick starts. Heavy sources go to E2B jobs and ti-api allows
+ * Most heavy sources without a success that one tick starts, on any cron. Heavy sources go to E2B jobs and ti-api allows
  * MAX_ACTIVE_JOBS (5) active jobs, two of them kept for deep queries, so 2 per tick leaves room: a new
  * environment starts its ~25 heavy sources within two days of ticks at most, while the others run at once.
  */
@@ -109,7 +109,7 @@ export async function dueSources(
   const cursors = new Map(((cursorRes?.results ?? []) as CursorRow[]).map((r) => [r.source_id, r]));
 
   const due: DueSource[] = [];
-  const firstRunHeavy: string[] = [];
+  const firstRunHeavy: SourceConfig[] = [];
   for (const source of allowed) {
     const inCadence = cadences.includes(source.cadence);
     const run = latest.get(source.id);
@@ -122,19 +122,25 @@ export async function dueSources(
     const last = success.get(source.id);
     if (!inCadence && last) continue; // off-cadence candidates are only here for a first run
     if (!isDue(source.cadence, last ? new Date(last) : null, at)) continue;
-    if (!last && !run && firstRunTick && isHeavySource(source)) {
-      firstRunHeavy.push(source.id);
-    }
+    if (!last && isHeavySource(source)) firstRunHeavy.push(source);
     const c = cursors.get(source.id);
     const from: Cursor | null = c
       ? { kind: c.kind, value: c.value ?? '', ...(c.etag === null ? {} : { etag: c.etag }) }
       : null;
     due.push({ source, from });
   }
-  // Cap the heavy sources that were never even attempted. One that already ran and failed before its job
-  // started holds no job slot, so it is retried every tick and cannot hold the cap either.
-  const keep = new Set(firstRunHeavy.slice(0, FIRST_RUN_HEAVY_PER_TICK));
-  return due.filter(({ source }) => !firstRunHeavy.includes(source.id) || keep.has(source.id));
+  // Cap every heavy source that has not yet succeeded, on every cron and whether or not an earlier attempt
+  // failed: each start is an E2B job and ti-api allows MAX_ACTIVE_JOBS. Never-attempted sources go first,
+  // then the least recently attempted, so a source that keeps failing cannot starve the others.
+  const attempted = (id: string) => (latest.has(id) ? Date.parse(latest.get(id)?.started_at ?? '') : -1);
+  const keep = new Set(
+    [...firstRunHeavy]
+      .sort((x, y) => attempted(x.id) - attempted(y.id))
+      .slice(0, FIRST_RUN_HEAVY_PER_TICK)
+      .map((x) => x.id),
+  );
+  const capped = new Set(firstRunHeavy.map((x) => x.id));
+  return due.filter(({ source }) => !capped.has(source.id) || keep.has(source.id));
 }
 
 /** Queues one step-0 job per due source, then tells ti-notify when the 3-hourly run has been queued. */

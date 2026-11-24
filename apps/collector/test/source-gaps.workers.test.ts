@@ -242,14 +242,21 @@ describe('first run regardless of cadence (fake clock, fresh database)', () => {
     for (const s of fetchable) expect(have.has(s.id)).toBe(true);
   });
 
-  it('a heavy source whose first run failed is retried and does not use up the cap', async () => {
+  it('a heavy source whose first run failed counts against the cap and others rotate in', async () => {
     const first = await dueSources(E, CRON, NOW);
     const picked = first.filter((d) => isHeavySource(d.source)).map((d) => d.source.id);
-    expect(picked.length).toBeGreaterThanOrEqual(FIRST_RUN_HEAVY_PER_TICK);
+    expect(picked).toHaveLength(FIRST_RUN_HEAVY_PER_TICK);
     for (const id of picked) await seedRun(`f-${id}`, id, NOW, 'failed');
     const next = (await dueSources(E, CRON, new Date(NOW.getTime() + 3 * HOUR))).map((d) => d.source.id);
-    for (const id of picked) expect(next).toContain(id); // retried
-    const fresh = next.filter((id) => heavy.some((s) => s.id === id) && !picked.includes(id));
-    expect(fresh).toHaveLength(FIRST_RUN_HEAVY_PER_TICK); // and two more never-attempted ones start
+    const nextHeavy = next.filter((id) => heavy.some((s) => s.id === id));
+    expect(nextHeavy).toHaveLength(FIRST_RUN_HEAVY_PER_TICK);
+    for (const id of picked) expect(nextHeavy).not.toContain(id); // never-attempted ones go first
+  });
+
+  it('the weekly and daily crons are capped too on a fresh database', async () => {
+    for (const cron of ['0 5 * * 1', '45 14 * * *']) {
+      const due = await dueSources(E, cron, NOW);
+      expect(due.filter((d) => isHeavySource(d.source)).length).toBeLessThanOrEqual(FIRST_RUN_HEAVY_PER_TICK);
+    }
   });
 });

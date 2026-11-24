@@ -25,8 +25,8 @@ describe('dueSources', () => {
   });
 
   it('a latest run that failed is due; a young running run is skipped; an old one is not', async () => {
-    await seedRun('r1', 'cve-list', new Date(NOW.getTime() - 1 * HOUR), 'failed');
-    expect(await ids()).toContain('cve-list');
+    await seedRun('r1', 'cisa-kev', new Date(NOW.getTime() - 1 * HOUR), 'failed');
+    expect(await ids()).toContain('cisa-kev');
     await seedRun('r2', 'osv', new Date(NOW.getTime() - 1 * HOUR), 'running');
     expect(await ids()).not.toContain('osv');
     await seedRun('r3', 'nvd', new Date(NOW.getTime() - 7 * HOUR), 'running');
