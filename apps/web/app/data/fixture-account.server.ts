@@ -359,8 +359,8 @@ export function fixtureOpsReport(now: Date = new Date()): OpsReport {
     ],
     budget: {
       day: now.toISOString().slice(0, 10),
-      d1Writes: 41_250,
-      d1Limit: 100_000,
+      d1Writes: 660_000,
+      d1Limit: 1_600_000,
       emailsSent: 12,
       emailCap: 95,
       queueOps: 0,

@@ -18,7 +18,7 @@ beforeEach(async () => {
 });
 
 describe('reserveWrites', () => {
-  it('first-load: 90,000 exactly passes and one more does not', async () => {
+  it('first-load: 1,000,000 exactly passes and one more does not', async () => {
     expect(await reserveWrites(db, FIRST_LOAD_DAILY_CAP - 1, 'first-load', NOW)).toBe(true);
     expect(await reserveWrites(db, 1, 'first-load', NOW)).toBe(true);
     expect(await meter()).toBe(FIRST_LOAD_DAILY_CAP);
@@ -31,7 +31,7 @@ describe('reserveWrites', () => {
   it('steady is never blocked and is counted', async () => {
     await reserveWrites(db, FIRST_LOAD_DAILY_CAP, 'first-load', NOW);
     expect(await reserveWrites(db, 60_000, 'steady', NOW)).toBe(true);
-    expect(await meter()).toBe(150_000);
+    expect(await meter()).toBe(FIRST_LOAD_DAILY_CAP + 60_000);
   });
   it('steady creates the day row in one statement', async () => {
     expect(await reserveWrites(db, 7, 'steady', NOW)).toBe(true);
@@ -39,9 +39,9 @@ describe('reserveWrites', () => {
   });
   it('20 parallel first-load reservations never pass the cap', async () => {
     const results = await Promise.all(
-      Array.from({ length: 20 }, () => reserveWrites(db, 5_000, 'first-load', NOW)),
+      Array.from({ length: 20 }, () => reserveWrites(db, 62_500, 'first-load', NOW)),
     );
-    expect(results.filter(Boolean).length).toBe(18);
+    expect(results.filter(Boolean).length).toBe(16);
     expect(await meter()).toBe(FIRST_LOAD_DAILY_CAP);
   });
   it('each UTC day has its own meter', async () => {
@@ -92,10 +92,10 @@ describe('budgetUsage', () => {
   });
   it('reports today, and never a negative remainder', async () => {
     await reserveWrites(db, 25_000, 'steady', NOW);
-    expect((await budgetUsage(db, NOW)).firstLoadRemaining).toBe(65_000);
-    await reserveWrites(db, 100_000, 'steady', NOW);
+    expect((await budgetUsage(db, NOW)).firstLoadRemaining).toBe(FIRST_LOAD_DAILY_CAP - 25_000);
+    await reserveWrites(db, D1_DAILY_WRITE_LIMIT, 'steady', NOW);
     const u = await budgetUsage(db, NOW);
-    expect(u.d1Writes).toBe(125_000);
+    expect(u.d1Writes).toBe(25_000 + D1_DAILY_WRITE_LIMIT);
     expect(u.firstLoadRemaining).toBe(0);
   });
 });

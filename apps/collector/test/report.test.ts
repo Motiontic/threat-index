@@ -9,7 +9,7 @@ describe('formatReport', () => {
     expect(formatReport([], NOW).subject).toBe('Threat Index watchdog 2026-11-23: all clear');
   });
   it('counts issues and groups them', () => {
-    const r = formatReport([f(1), { kind: 'budget', subject: 'D1', detail: '85000' }], NOW);
+    const r = formatReport([f(1), { kind: 'budget', subject: 'D1', detail: '1300000' }], NOW);
     expect(r.subject).toBe('Threat Index watchdog 2026-11-23: 2 issues');
     expect(r.text).toContain('Late sources (1)');
     expect(r.text).toContain('- s1: never run');

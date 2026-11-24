@@ -1,10 +1,11 @@
 /**
- * Daily write budget meter. These are caps the project keeps for itself, not limits Cloudflare enforces
- * on a paid account: 100,000 D1 rows written a day (indexes count), with the first load stopping at 90,000.
- * Steady updates are always counted but never blocked.
+ * Daily write budget meter, sized for Workers Paid. These are caps the project keeps for itself, not limits
+ * Cloudflare enforces: D1 on Workers Paid includes 50 million rows written a month (indexes count), so about
+ * 1,600,000 a day spread over a month, with the first load stopping at 1,000,000 to leave room for steady
+ * updates. Steady updates are always counted but never blocked.
  */
-export const D1_DAILY_WRITE_LIMIT = 100_000;
-export const FIRST_LOAD_DAILY_CAP = 90_000;
+export const D1_DAILY_WRITE_LIMIT = 1_600_000;
+export const FIRST_LOAD_DAILY_CAP = 1_000_000;
 export const EMAIL_DAILY_CAP = 95; // Resend free plan: 100 a day
 
 export type WritePriority = 'steady' | 'first-load';

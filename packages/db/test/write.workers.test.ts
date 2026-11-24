@@ -305,23 +305,23 @@ describe('writeRows: idempotence and validation', () => {
 });
 
 describe('writeRows: budget', () => {
-  it('steady at 150,000 still writes and is counted', async () => {
-    await control.prepare("INSERT INTO budget (day, d1_writes) VALUES ('2026-11-23', 150000)").run();
+  it('steady above the first-load cap still writes and is counted', async () => {
+    await control.prepare("INSERT INTO budget (day, d1_writes) VALUES ('2026-11-23', 1500000)").run();
     const res = await writeRows(base, [adv('1'), adv('2')], { priority: 'steady', now: NOW });
     expect(res.deferred).toBe(false);
     expect(await count(env.DB_ADVISORIES, 'advisories')).toBe(2);
-    expect(await meter()).toBe(150_004); // 2 rows × (1 + 1 index)
+    expect(await meter()).toBe(1_500_004); // 2 rows × (1 + 1 index)
   });
 
-  it('first-load is deferred at 89,990 with cost 20: nothing written, meter unchanged', async () => {
-    await control.prepare("INSERT INTO budget (day, d1_writes) VALUES ('2026-11-23', 89990)").run();
+  it('first-load is deferred at 999,990 with cost 20: nothing written, meter unchanged', async () => {
+    await control.prepare("INSERT INTO budget (day, d1_writes) VALUES ('2026-11-23', 999990)").run();
     const rows = Array.from({ length: 10 }, (_, i) => adv(String(i)));
     const { dbs, batches } = counting();
     const res = await writeRows(dbs, rows, { priority: 'first-load', now: NOW });
     expect(res).toEqual({ written: 0, statements: 0, deferred: true });
     expect(batches).toEqual({});
     expect(await count(env.DB_ADVISORIES, 'advisories')).toBe(0);
-    expect(await meter()).toBe(89_990);
+    expect(await meter()).toBe(999_990);
   });
 
   it('first-load that fits is written and counted once', async () => {
