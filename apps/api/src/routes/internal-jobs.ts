@@ -272,12 +272,29 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
       killLater(c, s.sandbox_id, s.id, s.kind);
     }
 
-    const id =
-      'requestId' in req && req.requestId ? req.requestId : (deps.newId ?? (() => newJobId(now())))();
+    // A `running` job of this kind past the job time limit never reported: failed, so it cannot block this one.
+    const hung = await db
+      .prepare(
+        `UPDATE jobs SET status='failed', finished_at=?1, error='timed out' WHERE status='running' AND kind=?2 AND source_id IS ?3 AND created_at < ?4 RETURNING id, sandbox_id`,
+      )
+      .bind(now().toISOString(), req.kind, sourceId, new Date(now().getTime() - JOB_TIMEOUT_MS).toISOString())
+      .all<{ id: string; sandbox_id: string | null }>();
+    for (const s of hung.results) {
+      log('job timed out', { jobId: s.id, kind: req.kind, status: 'failed', sandboxId: s.sandbox_id });
+      killLater(c, s.sandbox_id, s.id, req.kind);
+    }
+
+    const freshId = deps.newId ?? (() => newJobId(now()));
+    let id = 'requestId' in req && req.requestId ? req.requestId : freshId();
     const existing = (row: Pick<JobRow, 'id' | 'status'>) =>
       c.json({ jobId: row.id, status: row.status, existing: true }, 200);
 
-    const same = await getRow(c, id);
+    let same = await getRow(c, id);
+    // Its request id is taken by the row just failed above, so the new job gets a fresh id.
+    if (same && hung.results.some((h) => h.id === same?.id)) {
+      id = freshId();
+      same = null;
+    }
     if (same) return existing(same);
     const ins = await db
       .prepare(
