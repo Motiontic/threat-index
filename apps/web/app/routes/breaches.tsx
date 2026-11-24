@@ -6,13 +6,14 @@ import { getData } from '../data/data.server';
 import type { BreachSummary, Credit } from '../data/types';
 import { formatDate } from '../lib/format';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import { countLine, parseWorldParams, pluralise } from '../lib/world';
 import type { Route } from './+types/breaches';
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const params = parseWorldParams(url.searchParams);
-  const base = { origin: url.origin, params };
+  const base = { origin: siteOrigin(request), params };
   try {
     const res = await getData(request).breaches(params);
     return { ...base, items: res.items, next: res.next, credits: res.credits };

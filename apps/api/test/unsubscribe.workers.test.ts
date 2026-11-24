@@ -91,7 +91,7 @@ describe('POST /unsubscribe', () => {
     const res = await post(await tok({ userId: 'u1', scope: 'all' }));
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(await res.text()).toContain('all Threat Index alert email');
+    expect(await res.text()).toContain('all MTI alert email');
     const s = await state();
     expect(s.users).toEqual([
       { id: 'u1', alert_instant: 0, digest: 'off', email_suppressed: 0 },

@@ -20,5 +20,6 @@ export default [
   route('__fake/sign-out', 'routes/fake-sign-out.ts'),
   route('ops', 'routes/ops.tsx'),
   route('sitemap.xml', 'routes/sitemap.ts'),
+  route('robots.txt', 'routes/robots.ts'),
   route('*', 'routes/not-found.tsx'),
 ] satisfies RouteConfig;

@@ -111,7 +111,7 @@ describe('runWatchdog', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ from: 'watchdog@example.org', to: 'ops@example.com' });
     const raw = sent[0]?.raw as string;
-    expect(raw).toContain('Subject: Threat Index watchdog 2026-11-23:');
+    expect(raw).toContain('Subject: MTI watchdog 2026-11-23:');
     expect(raw).toContain('Message-ID: <01JABCDEFGHJKMNPQRSTVWXYZ0@example.org>');
     expect(raw).toContain('\r\n');
     expect(d.logs.join('\n')).not.toContain('ops@example.com');

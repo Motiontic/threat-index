@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "description": "The public Threat Index site: React Router 8 on Cloudflare Workers.",
+  "description": "The public MTI (Motiontic Threat Index) site: React Router 8 on Cloudflare Workers.",
   "engines": {
     "node": ">=22.22.0"
   },

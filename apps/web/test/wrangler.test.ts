@@ -15,7 +15,8 @@ interface WranglerConfig {
   observability: unknown;
   vars: unknown;
   services: Service[];
-  env: { staging: { name: string; vars: unknown; services: Service[] } };
+  routes?: unknown;
+  env: { staging: { name: string; vars: unknown; services: Service[]; routes?: unknown } };
 }
 
 // `ts` is what scripts/wrangler-config.mjs uses to read these files too.
@@ -35,6 +36,11 @@ describe('apps/web/wrangler.jsonc', () => {
     expect(web.observability).toEqual({ enabled: true });
     expect(web.vars).toEqual({ TI_ENV: 'production', DATA_SOURCE: 'api' });
     expect(web.services).toEqual([{ binding: 'API', service: 'ti-api' }]);
+  });
+
+  it('serves production on mti.motiontic.com, and staging on workers.dev only', () => {
+    expect(web.routes).toEqual([{ pattern: 'mti.motiontic.com', custom_domain: true }]);
+    expect(web.env.staging.routes ?? []).toEqual([]);
   });
 
   it('is the staging worker under env.staging', () => {

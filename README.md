@@ -1,6 +1,6 @@
-# Threat Index
+# MTI (Motiontic Threat Index)
 
-An open-source system that keeps **one record of every public vulnerability, exploit, breach and AI incident**. It pulls 55 public sources, checks them for changes every 3 hours, and traces every fact back to the exact record it came from.
+MTI, the Motiontic Threat Index, is an open-source system that keeps **one record of every public vulnerability, exploit, breach and AI incident**. It pulls 55 public sources, checks them for changes every 3 hours, and traces every fact back to the exact record it came from.
 
 It runs on **Cloudflare's free plan** (Workers, D1, R2, Queues, KV). Heavy jobs, such as big files, the first load and deep history, run in **E2B sandboxes**. Accounts use **Clerk** (single-user, no organisations), and alert emails go through **Resend**.
 

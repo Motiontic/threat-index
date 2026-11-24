@@ -5,6 +5,7 @@ import { getData } from '../data/data.server';
 import type { BreachNotice } from '../data/types';
 import { formatDate } from '../lib/format';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import { countLine, pluralise } from '../lib/world';
 import type { Route } from './+types/breach';
 
@@ -21,7 +22,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw err;
   }
   if (!breach) throw data(null, { status: 404 });
-  return { origin: new URL(request.url).origin, breach };
+  return { origin: siteOrigin(request), breach };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {

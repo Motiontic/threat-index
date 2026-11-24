@@ -4,6 +4,7 @@ import { ApiBadRequest } from '../data/api.server';
 import { getData } from '../data/data.server';
 import { formatDate } from '../lib/format';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import { KIND_LABELS } from '../lib/world';
 import type { Route } from './+types/incident';
 
@@ -21,7 +22,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw err;
   }
   if (!incident) throw data(null, { status: 404 });
-  return { origin: new URL(request.url).origin, incident };
+  return { origin: siteOrigin(request), incident };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {

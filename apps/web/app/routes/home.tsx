@@ -1,10 +1,12 @@
+import { PRODUCT_INTRO } from '@ti/core/brand';
 import { Link } from 'react-router';
 import { SearchForm } from '../components/shell';
 import { CompactRow, Panel, Tile } from '../components/ui';
 import { getData } from '../data/data.server';
 import type { SearchHit } from '../data/types';
 import { formatDate, TYPE_PLURALS } from '../lib/format';
-import { buildMeta, pageTitle } from '../lib/seo';
+import { buildMeta, HOME_TITLE, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import type { Route } from './+types/home';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -14,13 +16,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   } catch {
     // The panel is left out; the page is still 200.
   }
-  return { origin: new URL(request.url).origin, kev };
+  return { origin: siteOrigin(request), kev };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
   if (!loaderData) return [{ title: pageTitle('Not found') }];
   return buildMeta({
-    title: pageTitle('Every vulnerability, exploit, breach and AI incident'),
+    title: HOME_TITLE,
     description:
       'Search one record of public vulnerabilities, exploited-in-the-wild flags, breaches and AI incidents, with every source credited.',
     path: '/',
@@ -52,8 +54,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           Every vulnerability, exploit, breach and AI incident, <em>in one place</em>.
         </h1>
         <p className="lede">
-          One record for each public security issue, with the exploited-in-the-wild flag and a credit for
-          every source that reported it.
+          {PRODUCT_INTRO}, keeps one record for each public security issue, with the exploited-in-the-wild
+          flag and a credit for every source that reported it.
         </p>
         <SearchForm large />
         <div className="chips">

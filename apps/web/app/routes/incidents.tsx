@@ -6,13 +6,14 @@ import { getData } from '../data/data.server';
 import type { Credit, IncidentSummary } from '../data/types';
 import { formatDate } from '../lib/format';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import { INCIDENT_KINDS, KIND_LABELS, parseWorldParams } from '../lib/world';
 import type { Route } from './+types/incidents';
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const params = parseWorldParams(url.searchParams, { kind: INCIDENT_KINDS });
-  const base = { origin: url.origin, params };
+  const base = { origin: siteOrigin(request), params };
   try {
     const res = await getData(request).incidents(params);
     return { ...base, items: res.items, next: res.next, credits: res.credits };

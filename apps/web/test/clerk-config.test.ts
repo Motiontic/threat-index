@@ -18,6 +18,15 @@ describe('clerkConfig', () => {
     });
   });
 
+  it('decodes the production key for clerk.mti.motiontic.com', () => {
+    const key = `pk_live_${b64('clerk.mti.motiontic.com')}`;
+    expect(decodePublishableKey(key)).toEqual({ frontendApi: 'clerk.mti.motiontic.com', live: true });
+    expect(clerkConfig({ CLERK_PUBLISHABLE_KEY: key, CLERK_SECRET_KEY: 'sk_live_abc' })).toEqual({
+      publishableKey: key,
+      frontendApi: 'clerk.mti.motiontic.com',
+    });
+  });
+
   it('is null (Clerk off) without a secret, without a key, or with a bad secret', () => {
     expect(clerkConfig({ CLERK_PUBLISHABLE_KEY: TEST_KEY })).toBeNull();
     expect(clerkConfig({ CLERK_SECRET_KEY: SECRET })).toBeNull();

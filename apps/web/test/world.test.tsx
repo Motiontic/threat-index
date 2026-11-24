@@ -19,6 +19,7 @@ import { fakeApi } from './fake-api';
 
 // Searches and pages go through the in-process fixture API, with every request recorded.
 const seen = vi.hoisted(() => ({ requests: [] as string[] }));
+vi.mock('cloudflare:workers', () => ({ env: {} }));
 vi.mock('../app/data/data.server', async () => {
   const { createSiteData: create } = await import('../app/data/api.server');
   const { fixtureApi: fixtures } = await import('../app/data/fixture-api.server');

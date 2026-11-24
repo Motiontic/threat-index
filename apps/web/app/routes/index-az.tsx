@@ -1,3 +1,4 @@
+import { PRODUCT_SHORT } from '@ti/core/brand';
 import { data, Link } from 'react-router';
 import { CompactRow, EmptyState, LetterBar } from '../components/ui';
 import { ApiBadRequest } from '../data/api.server';
@@ -29,7 +30,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
   const name = letter === null ? 'Index A–Z' : `Index: ${letter === '0' ? '0–9' : letter.toUpperCase()}`;
   return buildMeta({
     title: pageTitle(name),
-    description: 'Every entry in the Threat Index, listed alphabetically by ID.',
+    description: `Every entry in ${PRODUCT_SHORT}, listed alphabetically by ID.`,
     noindex: loaderData.letter !== null && loaderData.items.length === 0,
     path: letter === null ? '/index' : `/index/${letter}`,
     origin,

@@ -11,7 +11,8 @@ import { groupEvidence } from '../lib/evidence';
 import { formatDate, TYPE_PLURALS } from '../lib/format';
 import { saveIntent } from '../lib/intent';
 import { useNonce } from '../lib/nonce';
-import { buildMeta, JsonLd, pageTitle } from '../lib/seo';
+import { buildMeta, JsonLd, pageTitle, SITE_NAME } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import type { Route } from './+types/entry';
 
 const ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
@@ -49,7 +50,7 @@ export async function loader(args: Route.LoaderArgs) {
       if (!(err instanceof SignInRequired)) throw err;
     }
   }
-  return { origin: new URL(request.url).origin, entry, signedIn, full, watching };
+  return { origin: siteOrigin(request), entry, signedIn, full, watching };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -220,6 +221,7 @@ export default function Entry({ loaderData }: Route.ComponentProps) {
           name: `${entry.key}: ${entry.title}`,
           description: entry.summary,
           identifier: entry.key,
+          isPartOf: { '@type': 'WebSite', name: SITE_NAME, url: origin },
           url: new URL(`/e/${encodeURIComponent(entry.key)}`, origin).toString(),
           ...(entry.published ? { datePublished: entry.published } : {}),
           ...(entry.modified ? { dateModified: entry.modified } : {}),

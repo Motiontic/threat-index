@@ -1,6 +1,6 @@
 # Sample fixtures
 
-These JSON files are **hand-written samples**, not real Threat Index records. Summaries are in our own words.
+These JSON files are **hand-written samples**, not real MTI records. Summaries are in our own words.
 CVE, ATT&CK, CWE and GHSA identifiers and their public facts (dates, CVSS scores, KEV dates) are real; every
 breach, AI incident and malicious-package record is invented: its ID starts with `EXAMPLE-` and it names only
 `Example Co.` / `example.com`.

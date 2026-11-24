@@ -5,6 +5,7 @@ import { Chip, Panel, Table } from '../components/ui';
 import { bridge, getAccount } from '../data/data.server';
 import { formatDate } from '../lib/format';
 import { buildMeta, pageTitle } from '../lib/seo';
+import { siteOrigin } from '../lib/site.server';
 import type { Route } from './+types/ops';
 
 const NO_STORE = { 'Cache-Control': 'private, no-store' };
@@ -16,7 +17,7 @@ export async function loader(args: Route.LoaderArgs) {
     throw data(null, { status: 404 });
   const report = await bridge(() => account.client.adminOps());
   if (!report) throw data(null, { status: 404 });
-  return data({ report, origin: new URL(args.request.url).origin }, { headers: NO_STORE });
+  return data({ report, origin: siteOrigin(args.request) }, { headers: NO_STORE });
 }
 
 export const headers: Route.HeadersFunction = () => NO_STORE;

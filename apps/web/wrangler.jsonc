@@ -18,6 +18,10 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   "vars": { "TI_ENV": "production", "DATA_SOURCE": "api" },
+  // Production is served at https://mti.motiontic.com (Cloudflare creates the DNS record and certificate; the
+  // zone must be on this account). Staging keeps its workers.dev address. The site URL itself (SITE_ORIGIN) is
+  // a var set at deploy by scripts/deploy-web.mjs (`--var`, from TI_APP_URL / TI_APP_URL_STAGING).
+  "routes": [{ "pattern": "mti.motiontic.com", "custom_domain": true }],
   // Clerk (sign-in). No key values live here:
   //   CLERK_PUBLISHABLE_KEY  a plain var (public), set at deploy by scripts/deploy-web.mjs (`--var`).
   //   CLERK_SECRET_KEY       a Worker secret: `wrangler secret put CLERK_SECRET_KEY --name ti-web[-staging]`.
@@ -35,6 +39,8 @@
     "staging": {
       "name": "ti-web-staging",
       "vars": { "TI_ENV": "staging", "DATA_SOURCE": "api" },
+      // Staging keeps workers.dev only: no custom domain (explicit, so it can never inherit production's).
+      "routes": [],
       "services": [{ "binding": "API", "service": "ti-api-staging" }],
       "ratelimits": [{ "name": "RL_PAGES", "namespace_id": "7204", "simple": { "limit": 120, "period": 60 } }]
     }
