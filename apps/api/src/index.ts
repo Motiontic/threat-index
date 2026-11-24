@@ -10,6 +10,7 @@ import breaches from './routes/breaches';
 import deepQuery from './routes/deep-query';
 import entries from './routes/entries';
 import health from './routes/health';
+import home from './routes/home';
 import incidents from './routes/incidents';
 import indexLetter from './routes/index-letter';
 import internalJobs from './routes/internal-jobs';
@@ -52,6 +53,7 @@ export function createApp(clerk: MiddlewareHandler<AppEnv> = clerkMiddleware()) 
   app.use('/unsubscribe', rateLimit);
 
   for (const route of [
+    home,
     search,
     entries,
     indexLetter,
