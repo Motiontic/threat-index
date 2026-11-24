@@ -172,6 +172,61 @@ describe('PUT objects', () => {
   });
 });
 
+// QA archive-limits: DELETE objects had no coverage (a failed load undoes its lake parts through it).
+async function del(id: string, objectKey: string, o: { key?: string; signAs?: string } = {}) {
+  const target = `/internal/jobs/${id}/objects/${objectKey}`;
+  return call(
+    new Request(`https://api.test${o.signAs ?? target}`, {
+      method: 'DELETE',
+      headers: await sigHeaders(id, 'DELETE', target, '', o.key),
+    }),
+  );
+}
+
+describe('DELETE objects', () => {
+  it('removes a key the job could write, and deleting a missing key succeeds', async () => {
+    await seed(ID, 'first-load', 'running', 'cisa-kev');
+    const k = 'lake/records/cisa-kev/2026/part-x.ndjson.gz';
+    await put(ID, k);
+    expect(await env.BUCKET.get(k)).not.toBeNull();
+    const res = await del(ID, k);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ key: k });
+    expect(await env.BUCKET.get(k)).toBeNull();
+    expect((await del(ID, k)).status).toBe(200);
+  });
+  it('401 for a wrong key or a changed path, and the object stays', async () => {
+    await seed(ID, 'echo');
+    const k = `jobs/${ID}/keep`;
+    await put(ID, k);
+    expect((await del(ID, k, { key: 'deadbeef' })).status).toBe(401);
+    expect((await del(ID, k, { signAs: `/internal/jobs/${ID}/objects/jobs/${ID}/other` })).status).toBe(401);
+    expect(await env.BUCKET.get(k)).not.toBeNull();
+  });
+  it('400 for keys outside the write prefixes, request.json and ..; other sources and jobs are untouched', async () => {
+    await seed(ID, 'first-load', 'running', 'cisa-kev');
+    await env.BUCKET.put('lake/records/nvd/2026/part-x.ndjson.gz', 'x');
+    await env.BUCKET.put(`jobs/${OTHER}/x`, 'x');
+    for (const k of [
+      'lake/records/nvd/2026/part-x.ndjson.gz',
+      `jobs/${OTHER}/x`,
+      `jobs/${ID}/request.json`,
+      `jobs/${ID}/../${OTHER}/x`,
+      `jobs/${ID}/%2e%2e/x`,
+    ]) {
+      expect((await del(ID, k)).status, k).toBe(400);
+    }
+    expect(await env.BUCKET.get('lake/records/nvd/2026/part-x.ndjson.gz')).not.toBeNull();
+    expect(await env.BUCKET.get(`jobs/${OTHER}/x`)).not.toBeNull();
+  });
+  it('409 and the object stays when the job is not running', async () => {
+    await seed(OTHER, 'echo', 'complete');
+    await env.BUCKET.put(`jobs/${OTHER}/z`, 'x');
+    expect((await del(OTHER, `jobs/${OTHER}/z`)).status).toBe(409);
+    expect(await env.BUCKET.get(`jobs/${OTHER}/z`)).not.toBeNull();
+  });
+});
+
 describe('GET objects and list', () => {
   beforeEach(async () => {
     await seed(ID, 'echo');
