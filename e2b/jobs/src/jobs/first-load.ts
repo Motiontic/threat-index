@@ -156,10 +156,10 @@ export const DEFAULT_MAX_BYTES = MAX_TOTAL_BYTES;
 export const HARD_MAX_BYTES = 20 * 1024 ** 3;
 const PROGRESS_EVERY = 10_000;
 
-/** The archive caps for a source: its own values, kept within the hard ceilings. */
 /** The most a git archive may take on disk. */
 const ARCHIVE_DOWNLOAD_BYTES = 4 * 1024 ** 3;
 
+/** The archive caps for a source: its own values, kept within the hard ceilings. */
 export function archiveLimits(git: { maxFiles?: number; maxBytes?: number }) {
   const pick = (v: number | undefined, dflt: number, hard: number) =>
     v !== undefined && Number.isFinite(v) && v > 0 ? Math.min(Math.floor(v), hard) : dflt;
