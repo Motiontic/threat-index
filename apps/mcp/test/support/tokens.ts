@@ -90,7 +90,7 @@ export function mockJwks(keys: TestKey[], mode: JwksMode = 'ok'): JwksSpy {
         case 'timeout':
           throw new DOMException('timed out', 'TimeoutError');
         case 'redirect':
-          throw new TypeError('redirect mode is set to error');
+          return new Response(null, { status: 302, headers: { location: 'https://evil.example/jwks' } });
         case 'badjson':
           return new Response('{not json', { status: 200 });
         case 'weak': {
@@ -118,5 +118,6 @@ export function mockJwks(keys: TestKey[], mode: JwksMode = 'ok'): JwksSpy {
 }
 
 function expectInit(init?: RequestInit) {
-  if (init?.redirect !== 'error') throw new Error('JWKS fetch must use redirect: "error"');
+  // workerd rejects redirect: 'error' ("must be one of follow or manual"), so the JWKS fetch must use 'manual'.
+  if (init?.redirect !== 'manual') throw new Error('JWKS fetch must use redirect: "manual"');
 }

@@ -45,7 +45,7 @@ async function load(issuer: string, now: number): Promise<Cache> {
   try {
     res = await fetch(`${issuer}/.well-known/jwks.json`, {
       headers: { accept: 'application/json' },
-      redirect: 'error',
+      redirect: 'manual', // workerd has no 'error' mode; a 3xx fails the status check below
       signal: AbortSignal.timeout(3000),
     });
   } catch {
