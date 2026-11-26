@@ -106,6 +106,25 @@ describe('a signed MCP call', () => {
   });
 });
 
+describe('a signed MCP call on cachedPublic routes', () => {
+  it('returns 200, bypasses the public cache and gets the full-record view', async () => {
+    const V = env as unknown as { DB_VULNS: D1Database };
+    await V.DB_VULNS.prepare(
+      `INSERT OR REPLACE INTO vulns (key, kind, title, summary, published, modified, cvss, cvss_version, cvss_source, cwe, kev_added, ransomware, epss, sources, doc_key)
+       VALUES ('CVE-2031-0001','cve','T','S','2025-01-01','2025-01-02T00:00:00Z',7.5,'3.1','nvd','["CWE-79"]',NULL,0,0.5,'["nvd"]','docs/x')`,
+    ).run();
+    for (const path of ['/v1/home', '/v1/search?q=log4j', '/v1/entries/CVE-2031-0001']) {
+      const res = await mcp('GET', path);
+      expect(res.status, path).toBe(200);
+      // Search sets its own header and has no per-user view; the cachedPublic routes must skip the cache.
+      if (!path.startsWith('/v1/search'))
+        expect(res.headers.get('cache-control'), path).toBe('private, no-store');
+      if (path.startsWith('/v1/entries/')) expect((await json(res)).access).toBe('full');
+    }
+    expect(clerkRan).toBe(0);
+  });
+});
+
 describe('route allow-list and scopes', () => {
   it('refuses admin, internal and destructive routes with 403 not_allowed_for_mcp, even for an admin user', async () => {
     const admin: McpIdentity = { sub: SUB, scopes: ['mti:read', 'mti:watch'], clientId: CLIENT };
