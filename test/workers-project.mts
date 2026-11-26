@@ -30,6 +30,8 @@ export function workerProject(
   include: string[],
   dbs: Record<string, string>,
   bindings = {},
+  /** More Miniflare options, e.g. `serviceBindings` with an in-test handler for another Worker. */
+  miniflare: Record<string, unknown> = {},
 ) {
   const configPath = writeTestConfig(app);
   return defineProject({
@@ -42,6 +44,7 @@ export function workerProject(
         return {
           wrangler: { configPath, environment: 'staging' },
           miniflare: {
+            ...miniflare,
             bindings: { ...bindings, MIGRATIONS: migrations },
           },
         };

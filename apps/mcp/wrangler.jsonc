@@ -1,0 +1,58 @@
+// ti-mcp: the remote MCP server for MTI (MCP spec 2026-07-28), served at /mcp on the web host.
+//
+// Top level = production. `--env staging` = staging (worker ti-mcp-staging, *-staging resources).
+// ${VAR} values are filled in by scripts/wrangler-config.mjs before a deploy, so account-specific IDs and
+// URLs never live in this public file.
+//
+// Reachable only through ti-web: no workers.dev URL, no preview URLs, no routes. ti-web forwards /mcp here
+// over a service binding (apps/web/workers/app.ts) when its MCP_ENABLED var is "1".
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ti-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "workers_dev": false,
+  "preview_urls": false,
+  // Calls to ti-api carry a signed identity (src/api.ts), never the user's token.
+  "services": [{ "binding": "API", "service": "ti-api" }],
+  // Tool off-switches live here as `mcp:tool:<name>:off`.
+  "kv_namespaces": [{ "binding": "SETTINGS", "id": "${TI_SETTINGS_KV_ID}" }],
+  "durable_objects": { "bindings": [{ "name": "MCP_TASKS", "class_name": "McpTask" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["McpTask"] }],
+  // Rate limits (per Cloudflare location, approximate). Not inherited by env.staging, which has its own
+  // namespace ids so staging never shares production counters.
+  "ratelimits": [
+    { "name": "RL_MCP", "namespace_id": "7105", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_MCP_ANON", "namespace_id": "7106", "simple": { "limit": 120, "period": 60 } }
+  ],
+  "vars": {
+    "TI_ENV": "production",
+    "MCP_RESOURCE_URL": "https://mti.motiontic.com/mcp",
+    "CLERK_ISSUER": "${TI_CLERK_ISSUER}",
+    "MCP_ALLOWED_ORIGINS": ""
+  },
+  // Secrets: MCP_HMAC_SECRET, MCP_HMAC_SECRET_NEXT (the same values as ti-api's, for rotation)
+
+  "env": {
+    "staging": {
+      "workers_dev": false,
+      "preview_urls": false,
+      "services": [{ "binding": "API", "service": "ti-api-staging" }],
+      "kv_namespaces": [{ "binding": "SETTINGS", "id": "${TI_SETTINGS_KV_ID_STAGING}" }],
+      "durable_objects": { "bindings": [{ "name": "MCP_TASKS", "class_name": "McpTask" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["McpTask"] }],
+      "ratelimits": [
+        { "name": "RL_MCP", "namespace_id": "7205", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_MCP_ANON", "namespace_id": "7206", "simple": { "limit": 120, "period": 60 } }
+      ],
+      "vars": {
+        "TI_ENV": "staging",
+        "MCP_RESOURCE_URL": "${TI_APP_URL_STAGING}/mcp",
+        "CLERK_ISSUER": "${TI_CLERK_ISSUER_STAGING}",
+        "MCP_ALLOWED_ORIGINS": ""
+      }
+    }
+  }
+}
