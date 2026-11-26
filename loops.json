@@ -43,7 +43,16 @@
       "e2b/e2b.toml",
       "**/.dev.vars*",
       "pnpm-workspace.yaml",
-      "**/install*"
+      "**/install*",
+      "apps/mcp/src/**",
+      "apps/mcp/skills/**",
+      "apps/mcp/ui/**",
+      "packages/core/src/mcp-user*",
+      "packages/core/src/packages*",
+      "apps/api/src/lib/mcp-*",
+      "apps/api/src/lib/auth*",
+      "apps/web/workers/**",
+      "scripts/deploy*"
     ]
   },
   "hooks": {

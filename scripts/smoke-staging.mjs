@@ -18,7 +18,12 @@ export async function runSmoke(fetchImpl, { web, api }) {
     return fetchImpl(`${trim(base)}${path}`, { redirect: 'manual', headers: { Accept: '*/*' } });
   };
 
-  async function check(label, base, path, { status, json = false, web: isWeb = false, hits = false }) {
+  async function check(
+    label,
+    base,
+    path,
+    { status, json = false, web: isWeb = false, hits = false, noCookie = false },
+  ) {
     let res;
     try {
       res = await get(base, path);
@@ -38,6 +43,7 @@ export async function runSmoke(fetchImpl, { web, api }) {
     if (!framed) problems.push('no frame protection');
     if (!h('referrer-policy')) problems.push('no Referrer-Policy');
     if (isWeb && !h('permissions-policy')) problems.push('no Permissions-Policy');
+    if (noCookie && h('set-cookie')) problems.push('sets a cookie');
     if (json && !(h('content-type') ?? '').includes('application/json')) problems.push('not JSON');
     if (hits && res.status === status) {
       try {
@@ -82,6 +88,11 @@ export async function runSmoke(fetchImpl, { web, api }) {
     await check(`web ${p}`, web, p, { status: 200, web: true });
   await check('web missing page', web, '/no-such-page-smoke', { status: 404, web: true });
   await check('web /ops', web, '/ops', { status: 404, web: true });
+  // MCP, forwarded by ti-web to ti-mcp (switched on in staging). Not pages, so no Permissions-Policy requirement
+  // beyond what ti-mcp sets; the headers are checked and no cookie may be set.
+  await check('web /mcp', web, '/mcp', { status: 405, noCookie: true });
+  // 404 until the server card ships.
+  await check('web /mcp/server-card', web, '/mcp/server-card', { status: 404, noCookie: true });
 
   await check('api /v1/health', api, '/v1/health', { status: 200, json: true });
   if (key)

@@ -21,6 +21,19 @@ here (or a lint rule) rather than paying for another review cycle.
 - Personal data (emails, user IDs) appears in logs, or deleting an account leaves user rows behind.
 - A queue- or cron-only Worker gets a public HTTP route.
 
+## MCP
+
+The MCP server (`apps/mcp`, served at `/mcp`) hands data to AI agents. Treat it as an untrusted-input
+boundary in both directions.
+
+- The user's token never leaves `ti-mcp`. Calls to `ti-api` go through `callApi` (`apps/mcp/src/api.ts`)
+  with a signed assertion (`packages/core/src/mcp-user.ts`); nothing from the client's request is copied.
+- Every source-derived string is cleaned before it reaches an agent (titles, summaries, names, URLs).
+- Nothing logs tool arguments, package lists or tokens.
+- Tool descriptions are fixed text with no instructions to the model.
+- A new API route used by MCP needs an entry in `MCP_ROUTES` (`apps/api/src/lib/mcp-routes.ts`) with its
+  scope. Routes not listed there are refused for MCP, and an MCP identity never has admin rights.
+
 ## Do not nitpick
 
 - Formatting and naming that Biome already enforces.
