@@ -1,5 +1,6 @@
 // Fails when `fetch(` appears where a request path could turn into URL fetching (SSRF):
-//   - apps/mcp/src, except src/api.ts (the one place ti-mcp calls ti-api, over a service binding);
+//   - apps/mcp/src, except src/api.ts (the one place ti-mcp calls ti-api, over a service binding) and
+//     src/auth/jwks.ts (one fixed address: the Clerk issuer's JWKS);
 //   - apps/api/src, except the files below, which use it today for fixed, known addresses.
 // Run by `pnpm lint`. Method definitions (`async fetch(request ...)`, the Worker and Durable Object entry
 // points) are not calls and are ignored; comments are ignored.
@@ -13,7 +14,7 @@ export const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /** Per source folder, the files (relative to it) that may call fetch. */
 export const RULES = [
-  { dir: 'apps/mcp/src', allowed: ['api.ts'] },
+  { dir: 'apps/mcp/src', allowed: ['api.ts', 'auth/jwks.ts'] },
   // Today: the Clerk Backend API client, which calls one fixed address.
   { dir: 'apps/api/src', allowed: ['lib/clerk-api.ts'] },
 ];

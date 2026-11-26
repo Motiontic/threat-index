@@ -18,6 +18,8 @@ export interface Env {
   CLERK_ISSUER: string;
   /** Comma list of browser origins allowed to call /mcp. Empty: none. */
   MCP_ALLOWED_ORIGINS: string;
+  /** Comma list of IPv4/IPv6 CIDRs that skip the no-token limit. Unset: Anthropic's published egress. */
+  MCP_ANON_EXEMPT_CIDRS?: string;
   /** Signs the identity sent to ti-api (same values as ti-api's; the next one is for rotation). */
   MCP_HMAC_SECRET?: string;
   MCP_HMAC_SECRET_NEXT?: string;

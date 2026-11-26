@@ -11,6 +11,8 @@ export interface ApiCall {
   body?: string | null;
   identity: McpIdentity;
   requestId: string;
+  /** Aborts the call: client disconnect, cancellation or the run-time limit. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -42,6 +44,11 @@ export async function callApi(env: Env, call: ApiCall): Promise<Response> {
   const headers = new Headers({ accept: 'application/json', 'x-request-id': call.requestId, ...assertion });
   if (bodyText !== null) headers.set('content-type', 'application/json');
   return env.API.fetch(
-    new Request(url, { method, headers, ...(bodyText !== null ? { body: bodyText } : {}) }),
+    new Request(url, {
+      method,
+      headers,
+      ...(bodyText !== null ? { body: bodyText } : {}),
+      ...(call.signal ? { signal: call.signal } : {}),
+    }),
   );
 }

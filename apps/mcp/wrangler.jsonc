@@ -11,7 +11,8 @@
   "name": "ti-mcp",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // enable_request_signal: a client disconnect aborts request.signal, which cancels the ti-api call.
+  "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
   "observability": { "enabled": true },
   "workers_dev": false,
   "preview_urls": false,
@@ -31,7 +32,9 @@
     "TI_ENV": "production",
     "MCP_RESOURCE_URL": "https://mti.motiontic.com/mcp",
     "CLERK_ISSUER": "${TI_CLERK_ISSUER}",
-    "MCP_ALLOWED_ORIGINS": ""
+    "MCP_ALLOWED_ORIGINS": "",
+    // Skip the no-token per-IP limit (Anthropic's published egress). Exempting is not allow-listing.
+    "MCP_ANON_EXEMPT_CIDRS": "160.79.104.0/21,153.61.208.0/20"
   },
   // Secrets: MCP_HMAC_SECRET, MCP_HMAC_SECRET_NEXT (the same values as ti-api's, for rotation)
 
@@ -51,7 +54,8 @@
         "TI_ENV": "staging",
         "MCP_RESOURCE_URL": "${TI_APP_URL_STAGING}/mcp",
         "CLERK_ISSUER": "${TI_CLERK_ISSUER_STAGING}",
-        "MCP_ALLOWED_ORIGINS": ""
+        "MCP_ALLOWED_ORIGINS": "",
+        "MCP_ANON_EXEMPT_CIDRS": "160.79.104.0/21,153.61.208.0/20"
       }
     }
   }

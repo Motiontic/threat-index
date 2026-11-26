@@ -15,7 +15,6 @@ const STATUS: Record<string, number> = {
   '/v1/admin/ops': 403,
   '/ops': 404,
   '/mcp': 405,
-  '/mcp/server-card': 404,
   '/no-such-page-smoke': 404,
   '/v1/no-such-route-smoke': 404,
 };
@@ -24,40 +23,67 @@ function fake(
   opts: { drop?: { host: string; path: string; header: string }; hits?: unknown[]; cookieOn?: string } = {},
 ) {
   const seen: string[] = [];
-  const fetchImpl = async (url: string) => {
+  const fetchImpl = async (url: string, init: { method?: string; headers?: Record<string, string> } = {}) => {
     seen.push(url);
     const u = new URL(url);
     const headers: Record<string, string> = { ...GOOD };
     const isApi = u.hostname === 'api.test';
     headers['content-type'] = isApi ? 'application/json' : 'text/html';
+    let status = STATUS[u.pathname] ?? 200;
+    let body: string | null = null;
+    if (u.pathname === '/.well-known/oauth-protected-resource/mcp') {
+      headers['content-type'] = 'application/json';
+      body = JSON.stringify({
+        resource: 'https://web.test/mcp',
+        authorization_servers: ['https://clerk.test'],
+        scopes_supported: ['mti:read', 'mti:watch'],
+        bearer_methods_supported: ['header'],
+      });
+    } else if (u.pathname === '/mcp/server-card') {
+      headers['content-type'] = 'application/mcp-server-card+json';
+      headers['access-control-allow-origin'] = '*';
+      headers.etag = '"abc123"';
+      if (init.headers?.['If-None-Match'] === '"abc123"') {
+        status = 304;
+        body = '';
+      } else body = '{}';
+    } else if (u.pathname === '/mcp' && init.method === 'POST') {
+      status = 401;
+      headers['content-type'] = 'application/json';
+      headers['www-authenticate'] =
+        'Bearer resource_metadata="https://web.test/.well-known/oauth-protected-resource/mcp", scope="mti:read"';
+    }
     if (opts.drop && opts.drop.host === u.hostname && opts.drop.path === u.pathname)
       delete headers[opts.drop.header];
     if (opts.cookieOn === u.pathname) headers['set-cookie'] = '__session=x';
-    const body =
+    body ??=
       u.pathname === '/v1/search' ? JSON.stringify({ hits: opts.hits ?? [{ key: 'CVE-2025-1' }] }) : '{}';
-    return new Response(body, { status: STATUS[u.pathname] ?? 200, headers });
+    return new Response(status === 304 ? null : body, { status, headers });
   };
   return { fetchImpl, seen };
 }
 const cfg = { web: 'https://web.test/', api: 'https://api.test' };
 
 describe('runSmoke', () => {
-  it('passes against a healthy pair, within 40 requests', async () => {
+  it('passes against a healthy pair, within 43 requests', async () => {
     const { fetchImpl, seen } = fake();
     const rows = await runSmoke(fetchImpl, cfg);
     expect(rows.filter((r: { result: string }) => r.result !== 'ok')).toEqual([]);
-    expect(seen.length).toBeLessThanOrEqual(40);
+    expect(seen.length).toBeLessThanOrEqual(43);
     expect(seen.some((u) => u.endsWith('/v1/search?q=apache'))).toBe(true);
     expect(seen.some((u) => u.endsWith('/e/CVE-2025-1'))).toBe(true);
     expect(seen.some((u) => u.endsWith('/v1/entries/CVE-2025-1'))).toBe(true);
   });
 
-  it('checks /mcp (405) and /mcp/server-card (404) on the web host, with the security headers', async () => {
+  it('checks /mcp (405), the metadata, the server card and the no-token 401 on the web host', async () => {
     const { fetchImpl, seen } = fake();
     const rows = await runSmoke(fetchImpl, cfg);
     for (const [check, status] of [
       ['web /mcp', 405],
-      ['web /mcp/server-card', 404],
+      ['web /.well-known/oauth-protected-resource/mcp', 200],
+      ['web /mcp/server-card', 200],
+      ['web /mcp/server-card (If-None-Match)', 304],
+      ['web POST /mcp (no token)', 401],
     ] as const)
       expect(rows.find((r: { check: string }) => r.check === check)).toMatchObject({ status, result: 'ok' });
     expect(seen).toContain('https://web.test/mcp');
@@ -68,12 +94,27 @@ describe('runSmoke', () => {
     expect(noHsts.find((r: { check: string }) => r.check === 'web /mcp').result).toContain('no HSTS');
   });
 
+  it('fails the no-token check when the challenge carries an error', async () => {
+    const base = fake().fetchImpl;
+    const fetchImpl = async (url: string, init: { method?: string; headers?: Record<string, string> }) => {
+      const res = await base(url, init);
+      if (init.method !== 'POST') return res;
+      const headers = new Headers(res.headers);
+      headers.set('www-authenticate', `${headers.get('www-authenticate')}, error="invalid_token"`);
+      return new Response(await res.text(), { status: res.status, headers });
+    };
+    const rows = await runSmoke(fetchImpl, cfg);
+    const bad = rows.filter((r: { result: string }) => r.result.startsWith('fail'));
+    expect(bad.map((r: { check: string }) => r.check)).toEqual(['web POST /mcp (no token)']);
+    expect(bad[0].result).toContain('error=');
+  });
+
   it('fails an /mcp row that sets a cookie', async () => {
-    for (const path of ['/mcp', '/mcp/server-card']) {
+    for (const path of ['/mcp', '/mcp/server-card', '/.well-known/oauth-protected-resource/mcp']) {
       const rows = await runSmoke(fake({ cookieOn: path }).fetchImpl, cfg);
       const bad = rows.filter((r: { result: string }) => r.result.startsWith('fail'));
-      expect(bad).toHaveLength(1);
-      expect(bad[0].result).toContain('sets a cookie');
+      expect(bad.length).toBeGreaterThan(0);
+      for (const r of bad) expect(r.result).toContain('sets a cookie');
     }
   });
 
