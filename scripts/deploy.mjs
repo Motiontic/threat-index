@@ -20,7 +20,10 @@ export const DEPLOY_ORDER = ['loader', 'notify', 'api', 'collector', 'mcp', 'web
 /** Runs git in `cwd` and returns { ok, out }: ok is false on a non-zero exit. */
 function git(args, cwd = ROOT) {
   try {
-    return { ok: true, out: execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() };
+    return {
+      ok: true,
+      out: execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(),
+    };
   } catch (err) {
     return { ok: false, out: String(err.stdout ?? '').trim() };
   }
@@ -35,15 +38,19 @@ export function productionGuard(cwd = ROOT, run = git) {
   const problems = [];
   const status = run(['status', '--porcelain'], cwd);
   if (!status.ok) return ['could not read the git state of this checkout (is it a git repository?)'];
-  if (status.out !== '') problems.push('the working tree is not clean: commit, stash or remove your changes first');
+  if (status.out !== '')
+    problems.push('the working tree is not clean: commit, stash or remove your changes first');
   if (!run(['rev-parse', '--verify', '--quiet', 'origin/main'], cwd).ok) {
-    problems.push('origin/main is not known here: run `git fetch origin main` (CI: check out with fetch-depth 0)');
+    problems.push(
+      'origin/main is not known here: run `git fetch origin main` (CI: check out with fetch-depth 0)',
+    );
   } else if (!run(['merge-base', '--is-ancestor', 'HEAD', 'origin/main'], cwd).ok) {
     problems.push('HEAD is not on origin/main: production deploys only what is merged to main');
   }
   const unpushed = run(['rev-list', 'HEAD', '--not', '--remotes'], cwd);
   if (!unpushed.ok) problems.push('could not check for unpushed commits');
-  else if (unpushed.out !== '') problems.push(`${unpushed.out.split('\n').length} commit(s) on HEAD are not pushed to any remote`);
+  else if (unpushed.out !== '')
+    problems.push(`${unpushed.out.split('\n').length} commit(s) on HEAD are not pushed to any remote`);
   return problems;
 }
 
@@ -99,7 +106,9 @@ async function main() {
     if (problems.length > 0) {
       console.error('Refusing to deploy production:');
       for (const p of problems) console.error(`  - ${p}`);
-      console.error('Nothing was deployed. Production deploys from a v* tag or the deploy workflow, after approval.');
+      console.error(
+        'Nothing was deployed. Production deploys from a v* tag or the deploy workflow, after approval.',
+      );
       process.exit(1);
     }
   }

@@ -1,8 +1,8 @@
 import { logEvent, REQUEST_ID_HEADER, requestIdFrom } from '@ti/core/log';
 import type { MiddlewareHandler } from 'hono';
 import { routePath } from 'hono/route';
-import type { AppEnv } from './env';
 import { currentUserId } from './auth';
+import type { AppEnv } from './env';
 import { mutableHeaders } from './headers';
 
 /**

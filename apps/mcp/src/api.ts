@@ -41,5 +41,7 @@ export async function callApi(env: Env, call: ApiCall): Promise<Response> {
   );
   const headers = new Headers({ accept: 'application/json', 'x-request-id': call.requestId, ...assertion });
   if (bodyText !== null) headers.set('content-type', 'application/json');
-  return env.API.fetch(new Request(url, { method, headers, ...(bodyText !== null ? { body: bodyText } : {}) }));
+  return env.API.fetch(
+    new Request(url, { method, headers, ...(bodyText !== null ? { body: bodyText } : {}) }),
+  );
 }

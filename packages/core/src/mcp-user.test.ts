@@ -13,7 +13,7 @@ const ID: McpIdentity = { sub: 'user_2abcdefghijk', scopes: ['mti:watch', 'mti:r
 const body = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
 const NOW = new Date('2026-11-26T10:00:00Z');
 const TS = Math.floor(NOW.getTime() / 1000);
-const REQ = {
+const REQ: { requestId: string; method: string; pathWithQuery: string; body: ArrayBuffer | null } = {
   requestId: 'req-1',
   method: 'POST',
   pathWithQuery: '/v1/packages/check?a=1',
@@ -84,7 +84,13 @@ describe('MCP assertion', () => {
     expect(await verify(signed)).toBeNull();
   });
   it('rejects a malformed sub even when signed', async () => {
-    for (const sub of ['admin', 'user_short', 'user_has space1234', `user_${'a'.repeat(65)}`, 'USER_2abcdefghijk']) {
+    for (const sub of [
+      'admin',
+      'user_short',
+      'user_has space1234',
+      `user_${'a'.repeat(65)}`,
+      'USER_2abcdefghijk',
+    ]) {
       const h = await headersFor({}, SECRET, { ...ID, sub });
       expect(await verify(h), sub).toBeNull();
     }

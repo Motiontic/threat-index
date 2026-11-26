@@ -63,7 +63,8 @@ interface SignedOpts {
 }
 async function mcp(method: string, path: string, o: SignedOpts = {}, e?: object) {
   const requestId = o.requestId ?? crypto.randomUUID();
-  const enc = (s: string | undefined) => (s === undefined ? null : (new TextEncoder().encode(s).buffer as ArrayBuffer));
+  const enc = (s: string | undefined) =>
+    s === undefined ? null : (new TextEncoder().encode(s).buffer as ArrayBuffer);
   const signed = await signMcpAssertion(
     o.secret ?? SECRET,
     o.id ?? READ,
@@ -120,7 +121,8 @@ describe('route allow-list and scopes', () => {
     ] as const) {
       const res = await mcp(method, path, { id: admin });
       expect(res.status, `${method} ${path}`).toBe(403);
-      if (method !== 'HEAD') expect(await json(res), `${method} ${path}`).toEqual({ error: 'not_allowed_for_mcp' });
+      if (method !== 'HEAD')
+        expect(await json(res), `${method} ${path}`).toEqual({ error: 'not_allowed_for_mcp' });
     }
   });
   it('refuses look-alike paths: trailing slash, encoded segments, case', async () => {
@@ -184,13 +186,17 @@ describe('bad assertions', () => {
     );
     const { [MCP_HEADERS.sig]: _drop, ...noSig } = signed;
     const missing = await fetchApp(
-      new Request('https://ti-api.internal/v1/me/watch', { headers: { 'x-request-id': id, ...noSig, 'x-test-user': SUB } }),
+      new Request('https://ti-api.internal/v1/me/watch', {
+        headers: { 'x-request-id': id, ...noSig, 'x-test-user': SUB },
+      }),
     );
     expect(missing.status).toBe(401);
     const unknown = await mcp('GET', '/v1/me/watch', { extra: { 'x-ti-mcp-admin': '1' } });
     expect(unknown.status).toBe(401);
     const mismatch = await fetchApp(
-      new Request('https://ti-api.internal/v1/me/watch', { headers: { 'x-request-id': crypto.randomUUID(), ...signed } }),
+      new Request('https://ti-api.internal/v1/me/watch', {
+        headers: { 'x-request-id': crypto.randomUUID(), ...signed },
+      }),
     );
     expect(mismatch.status).toBe(401);
     expect(clerkRan).toBe(0);
@@ -200,7 +206,10 @@ describe('bad assertions', () => {
     expect((await mcp('POST', '/v1/packages/check', { body: big })).status).toBe(401);
   });
   it('an MCP header with a cookie or an Authorization header gets 400', async () => {
-    for (const extra of [{ cookie: '__session=abc' }, { authorization: 'Bearer abc' }]) {
+    for (const extra of [{ cookie: '__session=abc' }, { authorization: 'Bearer abc' }] as Record<
+      string,
+      string
+    >[]) {
       const res = await mcp('GET', '/v1/me/watch', { extra });
       expect(res.status).toBe(400);
       expect(await json(res)).toEqual({ error: 'ambiguous_auth' });
@@ -268,7 +277,9 @@ describe('session behaviour is unchanged', () => {
     await fetchApp(new Request('https://ti-api.internal/v1/me/watch', { headers: { 'x-test-user': SUB } }));
     expect(limitKeys).toEqual([`u:${SUB}`]);
     limitKeys = [];
-    await fetchApp(new Request('https://ti-api.internal/v1/sources', { headers: { 'cf-connecting-ip': '203.0.113.9' } }));
+    await fetchApp(
+      new Request('https://ti-api.internal/v1/sources', { headers: { 'cf-connecting-ip': '203.0.113.9' } }),
+    );
     expect(limitKeys).toEqual(['ip:203.0.113.9']);
   });
   it('an OAuth access token sent straight to the API never counts as signed in', async () => {
@@ -300,22 +311,35 @@ describe('deleteUserData', () => {
   it('removes the new rows and leaves a 30-day block', async () => {
     const db = E.DB_USERS;
     await db.batch([
-      db.prepare(`INSERT INTO users (id, email, created_at) VALUES ('user_del', 'a@example.test', '2026-01-01')`),
-      db.prepare(`INSERT INTO watch (user_id, entry_key, created_at) VALUES ('user_del', 'CVE-1', '2026-01-01')`),
+      db.prepare(
+        `INSERT INTO users (id, email, created_at) VALUES ('user_del', 'a@example.test', '2026-01-01')`,
+      ),
+      db.prepare(
+        `INSERT INTO watch (user_id, entry_key, created_at) VALUES ('user_del', 'CVE-1', '2026-01-01')`,
+      ),
       db.prepare(
         `INSERT INTO watch_packages (user_id, ecosystem, name, created_at) VALUES ('user_del', 'npm', 'a', '2026-01-01')`,
       ),
-      db.prepare(`INSERT INTO package_usage (user_id, day, packages, calls) VALUES ('user_del', '2026-11-25', 5, 1)`),
+      db.prepare(
+        `INSERT INTO package_usage (user_id, day, packages, calls) VALUES ('user_del', '2026-11-25', 5, 1)`,
+      ),
       db.prepare(
         `INSERT INTO watch_packages (user_id, ecosystem, name, created_at) VALUES ('user_keep', 'npm', 'a', '2026-01-01')`,
       ),
     ]);
     await deleteUserData(db, 'user_del', NOW);
-    for (const t of ['users WHERE id', 'watch WHERE user_id', 'watch_packages WHERE user_id', 'package_usage WHERE user_id']) {
+    for (const t of [
+      'users WHERE id',
+      'watch WHERE user_id',
+      'watch_packages WHERE user_id',
+      'package_usage WHERE user_id',
+    ]) {
       const row = await db.prepare(`SELECT count(*) AS n FROM ${t} = 'user_del'`).first<{ n: number }>();
       expect(row?.n, t).toBe(0);
     }
-    const kept = await db.prepare(`SELECT count(*) AS n FROM watch_packages WHERE user_id = 'user_keep'`).first<{ n: number }>();
+    const kept = await db
+      .prepare(`SELECT count(*) AS n FROM watch_packages WHERE user_id = 'user_keep'`)
+      .first<{ n: number }>();
     expect(kept?.n).toBe(1);
     const block = await db.prepare(`SELECT * FROM mcp_blocks WHERE id = 'user_del'`).first<any>();
     expect(block).toEqual({
@@ -329,14 +353,20 @@ describe('deleteUserData', () => {
   it('blocks a deleted user on MCP, and never shortens an existing block', async () => {
     const db = E.DB_USERS;
     await db
-      .prepare(`INSERT INTO mcp_blocks (kind, id, reason, created_at, expires_at) VALUES ('user', 'user_perm', 'abuse', '2026-01-01', NULL)`)
+      .prepare(
+        `INSERT INTO mcp_blocks (kind, id, reason, created_at, expires_at) VALUES ('user', 'user_perm', 'abuse', '2026-01-01', NULL)`,
+      )
       .run();
     await deleteUserData(db, 'user_perm', NOW);
-    const row = await db.prepare(`SELECT reason, expires_at FROM mcp_blocks WHERE id = 'user_perm'`).first<any>();
+    const row = await db
+      .prepare(`SELECT reason, expires_at FROM mcp_blocks WHERE id = 'user_perm'`)
+      .first<any>();
     expect(row).toEqual({ reason: 'abuse', expires_at: null });
     await deleteUserData(db, 'user_twice00000', NOW);
     await deleteUserData(db, 'user_twice00000', new Date('2026-11-20T00:00:00.000Z'));
-    const twice = await db.prepare(`SELECT expires_at FROM mcp_blocks WHERE id = 'user_twice00000'`).first<any>();
+    const twice = await db
+      .prepare(`SELECT expires_at FROM mcp_blocks WHERE id = 'user_twice00000'`)
+      .first<any>();
     expect(twice.expires_at).toBe('2026-12-26T10:00:00.000Z');
   });
   it('a deleted user is refused on MCP at once; another user is not', async () => {

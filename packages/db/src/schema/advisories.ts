@@ -36,10 +36,7 @@ export const packageAdvisories = sqliteTable(
     published: text('published'),
     modified: text('modified').notNull(),
   },
-  (t) => [
-    primaryKey({ columns: [t.source, t.sourceId] }),
-    index('package_advisories_by_vuln').on(t.vulnKey),
-  ],
+  (t) => [primaryKey({ columns: [t.source, t.sourceId] }), index('package_advisories_by_vuln').on(t.vulnKey)],
 );
 
 /** migrations/advisories/0002_package_data.sql: one row per affected range (or exact-version list). */

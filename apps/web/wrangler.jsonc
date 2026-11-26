@@ -30,10 +30,7 @@
   // Never add an AUTH_MODE var here: fake sign-in is for local fixtures runs only (deploy refuses it).
   // Loaders call ti-api through this binding (app/data/api.server.ts).
   // MCP is ti-mcp, reached only through this Worker (/mcp and the OAuth metadata path, workers/app.ts).
-  "services": [
-    { "binding": "API", "service": "ti-api" },
-    { "binding": "MCP", "service": "ti-mcp" }
-  ],
+  "services": [{ "binding": "API", "service": "ti-api" }, { "binding": "MCP", "service": "ti-mcp" }],
   // Page rate limit (per Cloudflare location, approximate). Not inherited by env.staging.
   "ratelimits": [{ "name": "RL_PAGES", "namespace_id": "7104", "simple": { "limit": 120, "period": 60 } }],
   // More secrets and vars:

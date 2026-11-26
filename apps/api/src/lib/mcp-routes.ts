@@ -12,7 +12,11 @@ export interface McpRoute {
   scope: McpScope;
 }
 
-const read = (method: McpRoute['method'], pattern: string): McpRoute => ({ method, pattern, scope: 'mti:read' });
+const read = (method: McpRoute['method'], pattern: string): McpRoute => ({
+  method,
+  pattern,
+  scope: 'mti:read',
+});
 const watch = (method: McpRoute['method'], pattern: string): McpRoute => ({
   method,
   pattern,

@@ -62,7 +62,12 @@ it("ti-mcp's config fills a placeholder inside a longer string (the staging reso
   const staging = fillConfig(parsed.config, 'staging', vars, quiet).env.staging;
   expect(staging.vars.MCP_RESOURCE_URL).toBe('https://staging.example.test/mcp');
   expect(staging.vars.CLERK_ISSUER).toBe('https://clerk.example.test');
-  const prod = fillConfig(parsed.config, 'production', { TI_SETTINGS_KV_ID: 'kv', TI_CLERK_ISSUER: 'https://c.test' }, quiet);
+  const prod = fillConfig(
+    parsed.config,
+    'production',
+    { TI_SETTINGS_KV_ID: 'kv', TI_CLERK_ISSUER: 'https://c.test' },
+    quiet,
+  );
   expect(prod.vars.MCP_RESOURCE_URL).toBe('https://mti.motiontic.com/mcp');
   expect(prod.workers_dev).toBe(false);
   expect(prod.routes).toBeUndefined();

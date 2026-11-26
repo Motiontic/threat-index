@@ -137,7 +137,11 @@ describe('MCP forwarding', () => {
     await call(
       new Request('https://example.test/mcp?x=1', {
         method: 'POST',
-        headers: { Cookie: '__session=secret', Authorization: 'Bearer t', 'Content-Type': 'application/json' },
+        headers: {
+          Cookie: '__session=secret',
+          Authorization: 'Bearer t',
+          'Content-Type': 'application/json',
+        },
       }),
     );
     const req = forwarded();
@@ -174,7 +178,12 @@ describe('MCP forwarding', () => {
       expect(res.status, String(off)).toBe(404);
       expect(res.headers.get('Content-Type')).toContain('application/json');
       expect(await res.json()).toEqual({ error: 'not_found' });
-      for (const name of ['Strict-Transport-Security', 'X-Content-Type-Options', 'X-Frame-Options', 'Referrer-Policy'])
+      for (const name of [
+        'Strict-Transport-Security',
+        'X-Content-Type-Options',
+        'X-Frame-Options',
+        'Referrer-Policy',
+      ])
         expect(res.headers.get(name), name).toBe(BASE_HEADERS[name]);
       expect(res.headers.get('Cache-Control')).toBe('no-store');
     }
@@ -190,28 +199,45 @@ describe('MCP forwarding', () => {
     expect((await call(new Request('https://example.test/mcp'))).status).toBe(404);
   });
 
-  it.each(['/mcpx', '/mcp-docs', '/mcp.txt', '/MCP', '/x/mcp', '/.well-known/oauth-protected-resourcex', '/.well-known/security.txt'])(
-    'does not forward %s: it is a page',
-    async (path) => {
-      const res = await call(new Request(`https://example.test${path}`));
-      expect(mcpFetch).not.toHaveBeenCalled();
-      expect(handle).toHaveBeenCalledTimes(1);
-      expect(res.status).toBe(200);
-    },
-  );
+  it.each([
+    '/mcpx',
+    '/mcp-docs',
+    '/mcp.txt',
+    '/MCP',
+    '/x/mcp',
+    '/.well-known/oauth-protected-resourcex',
+    '/.well-known/security.txt',
+  ])('does not forward %s: it is a page', async (path) => {
+    const res = await call(new Request(`https://example.test${path}`));
+    expect(mcpFetch).not.toHaveBeenCalled();
+    expect(handle).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+  });
 
   it('the page limiter does not count forwarded calls, and still counts pages', async () => {
     cf.env.RL_PAGES = { limit };
     for (let i = 0; i < 3; i++)
-      await call(new Request('https://example.test/mcp', { method: 'POST', headers: { 'cf-connecting-ip': '203.0.113.7' } }));
+      await call(
+        new Request('https://example.test/mcp', {
+          method: 'POST',
+          headers: { 'cf-connecting-ip': '203.0.113.7' },
+        }),
+      );
     expect(limit).not.toHaveBeenCalled();
-    await call(new Request('https://example.test/sources', { headers: { 'cf-connecting-ip': '203.0.113.7' } }));
+    await call(
+      new Request('https://example.test/sources', { headers: { 'cf-connecting-ip': '203.0.113.7' } }),
+    );
     expect(limit).toHaveBeenCalledTimes(1);
   });
 
   it('forwards even when the page limiter would refuse the visitor', async () => {
     limit.mockResolvedValue({ success: false });
-    const res = await call(new Request('https://example.test/mcp', { method: 'POST', headers: { 'cf-connecting-ip': '203.0.113.7' } }));
+    const res = await call(
+      new Request('https://example.test/mcp', {
+        method: 'POST',
+        headers: { 'cf-connecting-ip': '203.0.113.7' },
+      }),
+    );
     expect(res.status).toBe(503);
     expect(mcpFetch).toHaveBeenCalledTimes(1);
   });

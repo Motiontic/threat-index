@@ -11,12 +11,25 @@ export const MCP_BINDINGS = {
  * (ti-api-staging does not exist in the test runtime, and these tests don't need ti-api). The handler
  * echoes the request it was given, so a test can check what `callApi` built and verify the assertion itself.
  */
-export default workerProject(import.meta.dirname, 'mcp', 'mcp', ['test/**/*.workers.test.ts'], {}, MCP_BINDINGS, {
-  serviceBindings: {
-    API: async (request: Request) => {
-      const headers: Record<string, string> = {};
-      for (const [k, v] of request.headers) headers[k] = v;
-      return Response.json({ method: request.method, url: request.url, headers, body: await request.text() });
+export default workerProject(
+  import.meta.dirname,
+  'mcp',
+  'mcp',
+  ['test/**/*.workers.test.ts'],
+  {},
+  MCP_BINDINGS,
+  {
+    serviceBindings: {
+      API: async (request: Request) => {
+        const headers: Record<string, string> = {};
+        for (const [k, v] of request.headers) headers[k] = v;
+        return Response.json({
+          method: request.method,
+          url: request.url,
+          headers,
+          body: await request.text(),
+        });
+      },
     },
   },
-});
+);

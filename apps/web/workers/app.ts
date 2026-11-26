@@ -32,7 +32,9 @@ async function overLimit(request: Request): Promise<boolean> {
 /** `/mcp`, `/mcp/...` and the OAuth protected-resource metadata paths belong to ti-mcp. `/mcpx` and `/mcp-docs` do not. */
 function isMcpPath(pathname: string): boolean {
   const PRM = '/.well-known/oauth-protected-resource';
-  return pathname === '/mcp' || pathname.startsWith('/mcp/') || pathname === PRM || pathname.startsWith(`${PRM}/`);
+  return (
+    pathname === '/mcp' || pathname.startsWith('/mcp/') || pathname === PRM || pathname.startsWith(`${PRM}/`)
+  );
 }
 
 /**

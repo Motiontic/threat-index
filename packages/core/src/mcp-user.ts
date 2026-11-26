@@ -37,11 +37,7 @@ async function sha256Hex(body: ArrayBuffer | null): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function message(
-  id: McpIdentity,
-  req: McpRequestBinding,
-  ts: number | string,
-): Promise<string> {
+async function message(id: McpIdentity, req: McpRequestBinding, ts: number | string): Promise<string> {
   return `mcp-assertion/v1\naud=ti-api\n${[
     id.sub,
     [...id.scopes].sort().join(' '),

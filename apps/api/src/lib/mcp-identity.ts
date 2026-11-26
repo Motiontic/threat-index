@@ -1,5 +1,5 @@
-import { MCP_HEADERS, verifyMcpAssertion } from '@ti/core/mcp-user';
 import { logEvent } from '@ti/core/log';
+import { MCP_HEADERS, verifyMcpAssertion } from '@ti/core/mcp-user';
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from './env';
 import { findMcpRoute } from './mcp-routes';
@@ -64,16 +64,12 @@ export const mcpIdentity: MiddlewareHandler<AppEnv> = async (c, next) => {
   const url = new URL(c.req.url);
   const body = await readBounded(c.req.raw.clone(), MAX_MCP_BODY_BYTES);
   if (body === null) return c.json({ error: 'bad_mcp_assertion' }, 401);
-  const identity = await verifyMcpAssertion(
-    [c.env.MCP_HMAC_SECRET, c.env.MCP_HMAC_SECRET_NEXT],
-    headers,
-    {
-      requestId: c.get('requestId'),
-      method: c.req.method,
-      pathWithQuery: url.pathname + url.search,
-      body,
-    },
-  );
+  const identity = await verifyMcpAssertion([c.env.MCP_HMAC_SECRET, c.env.MCP_HMAC_SECRET_NEXT], headers, {
+    requestId: c.get('requestId'),
+    method: c.req.method,
+    pathWithQuery: url.pathname + url.search,
+    body,
+  });
   if (!identity) {
     logEvent('warn', 'mcp_assertion_rejected', { requestId: c.get('requestId') });
     return c.json({ error: 'bad_mcp_assertion' }, 401);
@@ -81,7 +77,8 @@ export const mcpIdentity: MiddlewareHandler<AppEnv> = async (c, next) => {
 
   const route = findMcpRoute(c.req.method, url.pathname);
   if (!route) return c.json({ error: 'not_allowed_for_mcp' }, 403);
-  if (!identity.scopes.includes(route.scope)) return c.json({ error: 'insufficient_scope', scope: route.scope }, 403);
+  if (!identity.scopes.includes(route.scope))
+    return c.json({ error: 'insufficient_scope', scope: route.scope }, 403);
 
   const blocked = await c.env.DB_USERS.prepare(
     `SELECT 1 FROM mcp_blocks WHERE ((kind = 'user' AND id = ?1) OR (kind = 'client' AND id = ?2)) AND (expires_at IS NULL OR expires_at > ?3)`,

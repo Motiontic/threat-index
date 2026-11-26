@@ -178,8 +178,8 @@ describe('check request schema', () => {
   it('limits the list to 1..MAX_CHECK_PACKAGES, entries unparsed', () => {
     expect(CheckRequestSchema.safeParse({ packages: [] }).success).toBe(false);
     expect(CheckRequestSchema.safeParse({ packages: [{ purl: 'x' }, 7] }).success).toBe(true);
-    expect(CheckRequestSchema.safeParse({ packages: new Array(MAX_CHECK_PACKAGES + 1).fill(1) }).success).toBe(
-      false,
-    );
+    expect(
+      CheckRequestSchema.safeParse({ packages: new Array(MAX_CHECK_PACKAGES + 1).fill(1) }).success,
+    ).toBe(false);
   });
 });

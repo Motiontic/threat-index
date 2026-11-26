@@ -71,7 +71,7 @@ export function canonicalEcosystem(raw: string): Ecosystem | null {
 
 const MAX_NAME = 300;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
-const BAD_NAME_CHARS = new RegExp('[\\u0000-\\u0020\\u007f-\\u009f\\u2028\\u2029]');
+const BAD_NAME_CHARS = /[\u0000-\u0020\u007f-\u009f\u2028\u2029]/;
 
 /**
  * Per-ecosystem name rules: npm lower-case (scope kept); PyPI PEP 503 ([-_.]+ → "-", lower-case);

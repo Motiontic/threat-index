@@ -40,7 +40,13 @@ export default {
       // /.well-known/oauth-protected-resource/mcp and /mcp/server-card land later; 404 until then.
       res = respond({ error: 'not_found' }, 404, requestId);
     }
-    logEvent('info', 'request', { requestId, method: request.method, route, status: res.status, ms: Date.now() - started });
+    logEvent('info', 'request', {
+      requestId,
+      method: request.method,
+      route,
+      status: res.status,
+      ms: Date.now() - started,
+    });
     return res;
   },
 } satisfies ExportedHandler<Env>;

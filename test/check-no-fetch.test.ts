@@ -26,7 +26,8 @@ describe('check-no-fetch', () => {
 
   it('fails on a planted fetch( in apps/mcp/src/tools', () => {
     const root = repoWith({
-      'apps/mcp/src/api.ts': 'export const ok = (env) => env.API.fetch(new Request("https://ti-api.internal/"));',
+      'apps/mcp/src/api.ts':
+        'export const ok = (env) => env.API.fetch(new Request("https://ti-api.internal/"));',
       'apps/mcp/src/tools/mti_search.ts': 'export async function run(u: string) {\n  return fetch(u);\n}\n',
     });
     expect(findViolations(root)).toEqual([{ file: 'apps/mcp/src/tools/mti_search.ts', line: 2 }]);
@@ -38,11 +39,11 @@ describe('check-no-fetch', () => {
       'apps/mcp/src/b.ts': 'env.API.fetch (req);',
       'apps/mcp/src/c.ts': 'await fetch\n(u);\nawait fetch(u)',
     });
-    expect(findViolations(root).map((v: { file: string }) => v.file).sort()).toEqual([
-      'apps/mcp/src/a.ts',
-      'apps/mcp/src/b.ts',
-      'apps/mcp/src/c.ts',
-    ]);
+    expect(
+      findViolations(root)
+        .map((v: { file: string }) => v.file)
+        .sort(),
+    ).toEqual(['apps/mcp/src/a.ts', 'apps/mcp/src/b.ts', 'apps/mcp/src/c.ts']);
   });
 
   it('allows api.ts in apps/mcp and the listed files in apps/api, but not other api files', () => {
@@ -56,7 +57,8 @@ describe('check-no-fetch', () => {
 
   it('ignores handler definitions and comments', () => {
     const root = repoWith({
-      'apps/mcp/src/index.ts': 'export default {\n  async fetch(request) {},\n};\n// fetch(url) is not allowed\n/* fetch(url) */\n',
+      'apps/mcp/src/index.ts':
+        'export default {\n  async fetch(request) {},\n};\n// fetch(url) is not allowed\n/* fetch(url) */\n',
       'apps/mcp/src/tasks/t.ts': 'class T {\n  override async fetch(r) {}\n}\n',
     });
     expect(findViolations(root)).toEqual([]);

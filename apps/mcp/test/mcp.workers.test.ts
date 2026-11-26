@@ -14,13 +14,18 @@ const E = env as unknown as Env;
 
 async function call(method: string, path: string, headers: Record<string, string> = {}) {
   const ctx = createExecutionContext();
-  const res = await worker.fetch(new Request(`https://mti.test${path}`, { method, headers }) as never, E, ctx);
+  const res = await worker.fetch(
+    new Request(`https://mti.test${path}`, { method, headers }) as never,
+    E,
+    ctx,
+  );
   await waitOnExecutionContext(ctx);
   return res;
 }
 
 function expectCommonHeaders(res: Response) {
-  for (const [name, value] of Object.entries(API_SECURITY_HEADERS)) expect(res.headers.get(name), name).toBe(value);
+  for (const [name, value] of Object.entries(API_SECURITY_HEADERS))
+    expect(res.headers.get(name), name).toBe(value);
   expect(res.headers.get('Cache-Control')).toBe('no-store');
   expect(res.headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/);
   expect(res.headers.get('set-cookie')).toBeNull();
@@ -31,7 +36,11 @@ describe('ti-mcp fetch handler', () => {
     const res = await call('POST', '/mcp');
     expect(res.status).toBe(503);
     expect(res.headers.get('content-type')).toContain('application/json');
-    const body = (await res.json()) as { jsonrpc: string; id: null; error: { code: number; message: string } };
+    const body = (await res.json()) as {
+      jsonrpc: string;
+      id: null;
+      error: { code: number; message: string };
+    };
     expect(body).toEqual({ jsonrpc: '2.0', id: null, error: { code: -31001, message: 'not_ready' } });
     expect(body.error.code < -32768 || body.error.code > -32000).toBe(true);
     expectCommonHeaders(res);
@@ -50,7 +59,7 @@ describe('ti-mcp fetch handler', () => {
       expectCommonHeaders(res);
     },
   );
-  it('gives every request a fresh request id and ignores the caller\'s', async () => {
+  it("gives every request a fresh request id and ignores the caller's", async () => {
     const a = await call('POST', '/mcp', { 'x-request-id': 'attacker-chosen-id' });
     const b = await call('POST', '/mcp');
     expect(a.headers.get('x-request-id')).not.toBe('attacker-chosen-id');
@@ -75,29 +84,21 @@ describe('callApi', () => {
     expect(echo.method).toBe('POST');
     expect(new URL(echo.url).pathname + new URL(echo.url).search).toBe('/v1/packages/check?x=1');
     expect(echo.body).toBe(body);
-    const verified = await verifyMcpAssertion(
-      [E.MCP_HMAC_SECRET],
-      new Headers(echo.headers),
-      {
-        requestId: echo.headers['x-request-id'] as string,
-        method: echo.method,
-        pathWithQuery: '/v1/packages/check?x=1',
-        body: new TextEncoder().encode(echo.body).buffer as ArrayBuffer,
-      },
-    );
+    const verified = await verifyMcpAssertion([E.MCP_HMAC_SECRET], new Headers(echo.headers), {
+      requestId: echo.headers['x-request-id'] as string,
+      method: echo.method,
+      pathWithQuery: '/v1/packages/check?x=1',
+      body: new TextEncoder().encode(echo.body).buffer as ArrayBuffer,
+    });
     expect(verified).toEqual(identity);
     expect(echo.headers['x-request-id']).toBe('req-0001');
     // A different body fails: the hash is bound.
-    const tampered = await verifyMcpAssertion(
-      [E.MCP_HMAC_SECRET],
-      new Headers(echo.headers),
-      {
-        requestId: 'req-0001',
-        method: 'POST',
-        pathWithQuery: '/v1/packages/check?x=1',
-        body: new TextEncoder().encode('{}').buffer as ArrayBuffer,
-      },
-    );
+    const tampered = await verifyMcpAssertion([E.MCP_HMAC_SECRET], new Headers(echo.headers), {
+      requestId: 'req-0001',
+      method: 'POST',
+      pathWithQuery: '/v1/packages/check?x=1',
+      body: new TextEncoder().encode('{}').buffer as ArrayBuffer,
+    });
     expect(tampered).toBeNull();
   });
 
@@ -126,7 +127,9 @@ describe('callApi', () => {
   });
 
   it('uses the internal origin, and refuses a path that would leave it', async () => {
-    const ok = (await (await callApi(E, { method: 'GET', path: '/v1/sources', identity, requestId: 'r1' })).json()) as Echo;
+    const ok = (await (
+      await callApi(E, { method: 'GET', path: '/v1/sources', identity, requestId: 'r1' })
+    ).json()) as Echo;
     expect(new URL(ok.url).origin).toBe('https://ti-api.internal');
     for (const path of ['//evil.example/x', 'https://evil.example/x', 'v1/me', '/\\evil.example'])
       await expect(callApi(E, { method: 'GET', path, identity, requestId: 'r1' }), path).rejects.toThrow();
@@ -134,7 +137,10 @@ describe('callApi', () => {
 
   it('refuses to call without a signing secret', async () => {
     await expect(
-      callApi({ ...E, MCP_HMAC_SECRET: undefined }, { method: 'GET', path: '/v1/me', identity, requestId: 'r1' }),
+      callApi(
+        { ...E, MCP_HMAC_SECRET: undefined },
+        { method: 'GET', path: '/v1/me', identity, requestId: 'r1' },
+      ),
     ).rejects.toThrow(/not configured/);
   });
 });
