@@ -66,7 +66,7 @@ describe('check-no-fetch', () => {
 
   it('lists the allowed files in the script', () => {
     expect(RULES).toEqual([
-      { dir: 'apps/mcp/src', allowed: ['api.ts'] },
+      { dir: 'apps/mcp/src', allowed: ['api.ts', 'auth/jwks.ts'] },
       { dir: 'apps/api/src', allowed: ['lib/clerk-api.ts'] },
     ]);
   });
