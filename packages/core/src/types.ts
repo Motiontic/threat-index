@@ -17,12 +17,22 @@ export interface VulnRecord {
   source: string;
 }
 
+export type RangeType = 'SEMVER' | 'ECOSYSTEM' | 'EXACT';
+
 export interface Affected {
-  ecosystem: string; // PyPI, npm, Maven, Debian:12, vendor product…
+  ecosystem: string; // as the source wrote it: PyPI, npm, Debian:12, or a vendor name
   name: string;
   introduced?: string;
   fixed?: string;
-  range?: string; // human-readable when versions are not machine-comparable
+  range?: string; // display text, meaning unchanged
+  /**
+   * Set only for registry packages: OSV entries, and CVE List entries with a known collectionURL and a
+   * packageName. Unset means a vendor product. It is shown, but never package-matched.
+   */
+  rangeType?: RangeType;
+  lastAffected?: string;
+  /** EXACT only: every listed version, at most 1,000. */
+  versions?: string[];
 }
 
 export interface AdvisoryRecord {
@@ -34,6 +44,10 @@ export interface AdvisoryRecord {
   modified: string;
   url?: string;
   affected?: Affected[];
+  summary?: string; // plain text, whitespace collapsed, at most 300 characters
+  severity?: string; // the source's label ("HIGH", "MODERATE") or a CVSS base score ("9.8")
+  /** True only when fix versions come from the ecosystem's own database or a reviewed advisory. */
+  reviewed?: boolean;
 }
 
 /** Kept separate on purpose: never merge these into one "exploited" flag. */
