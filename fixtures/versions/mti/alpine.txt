@@ -1,0 +1,25 @@
+# written for this repo (Apache-2.0), from the apk version rules, replacing the apk-tools lines
+# (GPL-marked) of scalibr's alpine-versions.txt
+1.0 < 1.1
+1.9 < 1.10
+1.0 < 1.0.1
+1.0_alpha < 1.0_beta
+1.0_beta < 1.0_pre
+1.0_pre < 1.0_rc
+1.0_rc < 1.0
+1.0 < 1.0_cvs
+1.0_cvs < 1.0_svn
+1.0_svn < 1.0_git
+1.0_git < 1.0_hg
+1.0_hg < 1.0_p
+1.0_alpha1 < 1.0_alpha2
+1.0 < 1.0a
+1.0a < 1.0b
+1.0-r0 < 1.0-r1
+1.0-r1 < 1.0-r10
+1.0-r9 < 1.0.1-r0
+1.0_rc1-r2 < 1.0-r0
+1.0_p1-r0 < 1.0_p2-r0
+1.0 = 1.0-r0
+0.6.19-r1 < 0.6.20-r0
+999999999999999999999999999991 < 999999999999999999999999999999

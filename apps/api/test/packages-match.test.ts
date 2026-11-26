@@ -43,8 +43,8 @@ describe('rowCovers', () => {
     expect(rowCovers('npm', '2.0.0', r)).toBe(false);
   });
   it('any other range is unsupported without a comparer', () => {
-    expect(rowCovers('npm', '1.0.0', row())).toBe('unsupported');
-    expect(rowCovers('npm', '1.0.0', row({ introduced: '2', fixed: null }))).toBe('unsupported');
+    expect(rowCovers('npm', '1.0.0', row(), noComparer)).toBe('unsupported');
+    expect(rowCovers('npm', '1.0.0', row({ introduced: '2', fixed: null }), noComparer)).toBe('unsupported');
   });
   it('uses the comparer when there is one', () => {
     expect(rowCovers('npm', '3', row(), withToy)).toBe(true);

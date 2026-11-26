@@ -1,0 +1,7 @@
+# written for this repo (Apache-2.0). A floating tag such as v4 is compared as its .0 version.
+v4 = 4.0.0
+v4.1 = 4.1.0
+46.0.1 = v46.0.1
+v46.0.0 < 46.0.1
+v3.9.9 < v4
+v4.0.0-beta.1 < v4

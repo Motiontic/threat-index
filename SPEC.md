@@ -1,680 +1,589 @@
-# packages-check-api: check up to 1,000 packages against MTI in one call
+# version-match: correct "is this version affected?" answers for every MTI ecosystem
 
 ## Why
 
-People and agents want to know which of their dependencies have known problems, and how urgent each one is.
-`POST /v1/packages/check` answers that from MTI's own data. The web app, the MCP server's `check_packages`
-tool, CI checks and alert emails will all call it. After mcp-seams the route answers 501.
+The package check asks one question many times: is version X of a package inside an advisory's affected
+range? The `affected` table stores each range as OSV events (`introduced`, `fixed`, `last_affected`). To
+answer, you need the ecosystem's own version order. Plain string order is wrong almost everywhere:
 
-This change builds it. The route takes up to 1,000 packages and refuses bad or risky input without echoing
-it. It charges a daily quota, looks the packages up in the `affected` table and ranks each one. It suggests an
-upgrade only when MTI can stand behind that version.
+- semver: `1.10.0 > 1.9.0`
+- Maven: `1.0-SNAPSHOT < 1.0 < 1.0-sp`
+- PyPI: `1.0rc1 < 1.0 < 1.0.post1`
+- Debian: `1.0~rc1 < 1.0`, and `1:0.9 > 2.0` because of the epoch
 
-A dependency list shows a company's stack and its unpatched bugs. So the route stores nothing but a usage
-count, logs only counts and timing, and never sends a package name anywhere else.
+mcp-seams added the contract (`Comparer`, `comparerFor`, `inRange`) and the OSV range walk, but no
+comparers. So every ranged row answers `'unsupported'` today. This change adds a comparer for each of the
+16 ecosystems in `ECOSYSTEMS`. Each one is tested against published test vectors, is safe on untrusted
+input, and is fast enough for a 1,000-package check.
+
+It also lets "every version" rows match with no comparer at all. Every malicious-package record has that
+shape.
 
 ## Current state (on main after mcp-seams)
 
-| Area | On main |
-| ---- | ------- |
-| `apps/api/src/routes/packages.ts` | `POST /v1/packages/check`: `requireUser`, then `notImplemented` (501). Already mounted in `index.ts` |
-| `@ti/core/packages` | `ECOSYSTEMS`, `canonicalEcosystem`, `normaliseName`, `parsePurl` (drops qualifiers), `rankPriority`, `MAX_CHECK_PACKAGES = 1000`, the zod request schema, and `CheckRequest`, `CheckMatch`, `CheckResult`, `CheckResponse`, `RejectedEntry` (six reasons). Each entry is `{ ecosystem, name, version }` or `{ purl }` |
-| `@ti/core/versions` | `comparerFor` returns null for every ecosystem. `inRange` matches `EXACT` rows by string and returns `'unsupported'` for every other range. Comparers arrive in a separate change |
-| `ti_advisories` | `affected` (key `ecosystem, name, source, source_id, range_no`; `vuln_key`, `range_type`, `introduced`, `fixed`, `last_affected`, `versions`) and `package_advisories` (key `source, source_id`; `status`, `summary`, `severity`, `reviewed`, `url`, `published`, `modified`). Both are empty until the package data load runs |
-| `ti_users` | `package_usage (user_id, day, packages, calls)`, key `user_id, day`. `deleteUserData` removes a user's rows |
-| `ti_vulns.vulns` | Hot set only: published since 2024-01-01, in KEV, with a public exploit, or EPSS ≥ 0.1. Columns used here: `key, kind, title, cvss, cvss_source, epss, kev_added, ransomware, exploit_public` |
-| `ti_signals.signals` | Key `vuln_key, kind, source, ref`. Kinds `exploited_wild`, `public_exploit`, `detection`, `poc`, `ransomware` |
-| Malicious data | Source id `openssf-malicious-packages` (written by the `osv-malicious` parser), ids `MAL-…`, `vulns.kind = 'mal'`. The `osv` source can also carry `MAL-` ids |
-| Licences | `packages/core/src/licence.ts` `displayMode` (`full` / `link` / `hidden`; `wait` is hidden). `lib/preview.ts` `displayFor(SETTINGS, ids)` (unknown ids are hidden) and `lib/credits.ts` `creditsFor`. `routes/entries.ts` drops hidden advisories, ignores signals from hidden sources, and nulls `cvss` when `cvss_source` is hidden |
-| Auth | `requireUser` sets `userId` from `currentUserId(c)`: the MCP identity's `sub`, else the Clerk session. `POST /v1/packages/check` is on the MCP route allow-list with scope `mti:read`. `rateLimit` keys both kinds of caller as `u:<id>` on `RL_USER` |
-| Logs | `logEvent` (`@ti/core/log`) writes one JSON line with primitives only. The `request` line logs the route pattern, status, ms and user id. `guarded()` logs the route and error name only |
-| Web | Entry pages are `/e/:id`. `SITE_ORIGIN` is in `Bindings` |
-| D1 | At most 100 bound parameters per statement |
-| Tests | `account.workers.test.ts` mounts routes on a test app whose middleware sets `clerkAuth` from `x-test-user`, and fails on any unexpected `fetch`. `launch.workers.test.ts` uses `createApp(stubClerk)`, env overrides and console spies |
+| Area | Today |
+| ---- | ----- |
+| `packages/core/src/versions/index.ts` | `Comparer { valid(v): boolean; compare(a, b): number }`. `comparerFor(ecosystem)` returns `null` for every ecosystem. `RangeRow { range_type, introduced, fixed, last_affected, versions }`. `inRange`: `EXACT` rows match by string equality; other rows run the OSV walk with the comparer, or return `'unsupported'` when there is none. Tests: the walk with a toy integer comparer, and "every ecosystem returns `'unsupported'`" |
+| `packages/core/src/packages.ts` | `ECOSYSTEMS`: `npm, PyPI, Go, Maven, crates.io, RubyGems, NuGet, Packagist, Hex, Pub, SwiftURL, GitHub Actions, Debian, Ubuntu, Alpine, Red Hat`, plus `type Ecosystem`. Not touched here |
+| `affected` (advisories `0002`) | One row per range. `range_type` is `SEMVER`, `ECOSYSTEM` or `EXACT`. `introduced` is `NOT NULL DEFAULT '0'`, so `EXACT` rows also carry `'0'`. No `limit` column. Nothing writes rows yet |
+| Version strings in the data | Checked in `fixtures/`. Go: `SEMVER`, no `v` (`0.52.0`), while `go.mod` users send `v0.51.0`. npm malicious package: `SEMVER`, `introduced: '0'` and nothing else. GHSA npm: `ECOSYSTEM`. Debian: `1:1.43.12+dfsg-1~deb13u1`. Ubuntu: `3.0.2-7ubuntu2.14`, `4.15.0-1023.24~14.04.1`. GHSA GitHub Actions (`tj-actions/changed-files`): `ECOSYSTEM`, `fixed: 46.0.1` |
+| `packages/core/package.json` | `exports: { "./*": "./src/*.ts" }`; one dependency (`zod`); no dev dependencies. Not touched here |
+| Unit tests | Root `vitest.config.ts` runs every `*.test.ts` except `*.workers.test.ts`, inside `pnpm build`. Core's tests sit next to the code (`src/*.test.ts`) |
+| Workers tests | `vitest.workers.config.mts` loads every `apps/*/vitest.workers.mts` and `packages/*/vitest.workers.mts`. `packages/core` has none. `packages/patterns/vitest.workers.mts` is a project with no bindings (compatibility date `2026-11-01`, `nodejs_compat`). CI runs `pnpm test` and `pnpm test:workers` |
+| Raw files in tests | `(import.meta as unknown as GlobImportMeta).glob(pattern, { query: '?raw', import: 'default', eager: true })`, as in `packages/linker/src/schema.test.ts`. Works in Node and in workerd |
+| Fixtures | `test/fixtures.ts` inlines every file matching `fixtures/*/*` (one level deep) into any test that imports it. Each fixture folder has a `SOURCE.md`. Biome ignores `fixtures/` |
+| Lint | Biome 2 recommended preset, 110 columns, single quotes. `test/no-barrel-imports.test.ts` forbids `packages/*/src/index.ts` and bare `@ti/<pkg>` imports. A nested `src/versions/index.ts` is fine |
+| NOTICE | This repo's Apache-2.0 notice. Says the repo holds no third-party vulnerability data |
+| Workers clock | Deployed, `performance.now()` only moves after I/O. In local workerd it also moves during CPU work ([docs](https://developers.cloudflare.com/workers/runtime-apis/performance/)) |
 
-If `affected`, `package_usage`, `@ti/core/packages`, `@ti/core/versions` or the 501 stub is missing on main,
-stop and say so.
+This change needs mcp-seams on main. If `src/versions/index.ts` (with the exports above and their tests) or
+`ECOSYSTEMS` is missing, stop and say so.
 
 ## What to build
 
-Touch only:
+You may touch only these paths:
 
-- `apps/api/src/routes/packages.ts`;
-- new `apps/api/src/lib/packages-*.ts`;
-- `packages/core/src/packages.ts`, for the type extensions in section 1;
-- new tests: `apps/api/test/packages-check.workers.test.ts`, `apps/api/test/packages-input.test.ts`,
-  `apps/api/test/packages-match.test.ts`.
+- `packages/core/src/versions/**` (code and tests);
+- `packages/core/vitest.workers.mts` (new: this package's Workers test project);
+- `fixtures/versions/**` (new).
 
-No migrations. No changes to `packages/core/src/versions/**`, `packages/linker/**`, `apps/mcp/**`,
-`apps/api/src/index.ts`, the MCP route allow-list or any config file.
+Leave `packages/core/src/packages.ts`, `packages/core/package.json`, `pnpm-lock.yaml`, NOTICE and
+everything else alone. Add no dependencies: this is pure TypeScript. The signatures of `Comparer`,
+`comparerFor`, `RangeRow` and `inRange` don't change, because other features already code against them.
 
-### 1. Type extensions (`packages/core/src/packages.ts`)
-
-Add fields and types. Remove or rename nothing.
+### 1. Shared rules (`common.ts`)
 
 ```ts
-// Each request entry gains `private?: boolean`: { ecosystem, name, version, private? } | { purl, private? }.
-// The zod request schema gains the same optional field. That is the only non-type change in this file.
-
-export interface RejectedEntry { index: number; reason: 'bad_entry' | 'bad_ecosystem' | 'bad_name' | 'bad_version'
-  | 'bad_purl' | 'bad_characters' | 'looks_like_url' | 'looks_like_secret' | 'duplicate' }  // three new reasons
-
-/** Values used in CheckMatch.signals. */
-export type MatchSignal = 'malicious' | 'exploited_wild' | 'ransomware' | 'public_exploit' | 'poc';
-
-export interface CheckMatch { id: string; title: string | null; summary: string | null;  // summary is new
-  fixedIn: string | null; signals: string[]; cvss: number | null; epss: number | null; url: string; sources: string[] }
-export interface CheckResult { package: PackageRef; priority: Priority; upgradeTo: string | null;
-  upgradeNote: string | null; matches: CheckMatch[]; omitted: number }                      // omitted is new
-/** Records that name this package but whose version ranges MTI can't evaluate yet. */
-export interface UncertainEntry { package: PackageRef; ids: string[]; reason: 'version_rules_pending' }
-/** A package marked private whose name is also a known malicious public package. */
-export interface ConfusionWarning { package: PackageRef; ids: string[]; reason: 'public_malicious_name' }
-export interface CheckResponse { asOf: string; checked: number; matched: number;
-  summary: Record<Priority, number>; results: CheckResult[]; noRecord: PackageRef[];
-  uncertain: UncertainEntry[]; confusion: ConfusionWarning[];                                  // new
-  rejected: RejectedEntry[]; notes: string[]; credits: Credit[] }                              // credits is new
+export const MAX_VERSION_LENGTH = 128;
+/** 1–128 characters, each printable ASCII (0x21–0x7E). Checks typeof and length first, so a huge input costs O(1). */
+export function isSafeVersion(v: unknown): v is string;
+/** Two runs of ASCII digits compared as whole numbers of any size: skip leading zeros, then the longer run
+ *  is larger, then code-unit order. */
+export function compareDigits(a: string, b: string): -1 | 0 | 1;
+/** Order for strings a comparer can't parse: invalid sorts below every valid version; two invalid strings
+ *  compare by code-unit order. */
+export function compareInvalid(a: string, aValid: boolean, b: string, bValid: boolean): -1 | 0 | 1;
 ```
 
-`Credit` is a type import from `./api`. `CheckMatch.signals` holds `MatchSignal` values only.
+Every comparer follows these rules:
 
-### 2. Input (`apps/api/src/lib/packages-input.ts`)
+- **`valid(v)`** is `isSafeVersion(v)` plus the ecosystem's grammar. It never throws, for any input, including
+  non-strings. So it rejects absurd input: empty, over 128 characters, control characters, whitespace and
+  non-ASCII characters (`１.２.３`, `‮`).
+- **`compare(a, b)`** returns exactly `-1`, `0` or `1` and never throws. `compare(a, a)` is `0`.
+  `compare(a, b)` equals `-compare(b, a)`. The order is transitive over valid versions.
+- **Invalid input.** If either side is invalid, use the ecosystem's own rule for invalid strings when its
+  vectors define one (Alpine, PyPI legacy versions; see section 2). Otherwise use `compareInvalid`.
+- **Hand-written scanners over character codes.** Use no regular expressions at all: no literals and no
+  `RegExp` (a test enforces this). Don't use `localeCompare` or `Intl`. Lower-case ASCII by hand where an
+  ecosystem is case-insensitive. Compare digit runs with `compareDigits`, never with `Number`, `parseInt`
+  or `BigInt`. The vectors include 30-digit numbers.
+- **No module-level mutable state and no caches.** Maven's nested lists may recurse. The 128-character
+  guard bounds the depth.
+- **Write the code from the rules below and the published specs.** Don't copy code from dpkg, rpm,
+  apk-tools or php-src: they are under GPL and other licences.
+- **The vendored vectors are the contract.** If a vector disagrees with a rule below, follow the vector,
+  add a one-line comment next to the rule, and list the case in the PR. Widen a character set only when a
+  vector needs it. The printable-ASCII guard never widens.
 
-Pure code, no bindings.
+### 2. One comparer per ecosystem
+
+Each file exports one `Comparer` constant. `semver.ts` also exports the parse and compare helpers that the
+semver-based files reuse:
 
 ```ts
-export interface CheckEntry { index: number; ref: PackageRef; private: boolean }
-export function readCheckBody(input: unknown):
-  | { ok: true; entries: CheckEntry[]; rejected: RejectedEntry[] }
-  | { ok: false; error: 'invalid_body' | 'too_many_packages' };
+export interface SemverParts { core: string[]; pre: string[] | null; build: string[] | null }
+export function parseSemver(v: string): SemverParts | null;
+export function compareSemverParts(a: SemverParts, b: SemverParts, orderBuild: boolean): -1 | 0 | 1;
+export const semver: Comparer;
 ```
 
-**The envelope** is the zod schema from `@ti/core/packages`: exactly `{ packages }`, an array of 1 to
-`MAX_CHECK_PACKAGES` items. Over 1,000 items gives `too_many_packages`. Anything else wrong with the envelope
-gives `invalid_body`. Items are checked one by one, so one bad entry never fails the whole request.
+| File | Export | Ecosystems | Rules |
+| ---- | ------ | ---------- | ----- |
+| `semver.ts` | `semver` | (shared) | SemVer 2.0 precedence, parsed as leniently as the vectors need |
+| `npm.ts` | `npm` | npm | `semver` |
+| `crates.ts` | `crates` | crates.io | `semver` |
+| `hex.ts` | `hex` | Hex | `semver` |
+| `swift.ts` | `swift` | SwiftURL | `semver` |
+| `go.ts` | `go` | Go | `semver`, Go module forms |
+| `github-actions.ts` | `githubActions` | GitHub Actions | `semver`, tag forms, no SHAs |
+| `pub.ts` | `pub` | Pub | `semver`, but build metadata is ordered |
+| `nuget.ts` | `nuget` | NuGet | NuGet versions |
+| `pypi.ts` | `pypi` | PyPI | PEP 440 |
+| `maven.ts` | `maven` | Maven | Maven `ComparableVersion` |
+| `rubygems.ts` | `rubygems` | RubyGems | `Gem::Version` |
+| `packagist.ts` | `packagist` | Packagist | Composer normalisation, then PHP `version_compare` order |
+| `dpkg.ts` | `dpkg` | Debian, Ubuntu | dpkg |
+| `alpine.ts` | `alpine` | Alpine | apk |
+| `rpm.ts` | `rpm` | Red Hat | rpmvercmp |
 
-**Each entry** goes through these steps in order. The first failure wins. Only `{ index, reason }` is kept; the
-value itself is dropped at once.
+The four one-line files (`npm`, `crates`, `hex`, `swift`) each carry a doc comment that names the upstream
+rule (node-semver, Cargo, Elixir `Version`, SwiftPM). Then each wiring entry has its own file, and a later
+ecosystem-specific rule has an obvious home.
 
-1. **Shape.** A strict object: `{ ecosystem, name, version, private? }` or `{ purl, private? }`. Strings stay
-   under raw caps (ecosystem 40, name 512, version 256, purl 1,024 characters), and `private` is a boolean. An
-   entry that is not an object, mixes the two forms or has another key gets `bad_entry`.
-2. **Characters**, on every raw string. Reject:
-   - controls and DEL (`\p{Cc}`);
-   - format characters (`\p{Cf}`), which cover zero-width (U+200B–U+200D, U+2060, U+FEFF), bidi
-     (U+200E, U+200F, U+061C, U+202A–U+202E, U+2066–U+2069) and Unicode Tag (U+E0000–U+E007F) characters;
-   - variation selectors (U+FE00–U+FE0F, U+E0100–U+E01EF);
-   - private-use and unassigned code points.
+**`semver`**
+- An optional single leading `v`. `V1.2.3` is invalid.
+- The core is 1 to 3 numeric parts. Missing parts are 0 (`1` = `1.0.0`). Leading zeros are ignored.
+- Numeric parts after the third are treated as build metadata, so `1.2.3.4` orders as `1.2.3`. This follows
+  the vectors' own comment.
+- The prerelease comes after `-`. It is dot-separated identifiers, each non-empty `[0-9A-Za-z-]`.
+  - Digit-only identifiers compare as numbers.
+  - Other identifiers compare by code unit, case-sensitive (`1.2.3-5-Foo < 1.2.3-5-foo`).
+  - A numeric identifier is lower than an alphanumeric one.
+  - When one list is a prefix of the other, the shorter one is lower.
+  - Any prerelease is lower than none.
+- Build metadata comes after `+`, as dot-separated `[0-9A-Za-z-]`. It is ignored unless `orderBuild` is set.
+- Anything else is invalid: `1..2`, `1.2.3-`, `1.2.3+`, `latest`.
 
-   Any of these gives `bad_characters`.
-3. **URLs.** `://` anywhere gives `looks_like_url`. In a purl, only the part before the first `?` or `#` is
-   checked here, because `parsePurl` drops qualifiers and subpath unread.
-4. **Secrets**, on every raw string. For a purl this includes qualifiers, percent-decoded. Each of these gives
-   `looks_like_secret`:
-   - a credential in a URL authority: `/[^\s\/:@]+:[^\s\/@]+@/` (`user:pass@`);
-   - a known token prefix followed by a token-shaped tail (table below). The tail rule keeps real names such
-     as `pypi-simple` and `sk-utils` valid;
-   - a run of 32 or more characters from `[A-Za-z0-9+/=_-]` with Shannon entropy of at least 4.3 bits per
-     character and at least 0.3 changes between upper case, lower case and digit per character. Long package
-     paths are low on the second measure; tokens are high on both;
-   - a run of 32 or more hex digits. One exception: a version that is exactly 40 lower-case hex digits, which
-     is a commit pin (common for GitHub Actions).
+**`go`**
+- `semver` rules, with or without the `v`: Go modules use `v1.2.3`, but OSV Go data uses `1.2.3`.
+- `vMAJOR` and `vMAJOR.MINOR` are shorthands for `.0`.
+- `+incompatible` is build metadata.
+- Pseudo-versions (`v0.0.0-20191109021931-daa7c04131f5`, `v1.2.4-0.2019…`, `v1.2.3-pre.0.2019…`) order as
+  ordinary prereleases. This is how Go orders them, so they need no special case.
+- Toolchain names (`go1.21.3`) are invalid.
 
-   Tune the two thresholds only against the corpora in Tests. Never drop a corpus value to make a rule pass.
-5. **purl.** `parsePurl`; failure gives `bad_purl`. The decoded name and version then go through steps 2–4
-   again, so `%E2%80%8B` or an encoded token is caught.
-6. **Ecosystem.** `canonicalEcosystem`; null gives `bad_ecosystem`.
-7. **Name.** NFKC, then `normaliseName`, then the ecosystem's grammar below as a whole-string match. A null or
-   a miss gives `bad_name`.
-8. **Version.** At most 128 characters, and the ecosystem's grammar below. A miss gives `bad_version`. For Go,
-   drop one leading `v`, because OSV stores Go versions without it. Range syntax (`^1.2`, `~1.2`, `>=1`,
-   `1.x`, `*`) never passes: the route checks installed versions.
-9. **Duplicates.** The key is ecosystem, normalised name and version. The first entry stays and later ones get
-   `duplicate`. If any copy says `private: true`, the kept entry is private.
+**`githubActions`**
+- `semver` rules, with or without the `v`. Workflow tags look like `v4` or `v4.1.0`. GHSA data looks like
+  `46.0.1`.
+- `v4` orders as `4.0.0`. Say in a doc comment that a floating tag is compared as its `.0` version.
+- A 40-character hexadecimal commit SHA is never valid, even when it is all digits.
 
-| Token prefix | Tail that must follow |
-| ------------ | --------------------- |
-| `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` | 30 or more of `[A-Za-z0-9]` |
-| `github_pat_` | 20 or more of `[A-Za-z0-9_]` |
-| `npm_` | 30 or more of `[A-Za-z0-9]` |
-| `sk-` | 20 or more of `[A-Za-z0-9_-]` |
-| `xox` plus one of `a b p o s r`, then `-` | 10 or more of `[A-Za-z0-9-]` |
-| `AKIA` | 16 of `[A-Z0-9]` |
-| `glpat-` | 20 or more of `[A-Za-z0-9_-]` |
-| `pypi-` | 50 or more of `[A-Za-z0-9_-]` |
+**`pub`**
+- `semver` precedence with `orderBuild: true`, following pub_semver:
+  - With an equal core and prerelease, a version with no build is lower than one with a build
+    (`1.0.0-pre < 1.0.0-pre+build < 1.0.0 < 1.0.0+build`).
+  - Build identifiers compare like prerelease identifiers (`1.2.3+900 < 1.2.3+a`).
 
-**Names**, checked after `normaliseName`:
+**`nuget`**
+- 1 to 4 numeric parts. Missing parts are 0 (`1.0` = `1.0.0.0`). Leading zeros are ignored
+  (`1.0.01` = `1.0.1.0`). No leading `v`.
+- The prerelease comes after `-`. It uses SemVer 2.0 identifier rules, but compares case-insensitively
+  (`1.0.0-BETA` = `1.0.0-beta`).
+- Build metadata after `+` is ignored (`1.0.0` = `1.0.0+beta`).
 
-| Ecosystem | Grammar (whole string) | Max |
-| --------- | ---------------------- | --- |
-| npm | `(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*` | 214 |
-| PyPI | `[a-z0-9]([a-z0-9-]*[a-z0-9])?` | 214 |
-| crates.io | `[a-z][a-z0-9-]{0,63}` | 64 |
-| Go | `stdlib`, `toolchain`, or `[a-z0-9.-]+\.[a-z0-9.-]+(/[A-Za-z0-9._~+-]+)*` | 256 |
-| Maven | `[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+` | 256 |
-| RubyGems | `[A-Za-z0-9_.-]+` | 214 |
-| NuGet | `[a-z0-9_.-]+` | 214 |
-| Packagist | `[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]\|-{1,2})?[a-z0-9]+)*` | 214 |
-| Hex | `[a-z][a-z0-9_]*` | 214 |
-| Pub | `[a-z_][a-z0-9_]*` | 214 |
-| SwiftURL | `[a-z0-9.-]+\.[a-z]{2,}(/[A-Za-z0-9._~-]+)+` (no scheme) | 256 |
-| GitHub Actions | `[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[A-Za-z0-9_./-]+)?` | 256 |
-| Debian, Ubuntu | `[a-z0-9][a-z0-9.+-]+` | 214 |
-| Alpine, Red Hat | `[A-Za-z0-9][A-Za-z0-9._+-]*` | 214 |
+**`pypi`: PEP 440**
+- **Normalisation**, all of it from the PEP:
+  - case-insensitive, with an optional leading `v`;
+  - separators `.`, `-` or `_` (or none) before the pre-release, post-release and dev parts;
+  - spellings: `alpha`→`a`, `beta`→`b`, `c`/`pre`/`preview`→`rc`, `rev`/`r`→`post`;
+  - an implicit number is 0 (`1.2a` = `1.2a0`, `1.2.post` = `1.2.post0`);
+  - an implicit post-release: `1.0-1` = `1.0.post1`;
+  - local separators `.`, `-` and `_` are all the same.
+- **Order** is by these keys, in this order:
+  1. epoch (default 0);
+  2. the release, with trailing zeros dropped (`1.0` = `1.0.0`);
+  3. the pre-release (`a < b < rc`, then its number). A dev release with no pre- or post-release sorts
+     below every pre-release (`1.0.dev0 < 1.0a0`). No pre-release sorts above all;
+  4. the post-release (none sorts lowest);
+  5. the dev release (none sorts highest);
+  6. the local part (none sorts lowest). Compare segments pairwise: a numeric segment beats a letter
+     segment; numbers compare as numbers; letters compare by code unit. When one is a prefix of the other,
+     more segments is higher.
+- Invalid: `1.0-`, wildcards (`1.0.*`), and anything the guard rejects. PEP 440 trims whitespace, but MTI
+  rejects it.
+- **Legacy strings.** These are strings that old `packaging.version.LegacyVersion` accepted, such as
+  `0.1-bulbasaur`. `valid()` is false for them. `compare` still orders them: below every PEP 440 version,
+  and among themselves the way `LegacyVersion` did. The PyPI vectors' "legacy versions" block encodes this.
 
-**Versions** (all at most 128 characters):
+**`maven`: `ComparableVersion`**
+- Lower-case ASCII.
+- **Items.** `.` and `-` separate items. A switch between digits and letters also separates them, and acts
+  like `-` (`1a1` → `1-a-1`). Each `-` opens a nested list. An item is a number, a string qualifier or a
+  list.
+- **Aliases.** `a`, `b` and `m` mean alpha, beta and milestone, but only when a digit follows directly.
+  `cr` means `rc`. `ga`, `final` and `release` mean the empty qualifier.
+- **Qualifier order:** `alpha < beta < milestone < rc < snapshot < "" < sp`. Unknown qualifiers sort after
+  `sp`, in code-unit order.
+- **Trailing nulls.** Drop trailing null items (0, `""` and its aliases) from each list before comparing,
+  so `1.0.0` = `1` and `1-ga` = `1`.
+- **Different kinds** at the same position: a qualifier is lower than a list, and a list is lower than a
+  number. A missing item compares as null: 0 for numbers, `""` for qualifiers.
+- `valid()` needs at least one digit and only letters, digits and `. - _ +`. So `r09` is valid and
+  `RELEASE` is not.
 
-| Ecosystem | Grammar (whole string) |
-| --------- | ---------------------- |
-| npm, crates.io, Hex, Pub, SwiftURL | SemVer 2.0.0 (the regular expression published on semver.org) |
-| Go | SemVer 2.0.0 after dropping one leading `v` (pseudo-versions and `+incompatible` pass) |
-| PyPI | PEP 440 `VERSION_PATTERN` (Appendix B), case-insensitive |
-| NuGet | `\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?` |
-| RubyGems | `\d+(\.[0-9A-Za-z]+)*(-[0-9A-Za-z_.-]+)?` (platform suffix allowed) |
-| Debian, Ubuntu | `(\d+:)?\d[A-Za-z0-9.+~-]*` |
-| Red Hat | `(\d+:)?[A-Za-z0-9][A-Za-z0-9._+~^-]*` |
-| Maven, Packagist, GitHub Actions, Alpine | `[A-Za-z0-9][A-Za-z0-9._+~-]*` |
+**`rubygems`: `Gem::Version`**
+- The string starts with a digit. Then come `.`-separated `[0-9A-Za-z]` segments, then an optional
+  `-` prerelease. A `-` means `.pre.` (`1.0.0-beta` = `1.0.0.pre.beta`).
+- Split segments at `.` and at each switch between letters and digits (`1.0.a10` → `1, 0, a, 10`).
+- Any letter segment makes the version a prerelease.
+- Drop trailing zero segments: `1.0` = `1`, `1.0.a` = `1.a`.
+- Compare position by position, padding the shorter version with 0:
+  - two numbers compare as numbers;
+  - two letter segments compare by code unit;
+  - a letter segment is lower than a number.
 
-These grammars only decide what is well formed. Version order belongs to the comparers.
+**`packagist`: Composer**
+- **Normalise** as Composer's `VersionParser::normalize` does:
+  - strip a leading `v` or `V`;
+  - pad the numeric part to four numbers (`1.2` → `1.2.0.0`);
+  - read a stability suffix after an optional `-`, `.` or `_`: `dev`, `alpha`/`a`, `beta`/`b`, `RC`/`rc`,
+    `patch`/`pl`/`p` or `stable`, with an optional number.
+- **Compare** the normalised strings as PHP's `version_compare` does:
+  - split at `.`, `-`, `_` and `+`, and at each switch between digits and other characters;
+  - numbers compare as numbers;
+  - special words follow `other < dev < alpha = a < beta = b < RC = rc < # < pl = p`;
+  - a number facing a word ranks like `#`.
+- Branch versions (`dev-main`) can't be ordered, so they are invalid.
 
-### 3. Daily quota (`apps/api/src/lib/packages-quota.ts`)
+**`dpkg`: Debian Policy 5.6.12**
+- **Format:** `[epoch:]upstream[-revision]`.
+  - The epoch is the digits before the first `:` (default 0).
+  - The revision is everything after the last `-`.
+  - The upstream part starts with a digit and uses `[A-Za-z0-9.+~-:]`. It may contain `-` only when there
+    is a revision, and `:` only when there is an epoch.
+  - The revision uses `[A-Za-z0-9.+~]`.
+- **Order:** compare the epoch as a number, then the upstream part, then the revision.
+  - Each part alternates runs of non-digits and runs of digits.
+  - Non-digit runs compare character by character: `~` sorts below the end of the run, the end of the run
+    sorts below letters, and letters sort below other characters.
+  - Digit runs compare as numbers. An empty run counts as 0.
+- The osv-scalibr invalid case `1.2.3-not-a-debian:version!@#$` is invalid.
 
-```ts
-export const DAILY_PACKAGE_QUOTA = 20_000;
-export type QuotaResult = { ok: true; used: number } | { ok: false; remaining: number; retryAfter: number };
-/** One statement. Throws on any D1 error; the route then answers 503. */
-export function chargeQuota(db: D1Database, userId: string, count: number, now: Date): Promise<QuotaResult>;
-export function refundQuota(db: D1Database, userId: string, count: number, now: Date): Promise<void>;
-/** Whole seconds until the next 00:00 UTC, at least 1. */
-export function secondsToUtcMidnight(now: Date): number;
+**`alpine`: apk**
+- **Format:** numbers joined by `.`, then an optional single letter, then any number of `_suffix[digits]`,
+  then an optional `-r<digits>`.
+- **Order:**
+  - suffixes: `_alpha < _beta < _pre < _rc < (none) < _cvs < _svn < _git < _hg < _p`;
+  - a letter after the numbers sorts above no letter;
+  - the `-r` revision compares last.
+- Invalid strings order as the vectors' "invalid. do string sort" block says (code-unit order).
+- The vectors note cases where apk 2.x and 3.x disagree. Follow the vectors, and list those lines in the
+  PR.
+
+**`rpm`: rpmvercmp**
+- **Format:** `[epoch:]version[-release]`, with epoch 0 by default.
+- **Order:** compare the epoch as a number, then the version, then the release, each with rpmvercmp:
+  - skip separators (anything that is not a letter, a digit, `~` or `^`);
+  - `~` sorts below everything, even the end of the string;
+  - `^` sorts above the end of the string but below anything else;
+  - next, take a run of digits or a run of letters. A digit run beats a letter run. Digit runs compare as
+    numbers; letter runs compare by code unit, case-sensitive;
+  - when one string runs out, the one with segments left is higher.
+- The vectors' `# releases`, `# arch` and `# versions with colons that are not epochs` blocks decide the
+  edge cases: a missing release, an arch suffix, and a colon that isn't an epoch.
+
+### 3. `comparerFor` (`index.ts`)
+
+Build a `Map<Ecosystem, Comparer>` holding all 16 entries (`Debian` and `Ubuntu` both map to `dpkg`).
+`comparerFor` returns `map.get(ecosystem) ?? null`. Use a `Map` rather than an object literal, so a runtime
+string such as `constructor` or `__proto__` from a database row returns `null`, not an `Object.prototype`
+member. An ecosystem added to `ECOSYSTEMS` later with no comparer still gets `null`.
+
+### 4. `inRange` changes (`index.ts`)
+
+Keep the walk that seams built, which takes the comparer as an argument so the toy-comparer tests still
+apply. Make two changes.
+
+1. **Open-ended rows match first.** A `SEMVER` or `ECOSYSTEM` row with `introduced === '0'`, `fixed === null`
+   and `last_affected === null` returns `true` for any version string, before looking up a comparer.
+   - This covers every malicious-package record ("every version"), and distro records with no fix yet.
+   - `EXACT` rows are excluded. They also store `introduced: '0'` (the column default), and must keep
+     matching by their `versions` list.
+2. **No guessing on bad input.** For a ranged row with a comparer, return `'unsupported'` in two cases:
+   - `valid(version)` is false;
+   - a bound the row uses (`introduced` other than `'0'`, `fixed`, `last_affected`) is not valid.
+
+   Without this guard, `compareInvalid` would give a confident wrong answer.
+
+`SEMVER` and `ECOSYSTEM` rows both keep using the ecosystem's comparer, as today. In the fixtures, `SEMVER`
+rows are Go records and open-ended malicious-package records. For Go both orders agree, and the open-ended
+rows never reach a comparer.
+
+### 5. Test vectors (`fixtures/versions/`)
+
+Put the files in subfolders. The shared `test/fixtures.ts` glob (`fixtures/*/*`) then picks up only
+`SOURCE.md`, and never inlines 1.6 MB of vectors into every test that uses fixtures.
+
+All files use osv-scalibr's line format. Blank lines are skipped. Lines starting with `# ` or `// ` are
+comments. Every other line is exactly `a <op> b`, split on single spaces, where `<op>` is `<`, `=` or `>`.
+Each line is checked in both directions.
+
+**`osv-scalibr/`: vendored unchanged.**
+- Source: [google/osv-scalibr](https://github.com/google/osv-scalibr), `semantic/testdata/`.
+- Commit: `ce5ed63433445d0fd593efb273a18b87c57f02bc` (25 Nov 2026).
+- Licence: Apache-2.0, Copyright Google LLC.
+- Fetch each file from
+  `https://raw.githubusercontent.com/google/osv-scalibr/<commit>/semantic/testdata/<file>`.
+- Check each with `git hash-object`. If a blob SHA differs from the table, stop and say so.
+
+| File | Bytes | Blob SHA |
+| ---- | ----- | -------- |
+| `semver-versions.txt` | 2056 | `9ad42ec67393236284aad0ffca7b148a0b1225ef` |
+| `pub-versions.txt` | 2450 | `cb2143ab88a78f4e93cc31a2e077922b04aae96f` |
+| `nuget-versions.txt` | 1060 | `ac940baea3057f634d7c33bcca3412f1ee9d4273` |
+| `pypi-versions.txt` | 1280 | `d7d1dd917855127ab8d3d600422712ca70d8a136` |
+| `pypi-versions-generated.txt` | 217760 | `2af318c3cdab5af0bf7b461a08dd26b243a5bffc` |
+| `maven-versions.txt` | 1848 | `d3d5ff15a41af1563bfa4ca2ca352aa08128e2e4` |
+| `maven-versions-generated.txt` | 303561 | `3b24fc570e990a7e143761b367f364213fd3198b` |
+| `rubygems-versions.txt` | 622 | `78ea3515c1260077f06a1cdf94e57960d2a6ae16` |
+| `rubygems-versions-generated.txt` | 71880 | `f07e2529a2a6c118801da334d89767031b47ab88` |
+| `packagist-versions.txt` | 1984 | `dd3f4cb8ecf8b07659d61761fc1df3b75d921b4f` |
+| `packagist-versions-generated.txt` | 201633 | `8b50879510e492127b1d75cb769ff08301955854` |
+| `debian-versions.txt` | 701 | `1672bcd3cb831192a5a5185a2bda99fa3f9b8548` |
+| `debian-versions-generated.txt` | 451277 | `91b2b43f74f9f310e3f90c96332821fc117249cc` |
+| `alpine-versions.txt` | 13776 | `53258da2547ee0025bc0d93831fbb666171e6f1e` |
+| `alpine-versions-generated.txt` | 301708 | `2172125a79909906344d59fe3185556268f8cc6d` |
+| `redhat-versions.txt` | 2757 | `34d35d44b658e3ca18872a344bd3c9d8055e9a4a` |
+
+Skip `cran-*` and `hackage-*`: MTI has no data for those ecosystems.
+
+**`osv-dev/maven.txt`: ported.**
+- Source: [google/osv.dev](https://github.com/google/osv.dev) `osv/ecosystems/maven_test.py`.
+- Commit: `d60b14dd943e35d7b790c8649da2804bd9e48a01`. Licence: Apache-2.0.
+- Port the in-memory ordering tests: `test_versions_qualifiers`, `test_versions_number`,
+  `test_versions_order`, `test_versions_order_mng_5568`, `test_versions_order_mng_6572` and
+  `test_versions_equal`.
+  - Each ordered list becomes `a < b` lines for its adjacent pairs.
+  - Each equal group becomes `a = b` lines.
+  - Start each block with `# from osv/ecosystems/maven_test.py::<test>`.
+- This is what covers `sp` (`1 < 1-sp < 1-sp2 < 1-sp123 < 1-abc`), which the scalibr Maven files lack.
+- Leave out the tests that need recorded HTTP, and any case that uses osv.dev's `0` sentinel.
+- osv.dev's other ecosystem tests add little to the scalibr files, and they encode osv.dev conventions MTI
+  doesn't follow (`0` sorts first; invalid sorts last). Don't port them.
+- Its `testdata/packagist_test_cases.txt` names the same upstream sources as scalibr's
+  `packagist-versions.txt`. Vendor it only if it has lines that scalibr's lacks.
+
+**`standards/`: from the published specs.**
+
+`semver-org.txt` holds the precedence and build-metadata examples from
+[SemVer 2.0.0](https://semver.org/spec/v2.0.0.html) §10–11 (CC BY 3.0, Tom Preston-Werner):
+
+```
+1.0.0 < 2.0.0
+2.0.0 < 2.1.0
+2.1.0 < 2.1.1
+1.0.0-alpha < 1.0.0-alpha.1
+1.0.0-alpha.1 < 1.0.0-alpha.beta
+1.0.0-alpha.beta < 1.0.0-beta
+1.0.0-beta < 1.0.0-beta.2
+1.0.0-beta.2 < 1.0.0-beta.11
+1.0.0-beta.11 < 1.0.0-rc.1
+1.0.0-rc.1 < 1.0.0
+1.0.0-alpha+001 = 1.0.0-alpha
+1.0.0+20130313144700 = 1.0.0
+1.0.0-beta+exp.sha.5114f85 = 1.0.0-beta
 ```
 
-`count` is the number of accepted entries after folding. Rejected entries are free. `day` is the UTC date
-(`YYYY-MM-DD`) of `now`. The charge is a single upsert that adds and checks at once:
+`pep440.txt` holds examples from [PEP 440](https://peps.python.org/pep-0440/) (public domain):
 
-```sql
-INSERT INTO package_usage (user_id, day, packages, calls)
-SELECT ?1, ?2, ?3, 1 WHERE ?3 <= ?4
-ON CONFLICT (user_id, day) DO UPDATE
-  SET packages = packages + excluded.packages, calls = calls + 1
-  WHERE package_usage.packages + excluded.packages <= ?4
-RETURNING packages
-```
+- The ordering example as 19 `<` lines: `1.dev0`, `1.0.dev456`, `1.0a1`, `1.0a2.dev456`, `1.0a12.dev456`,
+  `1.0a12`, `1.0b1.dev456`, `1.0b2`, `1.0b2.post345.dev456`, `1.0b2.post345`, `1.0rc1.dev456`, `1.0rc1`,
+  `1.0`, `1.0+abc.5`, `1.0+abc.7`, `1.0+5`, `1.0.post456.dev34`, `1.0.post456`, `1.0.15`, `1.1.dev1`.
+- The normalisation examples as `=` lines:
+  - `1.1RC1 = 1.1rc1`, `00 = 0`, `09000 = 9000`;
+  - `1.1.a1 = 1.1a1`, `1.1-a1 = 1.1a1`, `1.1_a1 = 1.1a1`, `1.0a.1 = 1.0a1`;
+  - `1.1alpha1 = 1.1a1`, `1.1beta2 = 1.1b2`, `1.1c3 = 1.1rc3`, `1.0pre1 = 1.0rc1`, `1.0preview1 = 1.0rc1`;
+  - `1.2a = 1.2a0`;
+  - `1.2-post2 = 1.2.post2`, `1.2post2 = 1.2.post2`, `1.2.post-2 = 1.2.post2`;
+  - `1.0-r4 = 1.0.post4`, `1.0rev4 = 1.0.post4`, `1.2.post = 1.2.post0`, `1.0-1 = 1.0.post1`;
+  - `1.2-dev2 = 1.2.dev2`, `1.2dev2 = 1.2.dev2`, `1.2.dev = 1.2.dev0`;
+  - `1.0+ubuntu-1 = 1.0+ubuntu.1`, `v1.0 = 1.0`, `1.0 = 1.0.0`.
+- One epoch line: `1!1.0 > 2.0`.
 
-- **A row comes back:** the call is charged.
-- **No row:** the call would cross the limit, and none of it is charged. A plain read of today's row gives
-  `remaining`; if that read fails, `remaining` is 0. The route answers 429
-  `{ error: 'quota_exceeded', limit: 20000, remaining, retryAfter }`, with `Retry-After` set to
-  `secondsToUtcMidnight(now)`.
-- **D1 throws:** the route answers 503 `{ error: 'quota_unavailable' }` with `Retry-After: 30`. No lookup runs.
-  The quota fails closed.
-- **The lookup fails after a charge:** `refundQuota` runs in `waitUntil`
-  (`UPDATE … SET packages = MAX(0, packages - ?3)`). A failed refund is logged as `packages_refund_failed`,
-  with no values.
+**`mti/`: written for this repo (Apache-2.0)**, where the published files have gaps.
+- Check each line with the real tool when the sandbox has it (`dpkg --compare-versions`, Python
+  `packaging`), and say in the PR which lines were checked.
+- `go.txt`:
+  ```
+  v1.2.3 = 1.2.3
+  v1 = v1.0.0
+  v1.2 = v1.2.0
+  0.51.0 < v0.52.0
+  v0.0.0-20191109021931-daa7c04131f5 < v0.0.0
+  v0.0.0-20191109021931-daa7c04131f5 < v0.0.0-20200101000000-0123456789ab
+  v1.2.3 < v1.2.4-0.20191109021931-daa7c04131f5
+  v1.2.4-0.20191109021931-daa7c04131f5 < v1.2.4
+  v1.2.3-pre < v1.2.3-pre.0.20191109021931-daa7c04131f5
+  v1.2.3-pre.0.20191109021931-daa7c04131f5 < v1.2.3
+  v2.0.0+incompatible = v2.0.0
+  v1.9.9 < v2.0.0+incompatible
+  v2.0.0+incompatible < v2.0.1+incompatible
+  ```
+- `github-actions.txt`: `v4 = 4.0.0`, `v4.1 = 4.1.0`, `46.0.1 = v46.0.1`, `v46.0.0 < 46.0.1`,
+  `v3.9.9 < v4`, `v4.0.0-beta.1 < v4`.
+- `nuget.txt`: `1.0.0.1 > 1.0.0`, `1.0.0.0 = 1.0.0`, `1.0 = 1.0.0`, `1.0.0-ALPHA.10 > 1.0.0-alpha.9`,
+  `1.0.0-rc.1 < 1.0.0`, `1.0.0+build.5 = 1.0.0`.
+- `maven.txt`: `1-alpha-1 < 1-beta-1`, `1-beta-1 < 1-milestone-1`, `1-milestone-1 < 1-rc-1`,
+  `1-rc-1 = 1-cr-1`, `1-rc-1 < 1-SNAPSHOT`, `1-SNAPSHOT < 1`, `1 = 1-ga`, `1 = 1.final`, `1 = 1-release`,
+  `1 < 1-sp`, `1.0.0 = 1`, `2.0-beta9 < 2.0-rc1`, `2.0-rc1 < 2.0`, `2.13.0 < 2.14.1`, `2.14.1 < 2.15.0`.
+- `dpkg.txt`:
+  ```
+  1.0~~ < 1.0~~a
+  1.0~~a < 1.0~
+  1.0~ < 1.0
+  1.0 < 1.0a
+  1:1.0 > 2.0
+  1.0-1 < 1.0-1ubuntu1
+  1.0-1ubuntu1 < 1.0-2
+  3.0.2-7ubuntu2.13 < 3.0.2-7ubuntu2.14
+  4.15.0-1023.24~14.04.1 < 4.15.0-1023.24
+  1:1.43.11+dfsg-2 < 1:1.43.12+dfsg-1~deb13u1
+  1:1.43.12+dfsg-1~deb13u1 < 1:1.43.12+dfsg-1
+  ```
+- `rpm.txt`: `1.0~rc1 < 1.0`, `1.0 < 1.0^post1`, `1.0^post1 < 1.0.1`, `1.0a < 1.0.1`, `1:1.0 > 2.0`,
+  `1.2.3-4.el8 = 0:1.2.3-4.el8`, `0:1.2.3-4.el8 < 0:1.2.3-5.el8`, `1.2.3-4.el8_9 > 1.2.3-4.el8`.
 
-### 4. Lookup (`apps/api/src/lib/packages-lookup.ts`)
-
-```ts
-export const LOOKUP_CHUNK = 100;
-export function loadPackageData(env: ReadEnv, names: Map<Ecosystem, string[]>): Promise<PackageData>;
-```
-
-1. **Affected ranges.** Take the distinct names per ecosystem, in chunks of 100. Each chunk is one statement,
-   and every chunk goes in one `DB_ADVISORIES.batch()`. D1 allows at most 100 bound parameters per
-   statement, so the names are bound as one JSON array:
-
-   ```sql
-   SELECT a.ecosystem, a.name, a.source, a.source_id, a.range_no, a.vuln_key, a.range_type,
-          a.introduced, a.fixed, a.last_affected, a.versions,
-          p.summary, p.severity, p.reviewed, p.url, p.published, p.modified
-   FROM affected a
-   JOIN package_advisories p ON p.source = a.source AND p.source_id = a.source_id
-   WHERE a.ecosystem = ?1 AND a.name IN (SELECT value FROM json_each(?2)) AND p.status = 'active'
-   ```
-
-2. **Hot-set data and signals.** For the distinct `vuln_key`s found, use chunks of 100 and one batch per
-   database. Run these at the same time (`Promise.all`), together with the licence read
-   (`displayFor(env.SETTINGS, sourceIds)`):
-
-   ```sql
-   SELECT key, kind, title, cvss, cvss_source, epss, kev_added, ransomware, exploit_public
-   FROM vulns WHERE key IN (SELECT value FROM json_each(?1))
-
-   SELECT vuln_key, kind, source FROM signals
-   WHERE vuln_key IN (SELECT value FROM json_each(?1))
-     AND kind IN ('exploited_wild','public_exploit','poc','ransomware')
-   ```
-
-   `ransomware` signals are read too, because `rankPriority` takes a ransomware flag.
-
-3. **Outside the hot set.** A `vuln_key` with no `vulns` row is an older record. It still matches; it just has
-   no title, EPSS or KEV data.
-
-4. **Malicious records.** A record is malicious when any of these holds: `source` is
-   `openssf-malicious-packages`, `vuln_key` starts with `MAL-`, or `vulns.kind` is `'mal'`.
-
-That is three D1 round trips, whatever the list size: advisories, then vulns and signals side by side. Every
-statement is an index search; a test checks the query plans.
-
-### 5. Matching, ranking and upgrade advice (`apps/api/src/lib/packages-match.ts`)
-
-Pure code. Version rules come in as a dependency (`{ inRange, comparerFor }`, from `@ti/core/versions` by
-default), so tests can pass a toy comparer.
-
-**Covering a version.** `rowCovers(ecosystem, version, row)`:
-
-- A non-`EXACT` row with `introduced = '0'` and no `fixed` or `last_affected` covers every version, without a
-  comparer. Malicious-package records usually look like this.
-- Every other row goes to `inRange`.
-
-**Matching.** Licence filtering comes first (section 6): records from hidden sources are dropped before
-matching. Then, for each non-private package, each record (`source`, `source_id`) is one of:
-
-- **matched:** at least one of its rows covers the version;
-- **uncertain:** none does, and at least one row returned `'unsupported'`;
-- **clear:** otherwise.
-
-Group the matched records by `vuln_key`; each group is one `CheckMatch`. A `vuln_key` with only uncertain
-records goes into that package's `uncertain` entry, with `reason: 'version_rules_pending'`. A package can be
-in both `results` and `uncertain`. A package with neither goes in `noRecord`. MTI never claims a match it
-could not evaluate.
-
-**Priority.** Each match gets `rankPriority` with:
-
-| Input | From |
-| ----- | ---- |
-| `exploitedWild` | `vulns.kev_added` set, or a visible `exploited_wild` signal |
-| `ransomware` | `vulns.ransomware = 1`, or a visible `ransomware` signal |
-| `malicious` | any matched record is malicious (section 4) |
-| `publicExploit` | `vulns.exploit_public = 1`, or a visible `public_exploit` signal |
-| `poc` | a visible `poc` signal |
-| `epss` | `vulns.epss` |
-| `cvss` | `vulns.cvss` unless `cvss_source` is hidden; else the highest numeric `severity` (0–10) of a full-display record |
-| `severityLabel` | the highest of `CRITICAL`, `HIGH`, `MODERATE`/`MEDIUM`, `LOW` among full-display `severity` values |
-
-The rules are the shared ones in `rankPriority`:
-
-- `fix_now`: exploited in the wild, used by ransomware, or malicious;
-- `fix_soon`: public exploit code or a proof of concept, or EPSS of 0.1 or more;
-- `plan`: CVSS 7.0 or more, or a HIGH or CRITICAL label when there is no score;
-- `note`: everything else.
-
-`signals` lists the true flags in this order: `malicious`, `exploited_wild`, `ransomware`, `public_exploit`,
-`poc`. A package's priority is the highest of its matches.
-
-Sort the matches by priority, then id, and keep the first 50 (`MAX_MATCHES_PER_PACKAGE`). `omitted` is the
-number left out; priority is computed before the cut. Sort `results` by priority, then ecosystem, name and
-version. `summary` counts packages per priority.
-
-**`fixedIn`.** Fix versions come only from reviewed records (`package_advisories.reviewed = 1`) with full
-display. Take the `fixed` of the row that covers the version. Ignore a value that fails the version grammar,
-or that a comparer puts at or below the checked version. Several distinct values give the highest by the
-comparer, or null when there is no comparer. A match with only unreviewed records has `fixedIn: null`.
-
-**`upgradeTo`**, per package:
-
-1. **Every match needs a fix.** If any match has `fixedIn: null`, `upgradeTo` is null. The note says no
-   reviewed fix is listed for that id. If the match is malicious, it gets the malicious note instead.
-2. **Pick the highest.** The candidate is the highest `fixedIn` across matches, by the comparer. With no
-   comparer and more than one distinct value, `upgradeTo` is null, with a note.
-3. **Check the candidate itself.** Run `rowCovers` for the candidate over every active row of that package.
-   This covers every source, hidden sources and malicious records included: hidden records never appear in
-   an answer, but they may stop a suggestion.
-   - Any `true`: null, and the note says the version is listed as affected too.
-   - Any `'unsupported'`: null, and the note says MTI can't check that version yet.
-4. **Otherwise** `upgradeTo` is the candidate. The note names the source (its MTI display name), the record id
-   and the record's `modified` date.
-5. **Same package only.** `upgradeTo` is always a version of the package that was sent. No field names a
-   different package as a replacement. A `fixed` value that looks like a name, a path, a URL or `name@version`
-   fails the version grammar and is ignored.
-
-**Note texts** are fixed. Their only slots are versions, record ids, MTI source names, dates and ecosystem
+**`SOURCE.md`** follows the repo's fixture convention (a `SOURCE.md` in each folder). For each subfolder it
 names:
+- the source URL, commit, licence and copyright holder;
+- whether each file was copied unchanged (with its blob SHA) or ported, and from which test;
+- the upstream origins that scalibr's own comments name: php-src
+  `ext/standard/tests/versioning/version_compare.phpt` and composer/semver `tests/ComparatorTest.php` for the
+  Packagist files, and apk-tools `tests/version.data` for the Alpine file;
+- semver.org (CC BY 3.0, with attribution) and PEP 440 (public domain);
+- that `mti/` was written here.
 
-- suggestion: "`<v>` fixes every match above, according to `<source>` (`<id>`, updated `<date>`). Confirm
-  `<v>` exists in the registry and isn't brand new before installing it, and check it for breaking changes."
-- no fix: "No reviewed fix is listed for `<id>`."
-- malicious: "`<id>` marks this package as malicious. Remove it rather than upgrading, and treat machines that
-  installed it as exposed."
-- candidate affected: "`<v>` is listed as affected too, so no upgrade is suggested."
-- can't check: "MTI can't yet check `<v>` against every listed range for `<ecosystem>`, so no upgrade is
-  suggested."
-- can't order: "MTI can't yet order `<ecosystem>` versions, so it can't pick one version that fixes every
-  match."
+**NOTICE doesn't change.** Apache-2.0 §4(d) only requires carrying over an upstream NOTICE file, and
+neither osv-scalibr nor osv.dev has one at the pinned commits. Credit lives in `SOURCE.md`. The NOTICE line
+"no third-party vulnerability … data" stays true: version lists aren't vulnerability data. Say this in the
+PR.
 
-**Private entries.** An entry marked `private: true` is matched only against visible malicious records, by
-name and for any version.
+### 6. Workers test project (`packages/core/vitest.workers.mts`)
 
-- A hit adds `{ package, ids, reason: 'public_malicious_name' }` to `confusion`. This is a sign of a
-  dependency-confusion attack.
-- A private entry never goes in `results` or `uncertain`. Public advisories for the same name describe a
-  different package. With no hit it goes in `noRecord`.
-
-### 6. Licences and the answer (`apps/api/src/lib/packages-answer.ts`)
-
-The licence rules are the ones `routes/entries.ts` applies, via `displayFor` and `creditsFor`.
-
-- **Hidden** (`wait`, or a `SETTINGS` override): the source's records are dropped before matching. Its signals
-  are ignored. `cvss` is null when `vulns.cvss_source` is hidden. A hidden source id appears nowhere in the
-  answer.
-- **Link-only:** the record can match. It shows only its id, source and URL. Its `summary`, `severity` and
-  fix versions are neither shown nor used.
-- **Full:** every field.
-- **Hot-set fields:** `vulns.title`, `epss`, `kev_added`, `ransomware` and `exploit_public` are used the way
-  `entries.ts` uses them.
-
-Each `CheckMatch` field:
-
-- **`url`:** the MTI entry page `<origin>/e/<id>` when a `vulns` row exists. Otherwise the first visible
-  record URL starting with `https://`, by source id. Otherwise `<origin>/search?q=<id>`. `<origin>` is
-  `SITE_ORIGIN`, else `https://mti.motiontic.com`.
-- **`title`:** `vulns.title`, else null.
-- **`summary`:** from the first full-display record (reviewed ones first, then by source id), else null.
-- **`sources`:** the visible sources of the match's records and of the signals used.
-
-The response's `credits` is `creditsFor` over every source in the answer, so the NVD notice appears when NVD
-data is used. Text is returned as stored; the MCP server cleans it before it reaches an agent.
-
-`asOf` is the request time. `checked` is the number of accepted entries; `matched` is the number of `results`.
-
-`notes` are fixed strings, in this order:
-
-1. Always: "No record means none in MTI as of asOf. It does not mean safe."
-2. Always: "Reachability isn't checked: MTI doesn't know whether your code uses the affected part."
-3. Always: "Fix versions come only from reviewed sources. Confirm a release exists and isn't brand new before
-   installing it."
-4. When `uncertain` isn't empty: "Some records couldn't be matched to a version yet. They are listed under
-   uncertain, not as matches."
-5. When an entry was marked private: "Packages marked private are checked only against public malicious
-   packages with the same name."
-6. Always: "Which sources MTI holds, and how fresh each one is: /sources on the MTI site."
-
-### 7. Route (`apps/api/src/routes/packages.ts`)
+Copy the patterns project, which has no bindings. The root config picks it up through its
+`packages/*/vitest.workers.mts` glob, with no edit there.
 
 ```ts
-export interface PackagesDeps { now?: () => Date; versions?: { inRange: typeof inRange; comparerFor: typeof comparerFor } }
-export function createPackagesRoute(deps?: PackagesDeps): Hono<AppEnv>;
-export default createPackagesRoute();   // index.ts stays as it is
+export default defineProject({
+  root: import.meta.dirname,
+  plugins: [cloudflareTest({ miniflare: { compatibilityDate: '2026-11-01', compatibilityFlags: ['nodejs_compat'] } })],
+  test: { name: 'core', include: ['src/**/*.workers.test.ts'] },
+});
 ```
-
-`POST /v1/packages/check`:
-
-1. **No-store first.** A small middleware sets `Cache-Control: no-store`, so every answer carries it, 401
-   included.
-2. **Sign-in.** `requireUser`. Web users come with a Clerk session. MCP users come with the signed identity,
-   which mcp-seams already accepts for this route with `mti:read`. Nothing else is needed for access.
-3. **Body.**
-   - Over 1 MiB (checked on `content-length`, then on the bytes): 413 `{ error: 'body_too_large' }`.
-   - Not JSON: 400 `{ error: 'invalid_body' }`.
-   - Then `readCheckBody`: 400 `{ error: 'invalid_body' }` or 400 `{ error: 'too_many_packages', max: 1000 }`.
-4. **Nothing accepted:** answer 200 with `rejected` and `notes` only. No quota charge and no D1 reads.
-5. **Quota:** `chargeQuota`, then 429 or 503 as in section 3.
-6. **Answer:** lookup, match, build. Any error here refunds the charge and answers 500
-   `{ error: 'internal' }`, logging only the route and the error name, as `guarded()` does.
-7. **Success:** 200 with the `CheckResponse`.
-
-### 8. Logging and privacy
-
-- **One line per call.** `logEvent('info', 'packages_check', …)` with only these fields:
-  - `requestId` and `outcome` (`ok`, `all_rejected`, `quota_exceeded`, `quota_unavailable`, `failed`);
-  - `checked`, `matched`, `rejected`, `uncertain`, `confusion`, `unknownNames`, and `ecosystems` (a count);
-  - `ms`, `msQuota`, `msLookup`, `msMatch`.
-- **`unknownNames`** counts accepted, non-private names with no `affected` row at all. It lets a later alert
-  spot accounts that probe names MTI doesn't know. The answer itself never says whether MTI knows a name.
-- **Never logged:** names, versions, purls, rejected values, record ids, upgrade targets, and zod or D1 error
-  messages.
-- **Nothing stored.** The only write is the usage counter.
-- **No outbound calls.** No `fetch`, and no registry, OSV or deps.dev calls. The route reads only D1 and the
-  `SETTINGS` KV.
-
-### 9. Speed
-
-The target is p95 under 1.5 s for 500 packages. The design keeps it to three D1 round trips plus one KV read
-that runs alongside them.
-
-Measure it on staging after merge:
-
-1. Wait for staging to run main, and for the package data to be loaded there. Record the `affected` row count
-   (`wrangler d1 execute ti_advisories_staging --remote --command "SELECT COUNT(*) FROM affected"`). If the
-   table is empty, the measurement waits. If the staging deploy hasn't run yet, `pnpm preview` from an
-   up-to-date main checkout serves the same code.
-2. For the body, use 500 npm packages and versions from this repository's own `pnpm-lock.yaml`. That is public
-   data, never a user's list. Build it with a one-off command and don't commit it.
-3. Sign in as a staging test user and send the Clerk session token as `Authorization: Bearer`.
-4. Make 3 warm-up calls, then 30 timed calls, one at a time, with `curl -w '%{time_total}'`. That is 16,500
-   packages, inside one day's quota.
-5. p95 is the 29th of the 30 sorted times. Post the times, the median, the p95, the row count and the
-   server-side `ms` values from `wrangler tail` (the `packages_check` lines) on the merged PR. It passes when
-   p95 is under 1.5 s.
 
 ## Tests
 
-### Workers: `apps/api/test/packages-check.workers.test.ts`
+All files live in `packages/core/src/versions/`. Everything except the benchmark runs in `pnpm build`.
 
-**Setup.**
+- **`test-support.ts`** (shared by the tests, not imported by product code):
+  - `parseVectors(text)` returns `{ line, a, op, b }[]`. It throws on a malformed line, so a broken file
+    fails loudly.
+  - `VECTOR_FILES` maps each path under `fixtures/versions/` to the ecosystems it applies to:
+    - `osv-scalibr/semver-versions.txt`: npm, crates.io, Go, Hex, SwiftURL, GitHub Actions;
+    - `standards/semver-org.txt`: the same six, plus NuGet;
+    - `osv-scalibr/debian-*` and `mti/dpkg.txt`: Debian and Ubuntu;
+    - every other file: the one ecosystem its name says.
+  - `SMALL_VECTORS` is a `?raw` glob of `fixtures/versions/*/*.txt` that excludes `*-generated.txt`
+    (negative pattern). It keeps the Workers bundle small.
+  - `benchPairs()` returns 10,000 `{ ecosystem, a, b, op }` items, built by cycling through
+    `SMALL_VECTORS` for all 16 ecosystems in a fixed order.
+- **`vectors.test.ts`** globs every `fixtures/versions/*/*.txt`.
+  - Every line passes both ways for each mapped ecosystem.
+  - Both versions on every line are `valid()`, except entries on a short exemption list in the test (the
+    Alpine invalid block and the PyPI legacy lines, each with a reason).
+  - Per-file counts are printed.
+  - Every name in `ECOSYSTEMS` appears in `VECTOR_FILES`, and every `.txt` file is in `VECTOR_FILES`
+    (no orphan files).
+- **`valid.test.ts`**
+  - For every comparer, `valid()` is false for: `''`, 129 characters, `'1.0.0\n'`, `'1.0.0\u0000'`,
+    `'\u007f'`, `' 1.0.0'`, `'1.0.0\t'`, `'１.２.３'`, `'1.0.0é'`, `'1.0‮'`, `undefined`, `null`, `1`
+    and `{}`.
+  - A 1,000,000-character string returns false in under 1 ms on average over 1,000 calls.
+  - Per-ecosystem accept and reject lists:
+    - semver: accepts `v1.2.3-rc.1+b.5`; rejects `V1.2.3` and `1.2.3-`;
+    - Go: accepts `v0.0.0-20191109021931-daa7c04131f5`, `v2.0.0+incompatible` and `0.52.0`; rejects
+      `go1.21.3` and `master`;
+    - GitHub Actions: rejects `'1'.repeat(40)` and `'a5ac7e51b41094c92402da3b24376905380afc29'`;
+    - PyPI: accepts `1!2.0.post1.dev3+local.7`; rejects `1.0-`, `1.0.*` and `0.1-bulbasaur`;
+    - Maven: accepts `r09`; rejects `RELEASE`;
+    - NuGet: rejects `1.2.3.4.5`;
+    - Packagist: rejects `dev-main`;
+    - Debian: rejects `1.2.3-not-a-debian:version!@#$`.
+- **`index.test.ts`.** Seams' walk tests stay. Replace "every ecosystem returns `'unsupported'`" with:
+  - every `ECOSYSTEMS` entry has a comparer;
+  - `comparerFor` returns `null` for `CRAN`, `constructor` and `__proto__`.
 
-- Most cases use the test app from `account.workers.test.ts`: `createPackagesRoute(deps)` behind a middleware
-  that sets `clerkAuth` from `x-test-user`.
-- The log and MCP cases use `createApp(stubClerk)` from `launch.workers.test.ts`.
-- `beforeEach` clears `affected`, `package_advisories`, `package_usage`, the test `vulns` and `signals` rows,
-  and the `source:*` keys in `SETTINGS`.
-- A `fetch` spy fails the test on any call.
-- Helpers seed records, ranges, vulns and signals.
-- Token-shaped test values are put together at runtime (for example `['ghp', '_', tail].join('')`), so no
-  token-like literal is committed and secret scanners stay quiet.
-
-**Cases.**
-
-- **Access.**
-  - Signed out: 401 with `no-store`.
-  - Clerk session: 200.
-  - A request signed with `signMcpAssertion` (scope `mti:read`, test env with `MCP_HMAC_SECRET` set): 200, and
-    today's `package_usage` row belongs to the assertion's `sub`.
-- **Ranking bands.** Each fixture ranks as listed. Real version rules apply, so fixtures use `EXACT` rows and
-  all-versions rows:
-
-  | Fixture | Priority |
-  | ------- | -------- |
-  | `vulns.kev_added` set | fix_now |
-  | visible `exploited_wild` signal, no KEV | fix_now |
-  | `vulns.ransomware = 1` | fix_now |
-  | all-versions record from `openssf-malicious-packages` | fix_now |
-  | `MAL-` id from the `osv` source | fix_now |
-  | `exploited_wild` signal from a hidden source only, CVSS 5.0 | note |
-  | `public_exploit` signal | fix_soon |
-  | `vulns.exploit_public = 1` | fix_soon |
-  | `poc` signal | fix_soon |
-  | EPSS 0.10 | fix_soon |
-  | EPSS 0.099 with CVSS 7.0 | plan |
-  | no `vulns` row, record `severity` `HIGH` | plan |
-  | CVSS 6.9 | note |
-  | a record and nothing else | note |
-  | one `note` match plus one `fix_now` match | fix_now, with matches in that order |
-
-- **Malicious → fix_now.** An all-versions `MAL-` record gives fix_now with no comparer at all. `signals`
-  includes `malicious`, `upgradeTo` is null and the note is the malicious one.
-- **Rejections.**
-  - One request holds an example of every reason. `rejected` equals the exact `{ index, reason }` list.
-  - The response text contains none of the rejected values.
-  - The valid entries in the same request are still answered.
-- **Secrets.** Every row of the token table, `user:pass@` in a name, a JWT, 40 random base64 characters, 64
-  random hex characters, and a purl with `?repository_url=https://u:p@host`: all are `looks_like_secret`.
-  Every value in the must-accept corpus below is answered, not rejected.
-- **Caps.**
-  - 1,001 entries: 400 `too_many_packages`, and no usage row.
-  - 1,000 entries: 200.
-  - A body over 1 MiB: 413.
-- **Quota edge** (`now` injected):
-  - At 19,000 used, 1,000 more gives 200 and the row reads 20,000.
-  - One more then gives 429 with `remaining: 0`. At 23:59:30Z, `Retry-After` and `retryAfter` are 30.
-  - At 19,500 used, 501 more gives 429 with `remaining: 500`, and the row is unchanged.
-  - Yesterday's row at 20,000 doesn't block today.
-  - Two parallel calls of 400 at 19,500 used: exactly one gets 200.
-  - Rejected entries aren't charged.
-  - A `DB_USERS` whose `prepare` throws gives 503 `quota_unavailable`, and no `DB_ADVISORIES` statement runs.
-  - A `DB_ADVISORIES` that throws gives 500, and the usage row goes back to its earlier value.
-- **Upgrade advice** (toy integer comparer injected):
-  - A reviewed range with `fixed: '5'` and the checked version `3` gives `upgradeTo: '5'`. The note holds the
-    source's display name, the record id, the date and the confirm sentence.
-  - An unreviewed record with `fixed: '9'` is never offered, and its match has `fixedIn: null`.
-  - **The candidate is itself affected:** a malicious `EXACT ["5"]` record gives null and the "affected too"
-    note. A second range with `introduced: '5'` and `fixed: '7'` gives the same.
-  - A candidate check that returns `'unsupported'` gives null and the "can't check" note.
-  - Two matches fixed in `5` and `7`, with `7` clear, give `7`.
-  - No comparer and two distinct fixes give null and the "can't order" note.
-  - A `fixed` of `other-pkg@1.0` is ignored.
-  - In every answer, `upgradeTo` passes the version grammar and `package` equals the normalised input.
-- **Licence hiding.**
-  - `source:github-advisory-db` set to `hidden`: its only record no longer matches, so the package is in
-    `noRecord`, and `github-advisory-db` appears nowhere in the response.
-  - A hidden signal source doesn't raise priority.
-  - A hidden `cvss_source` gives `cvss: null`.
-  - `link` mode shows the id, URL and source only (`summary` and `fixedIn` are null, and severity doesn't
-    count).
-  - `credits` lists only visible sources.
-- **Dependency confusion.**
-  - A private entry whose name has a public malicious record lands in `confusion` with the ids, not in
-    `results`.
-  - The same entry without `private` gives fix_now in `results`.
-  - A private entry whose name has only ordinary advisories goes in `noRecord`, with no match.
-- **Uncertain path** (an `inRange` stub that returns `'unsupported'`):
-  - The package is listed in `uncertain` with its ids and `version_rules_pending`, not in `noRecord`, and
-    note 4 is present.
-  - A package with one matched record and one uncertain record appears in both `results` and `uncertain`.
-- **Headers and notes.**
-  - Every answer has `Cache-Control: no-store`: 200, 400, 401, 413, 429, 500 and 503.
-  - Every 200 has note 1, word for word.
-- **Logs.**
-  - Use the full app with spies on `console.log`, `warn` and `error`.
-  - Make an ok call, a call with rejected secrets, a 429, a 503 and a 500, using canary names, versions, purls
-    and record ids.
-  - No captured line holds any of them, and every line is JSON.
-  - Each call writes exactly one `packages_check` line, with only the fields in section 8.
-- **Scale.**
-  - Seed 3,000 `affected` rows (600 npm names, 5 rows each) with their records, then check 500 of those
-    names. The counts are right.
-  - `DB_ADVISORIES.batch` runs once with 5 statements; `vulns` and `signals` run one batch each.
-- **Query plans.** `EXPLAIN QUERY PLAN` for the three lookup statements shows a `SEARCH` on each table's
-  primary key, and no `SCAN` of `affected`, `vulns` or `signals`.
-- **No outbound calls.** The `fetch` spy is never called anywhere in the file.
-
-### Node: `apps/api/test/packages-input.test.ts` and `packages-match.test.ts`
-
-- **Input.**
-  - Every ecosystem's name and version grammar, with good and bad examples.
-  - Steps 2–4 against both corpora.
-  - NFKC: full-width `ｌｏｄａｓｈ` becomes `lodash`.
-  - Duplicate folding after npm lower-casing, and the private flag carrying over.
-  - The purl re-check after decoding: `%E2%80%8B` gives `bad_characters`.
-- **Matching.**
-  - `rowCovers` on all-versions rows.
-  - The upgrade picker with a toy comparer.
-  - Each note template.
-  - `secondsToUtcMidnight`: 00:00:00Z gives 86,400, and 23:59:59.5Z gives 1.
-
-**Must accept:**
-
-- `actions/checkout` at `a5ac7e51b41094c92402da3b24376905380afc29`
-- `github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5` at `v5.7.0`
-- `golang.org/x/net` at `v0.0.0-20231115185253-1b2c3d4e5f60`
-- `org.springframework.boot:spring-boot-starter-web` at `3.2.0`
-- `Microsoft.Extensions.DependencyInjection.Abstractions` at `8.0.0`
-- PyPI `torch` at `2.1.0+cu121`, and `pypi-simple` at `1.4.0`
-- npm `@typescript-eslint/eslint-plugin` at `6.13.2-alpha.0`, and `sk-utils` at `1.0.0`
-- Debian `glibc` at `2.36-9+deb12u4`, and at `1:2.36-9`
-- Red Hat `openssl` at `1:3.0.7-24.el9`
-- RubyGems `nokogiri` at `1.15.4-x86_64-linux`
-- SwiftURL `github.com/apple/swift-nio` at `2.62.0`
-- `pkg:npm/left-pad@1.3.0?repository_url=https://registry.npmjs.org`
-
-**Must reject:**
-
-- every token-table prefix with a matching tail;
-- `AKIA` plus 16 characters;
-- a 40-character AWS-style secret key containing `/`;
-- a three-part JWT;
-- 40 random base64 characters;
-- 64 random hex characters;
-- `deploy:s3cr3t@registry` as a name;
-- `https://evil.test/x` as a name and `git+https://host/x.git` as a version (both `looks_like_url`).
+  Add rows shaped like real advisories:
+  - PyPI `[0, 1.3.0)`: `1.2.0` true, `1.3.0rc1` true, `1.3.0` false, `1.3.0.post1` false.
+  - Maven `[2.13.0, 2.15.0)`: `2.14.1` true, `2.15.0` false. Maven `[2.0-beta9, 2.3.1)`: `2.0-rc1` true,
+    `2.0-beta8` false.
+  - Go `SEMVER [0, 0.52.0)`: `v0.51.0` true, `v0.0.0-20240101000000-abcdefabcdef` true, `v0.52.0` false.
+  - Debian `[0, 1:1.43.12+dfsg-1~deb13u1)`: `1:1.43.11+dfsg-2` true, the fixed version false,
+    `1:1.43.12+dfsg-1` false.
+  - Ubuntu `[0, 3.0.2-7ubuntu2.14)`: `3.0.2-7ubuntu2.13` true.
+  - npm `[1.0.0, last_affected 1.2.0]`: `1.2.0` true, `1.2.1` false, `0.9.0` false.
+  - An open-ended row matches for every one of the 16 ecosystems, and for `CRAN`, with versions `35.7.4`
+    and `not a version`.
+  - An `EXACT` row with `introduced: '0'` still matches only its listed versions.
+  - A ranged npm row with version `latest`, or with `fixed: 'x.y'`, gives `'unsupported'`.
+- **`fuzz.test.ts`**
+  - Use a seeded PRNG written in the test (for example mulberry32), so a failure reproduces from its seed.
+    Don't add a fuzzing library.
+  - Inputs for each comparer:
+    - 2,000 random strings of length 0 to 200 over printable ASCII;
+    - 2,000 strings over the version alphabet (digits, `.-+~^:!_v`, and the tokens `a b rc alpha beta dev
+      post pre sp snapshot final ga pl p r git cvs svn hg incompatible`);
+    - fixed pathological strings: 128 × `9`, 64 × `1.`, 128 × `-`, 128 × `~`, 64 × `1-`, 64 × `a1`,
+      128 × `0`;
+    - control characters, lone surrogates, emoji, and strings of 129, 10,000 and 1,000,000 characters.
+  - Properties:
+    - nothing throws;
+    - `valid` returns a boolean;
+    - `compare` returns only -1, 0 or 1, gives 0 against itself, and gives the opposite sign when swapped;
+    - transitivity: draw 150 valid versions from the ecosystem's vector files (seeded), sort them with
+      `compare`, then check that every pair `i < j` gives `compare ≤ 0`.
+  - CPU budget, timed with `performance.now()`:
+    - the slowest single `valid` or `compare` call is under 10 ms;
+    - each comparer's fuzz run is under 500 ms;
+    - the whole `src/versions` suite (including the vectors) is under 5 s on a laptop.
+  - If a transitivity failure comes from rules the vectors require, record the triple in the PR, and leave
+    out only that input shape from the transitivity check.
+- **`no-regex.test.ts`.** Parse every non-test `.ts` file in `src/versions/` with the TypeScript compiler
+  API (`typescript` is already a root dev dependency). Fail on any regular-expression literal and on any
+  identifier `RegExp`.
+- **`bench.test.ts`** (Node). Every item from `benchPairs()` gives its expected answer. A wrong comparer then
+  fails `pnpm build`, not only the Workers run.
+- **`bench.workers.test.ts`** (Workers).
+  - Build `benchPairs()` and look up the comparers outside the timed part.
+  - Run once to warm up, then 5 timed runs of all 10,000 `compare` calls. Count wrong answers inside the
+    loop, so the work can't be skipped.
+  - Afterwards, assert zero wrong answers. Assert the median is under the 250 ms ceiling (generous, for CI
+    machines). Assert that at least one run measured above 0 ms, or fail with "clock didn't advance".
+  - Print `versions bench: median <ms> ms for 10000 comparisons`.
 
 ## Not in scope
 
-- **Version comparers.** They land separately. Until then, ranges are reported under `uncertain`.
-- **Loading** `affected` and `package_advisories`.
-- **MCP formatting.** The `check_packages` MCP tool, cleaning untrusted text and shaping answer size belong
-  to the MCP server.
-- **Bigger inputs.** Lists over 1,000 packages, background jobs, and SBOM input.
-- **Abuse detection.** Alerts on probing patterns, canary records, bot protection, and per-account caps on
-  unknown names. A cap needs a new column, which belongs to a later change.
-- **Guessing which packages are private** from scopes or naming. Only the explicit `private: true` counts.
-- **Reachability analysis**, and a "report a wrong match" link.
-- **Storage.** Inputs and answers are never stored.
-- **A web page** for this route.
-- **Platform changes.** Changes to `RL_USER` limits, the MCP route allow-list, migrations or Wrangler config.
+- OSV `limit` events and `GIT` ranges: there is no column for them, and `GIT` ranges aren't written.
+- Ecosystem release suffixes (`Debian:13`, `Ubuntu:22.04:LTS`, `Alpine:v3.20`). Whoever writes `affected`
+  rows handles them. Comparers only see version strings.
+- `EXACT` rows. They keep plain string equality.
+- Resolving a floating GitHub Actions tag (`v4`) to the release it points at, or comparing a commit-SHA pin.
+- Go toolchain and standard-library strings (`go1.21.3`).
+- Ecosystems outside `ECOSYSTEMS` (CRAN, Hackage, openSUSE, Wolfi and others).
+- Choosing `upgradeTo`, ranking and wording. These belong to the package-check route.
+- Normalising versions for storage or display, and checking ranges when data is written.
 
 ## Acceptance criteria
 
-1. `pnpm build` and `pnpm test:workers` pass with the tests above. `pnpm typecheck` passes repo-wide.
-2. `git diff --name-only main` lists only the paths in "What to build".
-   `git diff main -- packages/core/src/packages.ts` only adds: the types and fields in section 1, the new
-   reason literals, and `private` in the request schema. It removes nothing.
-3. `rg -n "fetch\(" apps/api/src/routes/packages.ts apps/api/src/lib/packages-*.ts` finds nothing. The
-   no-`fetch` lint check passes. In Workers tests, `fetch` is never called. Save the `rg` output.
-4. Every fixture in the ranking table ranks as listed, including malicious → fix_now with no comparer.
-5. Each rejection reason has a test. Every must-reject value is refused with the listed reason, and every
-   must-accept value is answered. A rejected entry is `{ index, reason }` only, and no rejected value appears
-   in any response body or log line.
-6. Inputs with control, zero-width, bidi, Unicode Tag or variation-selector characters are refused as
-   `bad_characters`. Full-width names are NFKC-normalised.
-7. The quota holds at exactly 20,000 per user per UTC day:
-   - one statement adds and checks;
-   - an over-quota call is refused whole, with 429, `remaining` and the seconds to 00:00 UTC;
-   - a D1 error gives 503 and runs no lookup;
-   - a failed lookup refunds the charge.
-8. `upgradeTo` comes only from reviewed records. It is null, with the right note, when:
-   - any match has no reviewed fix;
-   - the candidate is affected or malicious itself;
-   - the candidate can't be checked;
-   - versions can't be ordered.
-
-   It is never another package. Each suggestion's note names the source, the record id and the date, and
-   says to confirm the release exists and isn't brand new.
-9. Licence rules match `entries.ts`:
-   - hidden sources appear nowhere in an answer and don't count toward a match or a priority;
-   - link-only sources show id, source and URL only;
-   - `credits` lists only visible sources.
-10. A private entry whose name has a public malicious record gets a `confusion` warning, and never appears in
-    `results`.
-11. When ranges can't be evaluated, the package is listed under `uncertain`, never as a match and never in
-    `noRecord`.
-12. Every response has `Cache-Control: no-store`. Every 200 includes the note "No record means none in MTI as
-    of asOf. It does not mean safe."
-13. Across the whole Workers test run, no log line holds a package name, version, purl, rejected value or
-    record id. Each call writes one `packages_check` line with counts and timing only.
-14. Web sessions and MCP identities with `mti:read` both get answers. Signed-out calls get 401.
-15. Each lookup statement's query plan is an index search. A 500-package check of one ecosystem uses one
-    advisories batch of 5 statements, plus one batch each for `vulns` and `signals`.
-16. The PR states each platform fact it relies on, with a docs link:
-    - D1's limit of 100 bound parameters per statement;
-    - `json_each` in D1;
-    - D1 `batch()`;
-    - SQLite `INSERT … ON CONFLICT DO UPDATE … WHERE` with `RETURNING`.
-17. After merge, the staging measurement in section 9 is posted on the PR. p95 for 500 packages is under 1.5 s.
-    If staging has no package data yet, the PR says the measurement is still to come.
+1. `pnpm build` passes. `pnpm test:workers` passes, and its output includes the `core` project.
+2. `git diff --name-only main` lists only paths under `packages/core/src/versions/` and `fixtures/versions/`,
+   plus `packages/core/vitest.workers.mts`. `pnpm install --frozen-lockfile` passes, and the lockfile is
+   unchanged.
+3. `comparerFor` returns a comparer for each of the 16 `ECOSYSTEMS` names, and `null` for `CRAN`,
+   `constructor`, `__proto__` and `''`.
+4. Every line of every vector file passes in both directions for every ecosystem mapped to it. The PR lists
+   the line count per file, the exemption count, and every case where a vector overrode a rule in this spec.
+5. The 16 vendored files match the blob SHAs in `SOURCE.md` (`git hash-object` output saved). `SOURCE.md`
+   names each source, commit, licence and credit.
+6. The `inRange` cases in Tests pass. In particular, an open-ended row matches any version for any ecosystem
+   name, an `EXACT` row does not, and a ranged row with an unparseable version or bound gives `'unsupported'`.
+7. The fuzz suite passes: no throws, the order properties hold, the slowest call is under 10 ms, and the
+   whole versions suite is under 5 s. The PR quotes the suite's time.
+8. Every comparer passes the `valid()` rejection list, including the 1,000,000-character case.
+9. `no-regex.test.ts` passes. No file under `src/versions/` imports anything outside `src/versions/` except
+   `../packages` (for the `Ecosystem` type and `ECOSYSTEMS`) and test tooling.
+10. The Workers benchmark's median for 10,000 comparisons is under 50 ms. The PR quotes the printed figure,
+    says where it ran, and links the Workers timer docs. The test itself fails above 250 ms, or if the clock
+    doesn't move.
+11. The PR says NOTICE is unchanged, and why.
 
 ## Decisions added at review
 
-- **OS packages:** OS rows are stored with their release, exactly as OSV writes them (`Debian:12`,
-  `Ubuntu:22.04:LTS`, `Alpine:v3.20`).
-  - Input accepts those keys, and maps the purl `distro` qualifier (`pkg:deb/debian/openssl@…?distro=debian-12`)
-    to them.
-  - A bare `Debian` or `Ubuntu` with no release is rejected with reason `bad_ecosystem` and a note asking for the
-    release.
-  - The lookup uses the full key.
-- **`vuln_key`** in `affected` and `package_advisories` is the CVE the record names when it has one, else the
-  record's own ID. Join it to `vulns` and `signals` on that.
-- **Import path:** if `main` puts the version module at `packages/core/src/versions/index.ts`, import it as
-  `@ti/core/versions/index`, or add a one-line `packages/core/src/versions.ts` re-export. This change may add
-  that file.
-- **Request shape:** the body is `{ packages: [...] }`, as assumed above.
+- **OS ecosystem keys carry a release,** exactly as OSV writes them (`Debian:12`, `Ubuntu:22.04:LTS`,
+  `Alpine:v3.20`). `comparerFor` maps any key that starts `Debian:` or `Ubuntu:` to the dpkg comparer and
+  `Alpine:` to the apk comparer. Test this mapping.
+- **Licences of test data:** don't vendor any test line that the upstream file marks as taken from a GPL
+  project (the php-src or composer lines in the Packagist file and the apk-tools lines in the Alpine file).
+  Write our own cases for those comparers instead, from the published version rules, and say so in
+  `fixtures/versions/SOURCE.md`. Every vendored line must be Apache-2.0, CC BY or public domain.
