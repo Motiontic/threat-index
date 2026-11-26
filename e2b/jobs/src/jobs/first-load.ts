@@ -4,6 +4,7 @@ import { normaliseId } from '@ti/core/ids';
 import type { InboxRow } from '@ti/core/inbox';
 import { jobPrefix, lookupVulnKey } from '@ti/core/r2-keys';
 import type { ParsedRecord } from '@ti/core/types';
+import { ROW_COST } from '@ti/linker/affected';
 import { candidateIds, type HubRecord } from '@ti/linker/hubs';
 import { isAdvisoryRecord, isSignalRecord, isVulnRecord } from '@ti/linker/kinds';
 import { type LinkDeps, link } from '@ti/linker/link';
@@ -32,6 +33,9 @@ import type { Job, JobContext, JobDeps } from '../types.ts';
 
 const BATCH = 5000;
 const ROW_TABLES: readonly string[] = ['vulns', 'advisories', 'signals'];
+const PACKAGE_TABLES: ReadonlySet<string> = new Set(['affected', 'package_advisories']);
+/** An update (`big-file`) that would write more package meter units than this leaves them to the backfill. */
+export const UPDATE_PACKAGE_WRITE_CAP = 200_000;
 
 const isJsonPath = (url: string) => /\.json(\.gz)?$/.test(new URL(url).pathname);
 
@@ -265,6 +269,13 @@ export async function runLoad(
   /** Lake keys this attempt has written, removed again if the load fails before the inbox is written. */
   const written: string[] = [];
   const hasRecords = () => total > 0;
+  // Package rows: first-load mode never writes them (they would load at first-load priority, days late, outside
+  // the backfill's cap), nor does an update from a whole archive or one over the cap.
+  const keepPackages = mode === 'update' && shape !== 'archive';
+  let packageCost = 0;
+  let packageDropped = 0;
+  let packageOver = false;
+  const reason = mode === 'first-load' ? 'first-load' : shape === 'archive' ? 'archive' : 'over cap';
 
   /** Links one batch, keeps its hot rows and writes its records as one lake part, so none are held after. */
   const processBatch = async (batch: ParsedRecord[]): Promise<void> => {
@@ -272,7 +283,27 @@ export async function runLoad(
     await prime(batch);
     const result = await link(batch, deps);
     merge(result.rows);
-    for (const r of result.rows) rows.push(r);
+    for (const r of result.rows) {
+      if (PACKAGE_TABLES.has(r.table)) {
+        if (!keepPackages || packageOver) {
+          packageDropped++;
+          continue;
+        }
+        packageCost += ROW_COST[r.table as keyof typeof ROW_COST];
+        if (packageCost > UPDATE_PACKAGE_WRITE_CAP) {
+          packageOver = true;
+          let at = 0;
+          for (const kept of rows) {
+            if (PACKAGE_TABLES.has(kept.table)) packageDropped++;
+            else rows[at++] = kept;
+          }
+          rows.length = at;
+          packageDropped++;
+          continue;
+        }
+      }
+      rows.push(r);
+    }
     docsLinked += result.docs.length;
     skipped += result.skipped;
     const lakeRows = batch.map((record, i) => ({
@@ -393,6 +424,7 @@ export async function runLoad(
     }
     ctx.log('parsed', { records: total });
 
+    if (packageDropped > 0) ctx.log('package rows left to the backfill', { rows: packageDropped, reason });
     ctx.log('linked', { rows: rows.length, docs: docsLinked, skipped });
     if (!hasRecords()) ctx.log('no records: no lake part');
 

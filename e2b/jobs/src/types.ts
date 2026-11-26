@@ -7,6 +7,7 @@ export const JOB_KINDS = [
   'big-file',
   'nightly-fold',
   'search-index',
+  'affected-backfill',
   'compaction',
   'deep-query',
   'echo', // a dummy job that proves the bridge: uploads one object and an empty manifest
