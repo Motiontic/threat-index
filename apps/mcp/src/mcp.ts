@@ -248,7 +248,7 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
 
   let res: Response;
   try {
-    // `serve` is the SDK handler's own entry, not a network call (scripts/check-no-fetch.mjs bans `fetch(` here).
+    // `serve` is the SDK handler's own entry, not a network call (the no-fetch lint bans the call form here).
     const serve = handler.fetch;
     res = await serve(forward, { authInfo, parsedBody: parsed } as never);
   } catch {
