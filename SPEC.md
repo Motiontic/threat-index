@@ -1,355 +1,680 @@
-# mcp-seams: shared contracts and security plumbing for the MTI MCP server
+# packages-check-api: check up to 1,000 packages against MTI in one call
 
 ## Why
 
-MTI gets a remote MCP server: `https://mti.motiontic.com/mcp`, a new `ti-mcp` Worker on MCP spec 2026-07-28.
-Several features are built next on separate branches at the same time: package data, version matching, the
-package-check route and the MCP server itself, followed by skills, package watches, Tasks, SBOM checks, a report
-view and change notices. Each owns its own files, but they meet at a few shared places: migrations, Wrangler
-configs, the API's entry point and auth, the web Worker's entry point, the deploy script and the MCP tool list.
+People and agents want to know which of their dependencies have known problems, and how urgent each one is.
+`POST /v1/packages/check` answers that from MTI's own data. The web app, the MCP server's `check_packages`
+tool, CI checks and alert emails will all call it. After mcp-seams the route answers 501.
 
-This change puts every meeting point on `main` once, as a migration, a type, a pure helper or a stub. It also
-adds the security plumbing every later feature relies on:
+This change builds it. The route takes up to 1,000 packages and refuses bad or risky input without echoing
+it. It charges a daily quota, looks the packages up in the `affected` table and ranks each one. It suggests an
+upgrade only when MTI can stand behind that version.
 
-- a signed MCP identity from `ti-mcp` to `ti-api`, so the user's token never leaves `ti-mcp`;
-- an allow-list of API routes that accept that identity;
-- per-user API rate limits for MCP traffic, which today arrives over a service binding with no IP and is not limited;
-- a block list that refuses a user or client at once, even with an unexpired token;
-- an `/mcp` forwarder with an off switch;
-- release guards: a minimum package age, a production deploy guard and a no-`fetch` lint check.
+A dependency list shows a company's stack and its unpatched bugs. So the route stores nothing but a usage
+count, logs only counts and timing, and never sends a package name anywhere else.
 
-It adds no MCP behaviour: `POST /mcp` answers "not ready".
+## Current state (on main after mcp-seams)
 
-## Current state (checked on main 00f7b56)
+| Area | On main |
+| ---- | ------- |
+| `apps/api/src/routes/packages.ts` | `POST /v1/packages/check`: `requireUser`, then `notImplemented` (501). Already mounted in `index.ts` |
+| `@ti/core/packages` | `ECOSYSTEMS`, `canonicalEcosystem`, `normaliseName`, `parsePurl` (drops qualifiers), `rankPriority`, `MAX_CHECK_PACKAGES = 1000`, the zod request schema, and `CheckRequest`, `CheckMatch`, `CheckResult`, `CheckResponse`, `RejectedEntry` (six reasons). Each entry is `{ ecosystem, name, version }` or `{ purl }` |
+| `@ti/core/versions` | `comparerFor` returns null for every ecosystem. `inRange` matches `EXACT` rows by string and returns `'unsupported'` for every other range. Comparers arrive in a separate change |
+| `ti_advisories` | `affected` (key `ecosystem, name, source, source_id, range_no`; `vuln_key`, `range_type`, `introduced`, `fixed`, `last_affected`, `versions`) and `package_advisories` (key `source, source_id`; `status`, `summary`, `severity`, `reviewed`, `url`, `published`, `modified`). Both are empty until the package data load runs |
+| `ti_users` | `package_usage (user_id, day, packages, calls)`, key `user_id, day`. `deleteUserData` removes a user's rows |
+| `ti_vulns.vulns` | Hot set only: published since 2024-01-01, in KEV, with a public exploit, or EPSS ≥ 0.1. Columns used here: `key, kind, title, cvss, cvss_source, epss, kev_added, ransomware, exploit_public` |
+| `ti_signals.signals` | Key `vuln_key, kind, source, ref`. Kinds `exploited_wild`, `public_exploit`, `detection`, `poc`, `ransomware` |
+| Malicious data | Source id `openssf-malicious-packages` (written by the `osv-malicious` parser), ids `MAL-…`, `vulns.kind = 'mal'`. The `osv` source can also carry `MAL-` ids |
+| Licences | `packages/core/src/licence.ts` `displayMode` (`full` / `link` / `hidden`; `wait` is hidden). `lib/preview.ts` `displayFor(SETTINGS, ids)` (unknown ids are hidden) and `lib/credits.ts` `creditsFor`. `routes/entries.ts` drops hidden advisories, ignores signals from hidden sources, and nulls `cvss` when `cvss_source` is hidden |
+| Auth | `requireUser` sets `userId` from `currentUserId(c)`: the MCP identity's `sub`, else the Clerk session. `POST /v1/packages/check` is on the MCP route allow-list with scope `mti:read`. `rateLimit` keys both kinds of caller as `u:<id>` on `RL_USER` |
+| Logs | `logEvent` (`@ti/core/log`) writes one JSON line with primitives only. The `request` line logs the route pattern, status, ms and user id. `guarded()` logs the route and error name only |
+| Web | Entry pages are `/e/:id`. `SITE_ORIGIN` is in `Bindings` |
+| D1 | At most 100 bound parameters per statement |
+| Tests | `account.workers.test.ts` mounts routes on a test app whose middleware sets `clerkAuth` from `x-test-user`, and fails on any unexpected `fetch`. `launch.workers.test.ts` uses `createApp(stubClerk)`, env overrides and console spies |
 
-| Area | Today |
-| ---- | ----- |
-| `apps/api/src/lib/auth.ts` | `requireUser` sets `userId` from `getAuth(c)` only. `rate-limit.ts` (`signedInUser`, lines 42-48) and `request-context.ts` (lines 18-23) call `getAuth` themselves |
-| `apps/api/src/lib/rate-limit.ts` | Signed in: `u:${userId}` on `RL_USER`. Otherwise `ip:…` on `RL_PUBLIC`. With no user and no IP (any service-binding call without a signed client IP) the request is **not limited** (lines 57-64) |
-| `apps/api/src/lib/env.ts` | `Variables = { userId; requestId; limited? }`. No MCP fields. `SITE_ORIGIN` is set in wrangler but missing from `Bindings` |
-| `apps/api/src/lib/delete-user.ts` | Deletes `watch`, `saved_searches`, `alert_queue`, `alerts_sent`, `users`. Called by `DELETE /v1/me` and the Clerk `user.deleted` webhook |
-| `apps/api/src/index.ts` | `createApp(clerk)`: request context, security headers, health, then Clerk and `rateLimit` on `/v1/*`, then 17 route modules |
-| `packages/core/src/sign.ts`, `edge.ts` | `hmac`, `constantTimeEqual`, `signRequest`/`verifyRequest` (±300 s), `signClientIp`/`verifiedClientIp` (±60 s) |
-| `packages/db/migrations` | advisories `0001`; signals `0001`, `0002`; users `0001`–`0003`. `changes.kind` has a `CHECK` list of six kinds (signals `0001`, line 11) |
-| `ChangeKind` | Declared in `packages/linker/src/detect.ts:32-38`, listed in `packages/linker/src/tables.ts:112-119` (`CHANGE_KINDS`), and checked against the migration in `packages/linker/src/schema.test.ts:106` |
-| Linker | Writes `advisories` rows only for hot-set records (`link.ts:326`), so `advisories` can't hold data for every package advisory |
-| `apps/web/workers/app.ts` | Redirect, then the per-IP page limit, then React Router. No path forwarding. Env types are hand-written in `apps/web/app/env.d.ts`. Tests: `apps/web/test/worker.test.ts`, `launch.test.ts` |
-| `apps/notify/wrangler.jsonc` | Binds `DB_SIGNALS`, `DB_USERS`, `DB_VULNS`, `DB_WORLD`; no `DB_ADVISORIES` |
-| `scripts/deploy.mjs` | `DEPLOY_ORDER = ['loader','notify','api','collector','web']`. An app missing from that list is never deployed. No check of the git state |
-| Durable Objects | None anywhere |
-| pnpm | `packageManager: pnpm@10.10.0`; no `minimumReleaseAge` |
+If `affected`, `package_usage`, `@ti/core/packages`, `@ti/core/versions` or the 501 stub is missing on main,
+stop and say so.
 
 ## What to build
 
-### 1. Migrations (new files only; never edit an applied one)
+Touch only:
 
-`packages/db/migrations/advisories/0002_package_data.sql`:
+- `apps/api/src/routes/packages.ts`;
+- new `apps/api/src/lib/packages-*.ts`;
+- `packages/core/src/packages.ts`, for the type extensions in section 1;
+- new tests: `apps/api/test/packages-check.workers.test.ts`, `apps/api/test/packages-input.test.ts`,
+  `apps/api/test/packages-match.test.ts`.
 
-```sql
--- One row per source record that names affected packages, for every year (not only the hot set).
-CREATE TABLE package_advisories (
-  source TEXT NOT NULL, source_id TEXT NOT NULL,
-  vuln_key TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','withdrawn','rejected')),
-  summary TEXT,                         -- plain text, at most 300 characters, as the source wrote it
-  severity TEXT,                        -- CVSS base score ("9.8") or the source's label ("HIGH")
-  reviewed INTEGER NOT NULL DEFAULT 0,  -- 1 when fix versions come from the ecosystem's own database or a reviewed advisory
-  url TEXT, published TEXT, modified TEXT NOT NULL,
-  PRIMARY KEY (source, source_id)
-) WITHOUT ROWID;
-CREATE INDEX package_advisories_by_vuln ON package_advisories (vuln_key);
+No migrations. No changes to `packages/core/src/versions/**`, `packages/linker/**`, `apps/mcp/**`,
+`apps/api/src/index.ts`, the MCP route allow-list or any config file.
 
--- One row per affected range (or exact-version list) in such a record.
-CREATE TABLE affected (
-  ecosystem TEXT NOT NULL,              -- canonical OSV name: npm, PyPI, Go, Maven, crates.io, ...
-  name TEXT NOT NULL,                   -- normalised with @ti/core/packages normaliseName
-  source TEXT NOT NULL, source_id TEXT NOT NULL,
-  range_no INTEGER NOT NULL,            -- position of the range within the record, from 0
-  vuln_key TEXT NOT NULL,
-  range_type TEXT NOT NULL CHECK (range_type IN ('SEMVER','ECOSYSTEM','EXACT')),
-  introduced TEXT NOT NULL DEFAULT '0',
-  fixed TEXT, last_affected TEXT,
-  versions TEXT,                        -- JSON array when range_type = 'EXACT'
-  PRIMARY KEY (ecosystem, name, source, source_id, range_no)
-) WITHOUT ROWID;
-CREATE INDEX affected_by_record ON affected (source, source_id);
-CREATE INDEX affected_by_vuln ON affected (vuln_key);
-```
+### 1. Type extensions (`packages/core/src/packages.ts`)
 
-`packages/db/migrations/users/0004_mcp.sql`:
-
-```sql
-CREATE TABLE watch_packages (
-  user_id TEXT NOT NULL, ecosystem TEXT NOT NULL, name TEXT NOT NULL,
-  created_at TEXT NOT NULL, alerts_on INTEGER NOT NULL DEFAULT 1,
-  PRIMARY KEY (user_id, ecosystem, name)
-) WITHOUT ROWID;
-CREATE INDEX watch_packages_by_package ON watch_packages (ecosystem, name);
-
-CREATE TABLE package_usage (
-  user_id TEXT NOT NULL, day TEXT NOT NULL,          -- day = YYYY-MM-DD (UTC)
-  packages INTEGER NOT NULL DEFAULT 0, calls INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (user_id, day)
-) WITHOUT ROWID;
-
--- Users and OAuth clients refused on every MCP request, even with an unexpired token.
-CREATE TABLE mcp_blocks (
-  kind TEXT NOT NULL CHECK (kind IN ('user','client')),
-  id TEXT NOT NULL,                                  -- Clerk user ID, or OAuth client_id
-  reason TEXT NOT NULL CHECK (reason IN ('deleted','abuse','security','request')),
-  created_at TEXT NOT NULL, expires_at TEXT,         -- NULL = until removed
-  PRIMARY KEY (kind, id)
-) WITHOUT ROWID;
-```
-
-`packages/db/migrations/signals/0003_change_kinds.sql` rebuilds `changes` so its `CHECK` list also allows
-`new_advisory` (SQLite can't alter a `CHECK`):
-
-```sql
-CREATE TABLE changes_new (
-  id TEXT PRIMARY KEY, entity_key TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('newly_exploited','public_exploit','epss_band','fix_released','cvss_change','breach_notice','new_advisory')),
-  old TEXT, new TEXT, at TEXT NOT NULL, source TEXT
-) WITHOUT ROWID;
-INSERT INTO changes_new (id, entity_key, kind, old, new, at, source)
-  SELECT id, entity_key, kind, old, new, at, source FROM changes;
-DROP TABLE changes;
-ALTER TABLE changes_new RENAME TO changes;
-CREATE INDEX changes_by_time ON changes (at);
-```
-
-Update the matching code in the same change:
-
-- Drizzle schemas in `packages/db/src/schema/{advisories,users}.ts`, so `schema.workers.test.ts` still passes.
-- `ChangeKind` in `packages/linker/src/detect.ts` and `CHANGE_KINDS` in `tables.ts` gain `new_advisory`, so `schema.test.ts:106` still passes. Nothing emits it yet.
-- `describeChange` and `shortChange` in `apps/notify/src/render.ts` get a `new_advisory` case ("New advisory"). Its matching comes later.
-- `CHANGE_LABELS` in `apps/web/app/routes/home.tsx` gets the same label.
-- `users.alert_triggers` defaults stay as they are.
-
-`ti_users` tables get rule `'none'` in `packages/db/src/table-info.ts`, like the other user tables. The new
-advisories tables get the default upsert rule.
-
-### 2. Package contracts: `packages/core/src/packages.ts`
-
-Pure code, no dependencies beyond zod. It is used by the API, the MCP Worker, the linker and tests.
+Add fields and types. Remove or rename nothing.
 
 ```ts
-export const ECOSYSTEMS = ['npm','PyPI','Go','Maven','crates.io','RubyGems','NuGet','Packagist','Hex','Pub',
-  'SwiftURL','GitHub Actions','Debian','Ubuntu','Alpine','Red Hat'] as const;
-export type Ecosystem = (typeof ECOSYSTEMS)[number];
-/** Lower-cased aliases and purl types → canonical name ("pypi" → "PyPI", "cargo" → "crates.io", "golang" → "Go", "gem" → "RubyGems", "composer" → "Packagist", "deb" needs the distro qualifier). */
-export function canonicalEcosystem(raw: string): Ecosystem | null;
-/** Per-ecosystem name rules: npm lower-case (scope kept); PyPI PEP 503 ([-_.]+ → "-", lower-case);
- *  crates.io lower-case with "_" → "-"; NuGet, Packagist, Hex, Pub lower-case; Go, Maven (group:artifact),
- *  RubyGems, SwiftURL unchanged. Returns null when the name can't be valid for that ecosystem. */
-export function normaliseName(ecosystem: Ecosystem, name: string): string | null;
-export interface PackageRef { ecosystem: Ecosystem; name: string; version: string }
-/** Parses `pkg:<type>/<namespace>/<name>@<version>` (percent-decoded). Ignores qualifiers such as
- *  repository_url and download_url entirely: they are never returned and never fetched. */
-export function parsePurl(purl: string): { ok: true; ref: PackageRef } | { ok: false; reason: string };
-export type Priority = 'fix_now' | 'fix_soon' | 'plan' | 'note';
-export interface PriorityInput {
-  exploitedWild: boolean; ransomware: boolean; malicious: boolean;
-  publicExploit: boolean; poc: boolean; epss: number | null;
-  cvss: number | null; severityLabel: string | null;
-}
-/** fix_now: exploited, ransomware or malicious. fix_soon: public exploit or PoC, or EPSS >= 0.1.
- *  plan: CVSS >= 7, or label HIGH/CRITICAL when there is no score. note: everything else. */
-export function rankPriority(i: PriorityInput): Priority;
-```
+// Each request entry gains `private?: boolean`: { ecosystem, name, version, private? } | { purl, private? }.
+// The zod request schema gains the same optional field. That is the only non-type change in this file.
 
-Also export the request and answer types of `POST /v1/packages/check` (`CheckRequest`, `CheckMatch`,
-`CheckResult`, `CheckResponse`, `RejectedEntry`) exactly as below, with zod schemas for the request:
+export interface RejectedEntry { index: number; reason: 'bad_entry' | 'bad_ecosystem' | 'bad_name' | 'bad_version'
+  | 'bad_purl' | 'bad_characters' | 'looks_like_url' | 'looks_like_secret' | 'duplicate' }  // three new reasons
 
-```ts
-export const MAX_CHECK_PACKAGES = 1000;
-export interface RejectedEntry { index: number; reason: 'bad_ecosystem' | 'bad_name' | 'bad_version' | 'bad_purl' | 'looks_like_secret' | 'duplicate' }
-export interface CheckMatch { id: string; title: string | null; fixedIn: string | null; signals: string[];
-  cvss: number | null; epss: number | null; url: string; sources: string[] }
+/** Values used in CheckMatch.signals. */
+export type MatchSignal = 'malicious' | 'exploited_wild' | 'ransomware' | 'public_exploit' | 'poc';
+
+export interface CheckMatch { id: string; title: string | null; summary: string | null;  // summary is new
+  fixedIn: string | null; signals: string[]; cvss: number | null; epss: number | null; url: string; sources: string[] }
 export interface CheckResult { package: PackageRef; priority: Priority; upgradeTo: string | null;
-  upgradeNote: string | null; matches: CheckMatch[] }
+  upgradeNote: string | null; matches: CheckMatch[]; omitted: number }                      // omitted is new
+/** Records that name this package but whose version ranges MTI can't evaluate yet. */
+export interface UncertainEntry { package: PackageRef; ids: string[]; reason: 'version_rules_pending' }
+/** A package marked private whose name is also a known malicious public package. */
+export interface ConfusionWarning { package: PackageRef; ids: string[]; reason: 'public_malicious_name' }
 export interface CheckResponse { asOf: string; checked: number; matched: number;
   summary: Record<Priority, number>; results: CheckResult[]; noRecord: PackageRef[];
-  rejected: RejectedEntry[]; notes: string[] }
+  uncertain: UncertainEntry[]; confusion: ConfusionWarning[];                                  // new
+  rejected: RejectedEntry[]; notes: string[]; credits: Credit[] }                              // credits is new
 ```
 
-Rejected entries carry an index and a reason only, never the value that was sent.
+`Credit` is a type import from `./api`. `CheckMatch.signals` holds `MatchSignal` values only.
 
-### 3. Version contract: `packages/core/src/versions/index.ts`
+### 2. Input (`apps/api/src/lib/packages-input.ts`)
+
+Pure code, no bindings.
 
 ```ts
-export interface Comparer { valid(v: string): boolean; compare(a: string, b: string): number }
-/** Returns null for every ecosystem in this change; comparers arrive in their own files later. */
-export function comparerFor(ecosystem: Ecosystem): Comparer | null;
-export interface RangeRow { range_type: 'SEMVER' | 'ECOSYSTEM' | 'EXACT'; introduced: string;
-  fixed: string | null; last_affected: string | null; versions: string | null }
-/** EXACT rows match by string equality. Other rows use the OSV evaluation rules (introduced, fixed,
- *  last_affected; "0" = from the start) with the comparer, or return 'unsupported' when there is none. */
-export function inRange(ecosystem: Ecosystem, version: string, row: RangeRow): boolean | 'unsupported';
+export interface CheckEntry { index: number; ref: PackageRef; private: boolean }
+export function readCheckBody(input: unknown):
+  | { ok: true; entries: CheckEntry[]; rejected: RejectedEntry[] }
+  | { ok: false; error: 'invalid_body' | 'too_many_packages' };
 ```
 
-Test the range walk with a toy integer comparer, and test that every ecosystem returns `'unsupported'` for
-ranges today.
+**The envelope** is the zod schema from `@ti/core/packages`: exactly `{ packages }`, an array of 1 to
+`MAX_CHECK_PACKAGES` items. Over 1,000 items gives `too_many_packages`. Anything else wrong with the envelope
+gives `invalid_body`. Items are checked one by one, so one bad entry never fails the whole request.
 
-### 4. Signed MCP identity: `packages/core/src/mcp-user.ts`
+**Each entry** goes through these steps in order. The first failure wins. Only `{ index, reason }` is kept; the
+value itself is dropped at once.
 
-`ti-mcp` checks the user's OAuth token itself, then calls `ti-api` over the service binding. It never forwards
-the token. Instead it sends a signed assertion:
+1. **Shape.** A strict object: `{ ecosystem, name, version, private? }` or `{ purl, private? }`. Strings stay
+   under raw caps (ecosystem 40, name 512, version 256, purl 1,024 characters), and `private` is a boolean. An
+   entry that is not an object, mixes the two forms or has another key gets `bad_entry`.
+2. **Characters**, on every raw string. Reject:
+   - controls and DEL (`\p{Cc}`);
+   - format characters (`\p{Cf}`), which cover zero-width (U+200B–U+200D, U+2060, U+FEFF), bidi
+     (U+200E, U+200F, U+061C, U+202A–U+202E, U+2066–U+2069) and Unicode Tag (U+E0000–U+E007F) characters;
+   - variation selectors (U+FE00–U+FE0F, U+E0100–U+E01EF);
+   - private-use and unassigned code points.
+
+   Any of these gives `bad_characters`.
+3. **URLs.** `://` anywhere gives `looks_like_url`. In a purl, only the part before the first `?` or `#` is
+   checked here, because `parsePurl` drops qualifiers and subpath unread.
+4. **Secrets**, on every raw string. For a purl this includes qualifiers, percent-decoded. Each of these gives
+   `looks_like_secret`:
+   - a credential in a URL authority: `/[^\s\/:@]+:[^\s\/@]+@/` (`user:pass@`);
+   - a known token prefix followed by a token-shaped tail (table below). The tail rule keeps real names such
+     as `pypi-simple` and `sk-utils` valid;
+   - a run of 32 or more characters from `[A-Za-z0-9+/=_-]` with Shannon entropy of at least 4.3 bits per
+     character and at least 0.3 changes between upper case, lower case and digit per character. Long package
+     paths are low on the second measure; tokens are high on both;
+   - a run of 32 or more hex digits. One exception: a version that is exactly 40 lower-case hex digits, which
+     is a commit pin (common for GitHub Actions).
+
+   Tune the two thresholds only against the corpora in Tests. Never drop a corpus value to make a rule pass.
+5. **purl.** `parsePurl`; failure gives `bad_purl`. The decoded name and version then go through steps 2–4
+   again, so `%E2%80%8B` or an encoded token is caught.
+6. **Ecosystem.** `canonicalEcosystem`; null gives `bad_ecosystem`.
+7. **Name.** NFKC, then `normaliseName`, then the ecosystem's grammar below as a whole-string match. A null or
+   a miss gives `bad_name`.
+8. **Version.** At most 128 characters, and the ecosystem's grammar below. A miss gives `bad_version`. For Go,
+   drop one leading `v`, because OSV stores Go versions without it. Range syntax (`^1.2`, `~1.2`, `>=1`,
+   `1.x`, `*`) never passes: the route checks installed versions.
+9. **Duplicates.** The key is ecosystem, normalised name and version. The first entry stays and later ones get
+   `duplicate`. If any copy says `private: true`, the kept entry is private.
+
+| Token prefix | Tail that must follow |
+| ------------ | --------------------- |
+| `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` | 30 or more of `[A-Za-z0-9]` |
+| `github_pat_` | 20 or more of `[A-Za-z0-9_]` |
+| `npm_` | 30 or more of `[A-Za-z0-9]` |
+| `sk-` | 20 or more of `[A-Za-z0-9_-]` |
+| `xox` plus one of `a b p o s r`, then `-` | 10 or more of `[A-Za-z0-9-]` |
+| `AKIA` | 16 of `[A-Z0-9]` |
+| `glpat-` | 20 or more of `[A-Za-z0-9_-]` |
+| `pypi-` | 50 or more of `[A-Za-z0-9_-]` |
+
+**Names**, checked after `normaliseName`:
+
+| Ecosystem | Grammar (whole string) | Max |
+| --------- | ---------------------- | --- |
+| npm | `(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*` | 214 |
+| PyPI | `[a-z0-9]([a-z0-9-]*[a-z0-9])?` | 214 |
+| crates.io | `[a-z][a-z0-9-]{0,63}` | 64 |
+| Go | `stdlib`, `toolchain`, or `[a-z0-9.-]+\.[a-z0-9.-]+(/[A-Za-z0-9._~+-]+)*` | 256 |
+| Maven | `[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+` | 256 |
+| RubyGems | `[A-Za-z0-9_.-]+` | 214 |
+| NuGet | `[a-z0-9_.-]+` | 214 |
+| Packagist | `[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]\|-{1,2})?[a-z0-9]+)*` | 214 |
+| Hex | `[a-z][a-z0-9_]*` | 214 |
+| Pub | `[a-z_][a-z0-9_]*` | 214 |
+| SwiftURL | `[a-z0-9.-]+\.[a-z]{2,}(/[A-Za-z0-9._~-]+)+` (no scheme) | 256 |
+| GitHub Actions | `[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[A-Za-z0-9_./-]+)?` | 256 |
+| Debian, Ubuntu | `[a-z0-9][a-z0-9.+-]+` | 214 |
+| Alpine, Red Hat | `[A-Za-z0-9][A-Za-z0-9._+-]*` | 214 |
+
+**Versions** (all at most 128 characters):
+
+| Ecosystem | Grammar (whole string) |
+| --------- | ---------------------- |
+| npm, crates.io, Hex, Pub, SwiftURL | SemVer 2.0.0 (the regular expression published on semver.org) |
+| Go | SemVer 2.0.0 after dropping one leading `v` (pseudo-versions and `+incompatible` pass) |
+| PyPI | PEP 440 `VERSION_PATTERN` (Appendix B), case-insensitive |
+| NuGet | `\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?` |
+| RubyGems | `\d+(\.[0-9A-Za-z]+)*(-[0-9A-Za-z_.-]+)?` (platform suffix allowed) |
+| Debian, Ubuntu | `(\d+:)?\d[A-Za-z0-9.+~-]*` |
+| Red Hat | `(\d+:)?[A-Za-z0-9][A-Za-z0-9._+~^-]*` |
+| Maven, Packagist, GitHub Actions, Alpine | `[A-Za-z0-9][A-Za-z0-9._+~-]*` |
+
+These grammars only decide what is well formed. Version order belongs to the comparers.
+
+### 3. Daily quota (`apps/api/src/lib/packages-quota.ts`)
 
 ```ts
-export const MCP_HEADERS = { sub: 'x-ti-mcp-sub', scopes: 'x-ti-mcp-scopes', client: 'x-ti-mcp-client',
-  ts: 'x-ti-mcp-ts', sig: 'x-ti-mcp-sig' } as const;
-export const MCP_SKEW_SECONDS = 60;
-export const MCP_SCOPES = ['mti:read', 'mti:watch'] as const;
-export interface McpIdentity { sub: string; scopes: string[]; clientId: string }
-/** hex(HMAC-SHA256(secret, "mcp-assertion/v1\naud=ti-api\n" + [sub, sortedScopes.join(' '), clientId,
- *  requestId, METHOD, pathWithQuery, sha256hex(body), ts].join('\n'))). */
-export function signMcpAssertion(secret: string, id: McpIdentity, req: { requestId: string; method: string;
-  pathWithQuery: string; body: ArrayBuffer | null }, ts: number): Promise<Record<string, string>>;
-/** Tries each secret (current, then next, for rotation). Fails closed: missing header, bad format
- *  (sub /^user_[A-Za-z0-9]{10,64}$/, clientId at most 512 printable characters, scopes ⊆ MCP_SCOPES),
- *  skew over 60 s, or a signature that matches no secret. */
-export function verifyMcpAssertion(secrets: (string | undefined)[], headers: Headers, req: { requestId: string;
-  method: string; pathWithQuery: string; body: ArrayBuffer | null }, now?: Date): Promise<McpIdentity | null>;
+export const DAILY_PACKAGE_QUOTA = 20_000;
+export type QuotaResult = { ok: true; used: number } | { ok: false; remaining: number; retryAfter: number };
+/** One statement. Throws on any D1 error; the route then answers 503. */
+export function chargeQuota(db: D1Database, userId: string, count: number, now: Date): Promise<QuotaResult>;
+export function refundQuota(db: D1Database, userId: string, count: number, now: Date): Promise<void>;
+/** Whole seconds until the next 00:00 UTC, at least 1. */
+export function secondsToUtcMidnight(now: Date): number;
 ```
 
-Tests cover these cases: a good assertion; a wrong secret; the next secret during rotation; an old or future
-timestamp; a changed body, path, query, method or request ID; scopes out of order (still valid); an unknown
-scope; a malformed `sub`.
+`count` is the number of accepted entries after folding. Rejected entries are free. `day` is the UTC date
+(`YYYY-MM-DD`) of `now`. The charge is a single upsert that adds and checks at once:
 
-### 5. ti-api: MCP identity, route allow-list, limits and block list
+```sql
+INSERT INTO package_usage (user_id, day, packages, calls)
+SELECT ?1, ?2, ?3, 1 WHERE ?3 <= ?4
+ON CONFLICT (user_id, day) DO UPDATE
+  SET packages = packages + excluded.packages, calls = calls + 1
+  WHERE package_usage.packages + excluded.packages <= ?4
+RETURNING packages
+```
 
-- **`lib/env.ts`**:
-  - Add `MCP_HMAC_SECRET?: string`, `MCP_HMAC_SECRET_NEXT?: string` and `SITE_ORIGIN?: string` to `Bindings`.
-  - Add `mcp?: McpIdentity` to `Variables`.
-- **`lib/auth.ts`**: add `currentUserId(c)`, which returns `c.get('mcp')?.sub` or else `getAuth(c)?.userId`.
-  `requireUser`, `rate-limit.ts` (`signedInUser`) and `request-context.ts` all use it. That way MCP calls are
-  limited per user on `RL_USER` and logged with their user. Pin the Clerk middleware's token type with
-  `clerkMiddleware({ acceptsToken: 'session_token' })`, so an OAuth access token sent straight to the API never
-  counts as signed in.
-- **New `lib/mcp-identity.ts`**, middleware `mcpIdentity`, mounted on `/v1/*` **before** the Clerk middleware:
-  - **No `x-ti-mcp-*` header:** do nothing (web and browser traffic is unchanged).
-  - **An MCP header plus an `Authorization` header or a `Cookie`:** 400 `{error:'ambiguous_auth'}`.
-  - **Verify:** read the body once (`c.req.raw.clone().arrayBuffer()`) and call `verifyMcpAssertion` with both secrets. On failure: 401 `{error:'bad_mcp_assertion'}`. Never fall through to Clerk.
-  - **Route allow-list:** the method and route must be on the list `MCP_ROUTES`, each entry with the scope it needs:
-    - `GET /v1/search`, `/v1/entries/:id`, `/v1/home`, `/v1/breaches`, `/v1/breaches/:key`, `/v1/incidents`, `/v1/incidents/:source/:id`, `/v1/techniques/:id`, `/v1/sources`: `mti:read`;
-    - `POST /v1/packages/check`: `mti:read`;
-    - `POST /v1/deep-query`, `GET /v1/deep-query/:id`, `DELETE /v1/deep-query/:id`: `mti:read`;
-    - `GET /v1/me`, `GET /v1/me/watch`, `GET /v1/me/watch/packages`, `GET /v1/me/changes`: `mti:read`;
-    - `PUT`/`DELETE /v1/me/watch/:id` and `PUT`/`DELETE /v1/me/watch/packages/:ecosystem/:name`: `mti:watch`.
-    - Anything else (admin, internal jobs, webhooks, `DELETE /v1/me`, saved searches) gets 403 `{error:'not_allowed_for_mcp'}`, even for a user in `ADMIN_USER_IDS`.
-  - **Missing scope:** 403 `{error:'insufficient_scope', scope:'mti:watch'}`.
-  - **Block list:** `SELECT 1 FROM mcp_blocks WHERE ((kind='user' AND id=?1) OR (kind='client' AND id=?2)) AND (expires_at IS NULL OR expires_at > ?3)`. A hit gets 403 `{error:'blocked'}`.
-  - **On success:** `c.set('mcp', identity)`.
-- **Admin rights:** `ADMIN_USER_IDS` checks (`admin-ops` and anything else that reads it) must ignore an MCP identity.
-- **New stub route modules,** mounted once in `index.ts`. Each runs `requireUser` before answering 501 through `lib/not-implemented.ts`:
-  - `routes/packages.ts`: `POST /v1/packages/check`
-  - `routes/watch-packages.ts`: `GET /v1/me/watch/packages`, `PUT` and `DELETE /v1/me/watch/packages/:ecosystem/:name`
-  - `routes/me-changes.ts`: `GET /v1/me/changes`
-  - `DELETE /v1/deep-query/:id` in `routes/deep-query.ts`, a 501 stub
-- **`lib/delete-user.ts`:** also delete from `watch_packages` and `package_usage`, and insert
-  `mcp_blocks (kind 'user', reason 'deleted', expires_at = now + 30 days)` in the same batch. Update the doc comment.
+- **A row comes back:** the call is charged.
+- **No row:** the call would cross the limit, and none of it is charged. A plain read of today's row gives
+  `remaining`; if that read fails, `remaining` is 0. The route answers 429
+  `{ error: 'quota_exceeded', limit: 20000, remaining, retryAfter }`, with `Retry-After` set to
+  `secondsToUtcMidnight(now)`.
+- **D1 throws:** the route answers 503 `{ error: 'quota_unavailable' }` with `Retry-After: 30`. No lookup runs.
+  The quota fails closed.
+- **The lookup fails after a charge:** `refundQuota` runs in `waitUntil`
+  (`UPDATE … SET packages = MAX(0, packages - ?3)`). A failed refund is logged as `packages_refund_failed`,
+  with no values.
 
-### 6. The `apps/mcp` Worker (skeleton)
+### 4. Lookup (`apps/api/src/lib/packages-lookup.ts`)
 
-- **`package.json`** (`@ti/mcp`):
-  - Exact versions: `@modelcontextprotocol/server` `2.4.0`, `@modelcontextprotocol/core` `2.4.0`, `@clerk/backend` `3.31.4`.
-  - `zod` and `@ti/core` as the API has them.
-  - This is the only package change in this PR besides the pnpm version (section 9).
-- **`wrangler.jsonc`** (production at the top level, `env.staging` below):
-  - `name: ti-mcp`, `main: src/index.ts`, the API's compatibility date and flags, `workers_dev: false`, `preview_urls: false`, no `routes`. It is reachable only through `ti-web`.
-  - `services`: `API` → `ti-api` (`ti-api-staging`).
-  - `kv_namespaces`: `SETTINGS` (`${TI_SETTINGS_KV_ID}`, staging `${TI_SETTINGS_KV_ID_STAGING}`), for tool off-switches under `mcp:tool:<name>:off`.
-  - `durable_objects`: binding `MCP_TASKS`, class `McpTask`, plus `migrations: [{ tag: 'v1', new_sqlite_classes: ['McpTask'] }]`.
-  - `ratelimits`: `RL_MCP` (60 per 60 s, namespace `7105` / `7205`) and `RL_MCP_ANON` (120 per 60 s, `7106` / `7206`).
-  - `vars`: `TI_ENV`, `MCP_RESOURCE_URL` (`https://mti.motiontic.com/mcp`; staging `${TI_APP_URL_STAGING}/mcp`), `CLERK_ISSUER` (`${TI_CLERK_ISSUER}` / `${TI_CLERK_ISSUER_STAGING}`), `MCP_ALLOWED_ORIGINS` (`""`).
-  - Secrets: `MCP_HMAC_SECRET`, `MCP_HMAC_SECRET_NEXT`. Check that `scripts/wrangler-config.mjs` fills a placeholder inside a longer string; if it can't, add a `TI_MCP_RESOURCE_URL_STAGING` variable instead.
-- **`src/index.ts`**, the fetch handler. Every response gets the API's security headers (`API_SECURITY_HEADERS`), `Cache-Control: no-store` and an `x-request-id`:
-  - `POST /mcp` → 503 `{"jsonrpc":"2.0","id":null,"error":{"code":-31001,"message":"not_ready"}}` (an application code outside the reserved −32768…−32000 range);
-  - `GET` or `DELETE /mcp` → 405 with `Allow: POST`;
-  - `/.well-known/oauth-protected-resource/mcp` and `/mcp/server-card` → 404 for now;
-  - anything else → 404.
-- **`src/api.ts`**: `callApi(env, { method, path, body, identity, requestId })` builds a fresh `Request` for `https://ti-api.internal`, adds the signed assertion and `x-request-id`, and calls `env.API.fetch`. It never copies the client's headers. It is the only file in `apps/mcp` that calls `fetch`.
-- **`src/tools/index.ts`**: `TOOL_ORDER`, the fixed list
-  `mti_check_packages, mti_check_sbom, mti_get_entry, mti_search, mti_latest_threats, mti_search_breaches,
-  mti_search_incidents, mti_get_technique, mti_list_sources, mti_watch_add, mti_watch_remove, mti_watch_list,
-  mti_deep_query`. Each has a stub file under `src/tools/` exporting `{ name, enabled: false }`.
-- **`src/ext/{skills,tasks,listen,apps,uploads}.ts`**: each exports a no-op `register()`. `src/tasks/mcp-task.ts` exports a `McpTask` Durable Object class whose methods throw `NotImplementedError`.
-- **Tests:**
-  - `apps/mcp/vitest.workers.mts`, using `workerProject`. Replace the `API` service binding with an in-test handler (`miniflare.serviceBindings`) so tests don't need `ti-api`.
-  - Workers tests for every route above, and for `callApi`: the assertion verifies on the API side, the body hash matches, and no client header leaks.
-  - `apps/mcp/.dev.vars.example` with the secret names.
+```ts
+export const LOOKUP_CHUNK = 100;
+export function loadPackageData(env: ReadEnv, names: Map<Ecosystem, string[]>): Promise<PackageData>;
+```
 
-### 7. ti-web: forward `/mcp` with an off switch
+1. **Affected ranges.** Take the distinct names per ecosystem, in chunks of 100. Each chunk is one statement,
+   and every chunk goes in one `DB_ADVISORIES.batch()`. D1 allows at most 100 bound parameters per
+   statement, so the names are bound as one JSON array:
 
-In `workers/app.ts`, before the redirect and the page limit: if the path is `/mcp`, starts with `/mcp/`, or is
-`/.well-known/oauth-protected-resource` (or starts with it plus `/`), then:
+   ```sql
+   SELECT a.ecosystem, a.name, a.source, a.source_id, a.range_no, a.vuln_key, a.range_type,
+          a.introduced, a.fixed, a.last_affected, a.versions,
+          p.summary, p.severity, p.reviewed, p.url, p.published, p.modified
+   FROM affected a
+   JOIN package_advisories p ON p.source = a.source AND p.source_id = a.source_id
+   WHERE a.ecosystem = ?1 AND a.name IN (SELECT value FROM json_each(?2)) AND p.status = 'active'
+   ```
 
-- if `env.MCP_ENABLED !== '1'`, answer 404 JSON `{error:'not_found'}` with the base security headers;
-- otherwise forward to `env.MCP.fetch(new Request(request, { headers }))`, where `headers` is a copy of the
-  request headers with `Cookie` and `x-ti-mcp-*` removed, and return the response unchanged (no page headers,
-  no `noindex` logic).
+2. **Hot-set data and signals.** For the distinct `vuln_key`s found, use chunks of 100 and one batch per
+   database. Run these at the same time (`Promise.all`), together with the licence read
+   (`displayFor(env.SETTINGS, sourceIds)`):
 
-Changes to config and tests:
+   ```sql
+   SELECT key, kind, title, cvss, cvss_source, epss, kev_added, ransomware, exploit_public
+   FROM vulns WHERE key IN (SELECT value FROM json_each(?1))
 
-- `wrangler.jsonc`: `services` adds `MCP` → `ti-mcp` (`ti-mcp-staging`). `vars.MCP_ENABLED` is `"0"` in production and `"1"` in staging.
-- `app/env.d.ts`: add `MCP: Fetcher; MCP_ENABLED?: string`.
-- Tests in `apps/web/test/worker.test.ts`:
-  - forwarding;
-  - the cookie is stripped;
-  - incoming `x-ti-mcp-*` headers are stripped;
-  - 404 when switched off;
-  - `/mcpx` and `/mcp-docs` are not forwarded;
-  - the page limiter doesn't count forwarded calls.
+   SELECT vuln_key, kind, source FROM signals
+   WHERE vuln_key IN (SELECT value FROM json_each(?1))
+     AND kind IN ('exploited_wild','public_exploit','poc','ransomware')
+   ```
 
-### 8. Other Workers and scripts
+   `ransomware` signals are read too, because `rankPriority` takes a ransomware flag.
 
-- **`apps/notify/wrangler.jsonc`:** add `DB_ADVISORIES` (`ti_advisories`, staging `ti_advisories_staging`); `src/env.ts` gets the type. Nothing reads it yet.
-- **`scripts/deploy.mjs`:**
-  - `DEPLOY_ORDER = ['loader','notify','api','collector','mcp','web']`.
-  - A production guard that refuses unless the working tree is clean, `HEAD` is on `origin/main`, and nothing is unpushed. It prints why, and `--allow-dirty` is not offered.
-- **`scripts/smoke-staging.mjs`:** add `web /mcp` (GET → 405) and `web /mcp/server-card` (→ 404 for now). Each gets the usual security-header checks plus "no `Set-Cookie`".
-- **New `scripts/check-no-fetch.mjs`** (run by `pnpm lint`): fails when `fetch(` appears in `apps/mcp/src` outside `src/api.ts`, or in `apps/api/src` outside the files that use it today (list them in the script). It blocks URL fetching from request paths.
+3. **Outside the hot set.** A `vuln_key` with no `vulns` row is an older record. It still matches; it just has
+   no title, EPSS or KEV data.
 
-### 9. Release guards and review rules
+4. **Malicious records.** A record is malicious when any of these holds: `source` is
+   `openssf-malicious-packages`, `vuln_key` starts with `MAL-`, or `vulns.kind` is `'mal'`.
 
-- **pnpm:** set `packageManager` to `pnpm@10.34.9`. Add `minimumReleaseAge: 10080` (7 days) to `pnpm-workspace.yaml`, so a dependency published less than a week ago can't be installed. Regenerate `pnpm-lock.yaml` with no version changes other than the new `apps/mcp` dependencies.
-- **`loops.json` `sensitivePaths`:** add `apps/mcp/src/**`, `apps/mcp/skills/**`, `apps/mcp/ui/**`, `packages/core/src/mcp-user*`, `packages/core/src/packages*`, `apps/api/src/lib/mcp-*`, `apps/api/src/lib/auth*`, `apps/web/workers/**` and `scripts/deploy*`.
-- **`REVIEW.md`:** add an "MCP" section:
-  - the user's token never leaves `ti-mcp`;
-  - every source-derived string is cleaned before it reaches an agent;
-  - nothing logs tool arguments, package lists or tokens;
-  - tool descriptions are fixed text with no instructions to the model;
-  - a new API route used by MCP needs an entry in `MCP_ROUTES` with its scope.
-- **`SECURITY.md`:** the scope covers the MCP server at `/mcp`.
-- **`security.txt`:** add `apps/web/public/.well-known/security.txt`, with `Contact:` set to the repository's private vulnerability-report URL, `Policy:` pointing to SECURITY.md, `Expires:` one year out and `Preferred-Languages: en`.
+That is three D1 round trips, whatever the list size: advisories, then vulns and signals side by side. Every
+statement is an index search; a test checks the query plans.
+
+### 5. Matching, ranking and upgrade advice (`apps/api/src/lib/packages-match.ts`)
+
+Pure code. Version rules come in as a dependency (`{ inRange, comparerFor }`, from `@ti/core/versions` by
+default), so tests can pass a toy comparer.
+
+**Covering a version.** `rowCovers(ecosystem, version, row)`:
+
+- A non-`EXACT` row with `introduced = '0'` and no `fixed` or `last_affected` covers every version, without a
+  comparer. Malicious-package records usually look like this.
+- Every other row goes to `inRange`.
+
+**Matching.** Licence filtering comes first (section 6): records from hidden sources are dropped before
+matching. Then, for each non-private package, each record (`source`, `source_id`) is one of:
+
+- **matched:** at least one of its rows covers the version;
+- **uncertain:** none does, and at least one row returned `'unsupported'`;
+- **clear:** otherwise.
+
+Group the matched records by `vuln_key`; each group is one `CheckMatch`. A `vuln_key` with only uncertain
+records goes into that package's `uncertain` entry, with `reason: 'version_rules_pending'`. A package can be
+in both `results` and `uncertain`. A package with neither goes in `noRecord`. MTI never claims a match it
+could not evaluate.
+
+**Priority.** Each match gets `rankPriority` with:
+
+| Input | From |
+| ----- | ---- |
+| `exploitedWild` | `vulns.kev_added` set, or a visible `exploited_wild` signal |
+| `ransomware` | `vulns.ransomware = 1`, or a visible `ransomware` signal |
+| `malicious` | any matched record is malicious (section 4) |
+| `publicExploit` | `vulns.exploit_public = 1`, or a visible `public_exploit` signal |
+| `poc` | a visible `poc` signal |
+| `epss` | `vulns.epss` |
+| `cvss` | `vulns.cvss` unless `cvss_source` is hidden; else the highest numeric `severity` (0–10) of a full-display record |
+| `severityLabel` | the highest of `CRITICAL`, `HIGH`, `MODERATE`/`MEDIUM`, `LOW` among full-display `severity` values |
+
+The rules are the shared ones in `rankPriority`:
+
+- `fix_now`: exploited in the wild, used by ransomware, or malicious;
+- `fix_soon`: public exploit code or a proof of concept, or EPSS of 0.1 or more;
+- `plan`: CVSS 7.0 or more, or a HIGH or CRITICAL label when there is no score;
+- `note`: everything else.
+
+`signals` lists the true flags in this order: `malicious`, `exploited_wild`, `ransomware`, `public_exploit`,
+`poc`. A package's priority is the highest of its matches.
+
+Sort the matches by priority, then id, and keep the first 50 (`MAX_MATCHES_PER_PACKAGE`). `omitted` is the
+number left out; priority is computed before the cut. Sort `results` by priority, then ecosystem, name and
+version. `summary` counts packages per priority.
+
+**`fixedIn`.** Fix versions come only from reviewed records (`package_advisories.reviewed = 1`) with full
+display. Take the `fixed` of the row that covers the version. Ignore a value that fails the version grammar,
+or that a comparer puts at or below the checked version. Several distinct values give the highest by the
+comparer, or null when there is no comparer. A match with only unreviewed records has `fixedIn: null`.
+
+**`upgradeTo`**, per package:
+
+1. **Every match needs a fix.** If any match has `fixedIn: null`, `upgradeTo` is null. The note says no
+   reviewed fix is listed for that id. If the match is malicious, it gets the malicious note instead.
+2. **Pick the highest.** The candidate is the highest `fixedIn` across matches, by the comparer. With no
+   comparer and more than one distinct value, `upgradeTo` is null, with a note.
+3. **Check the candidate itself.** Run `rowCovers` for the candidate over every active row of that package.
+   This covers every source, hidden sources and malicious records included: hidden records never appear in
+   an answer, but they may stop a suggestion.
+   - Any `true`: null, and the note says the version is listed as affected too.
+   - Any `'unsupported'`: null, and the note says MTI can't check that version yet.
+4. **Otherwise** `upgradeTo` is the candidate. The note names the source (its MTI display name), the record id
+   and the record's `modified` date.
+5. **Same package only.** `upgradeTo` is always a version of the package that was sent. No field names a
+   different package as a replacement. A `fixed` value that looks like a name, a path, a URL or `name@version`
+   fails the version grammar and is ignored.
+
+**Note texts** are fixed. Their only slots are versions, record ids, MTI source names, dates and ecosystem
+names:
+
+- suggestion: "`<v>` fixes every match above, according to `<source>` (`<id>`, updated `<date>`). Confirm
+  `<v>` exists in the registry and isn't brand new before installing it, and check it for breaking changes."
+- no fix: "No reviewed fix is listed for `<id>`."
+- malicious: "`<id>` marks this package as malicious. Remove it rather than upgrading, and treat machines that
+  installed it as exposed."
+- candidate affected: "`<v>` is listed as affected too, so no upgrade is suggested."
+- can't check: "MTI can't yet check `<v>` against every listed range for `<ecosystem>`, so no upgrade is
+  suggested."
+- can't order: "MTI can't yet order `<ecosystem>` versions, so it can't pick one version that fixes every
+  match."
+
+**Private entries.** An entry marked `private: true` is matched only against visible malicious records, by
+name and for any version.
+
+- A hit adds `{ package, ids, reason: 'public_malicious_name' }` to `confusion`. This is a sign of a
+  dependency-confusion attack.
+- A private entry never goes in `results` or `uncertain`. Public advisories for the same name describe a
+  different package. With no hit it goes in `noRecord`.
+
+### 6. Licences and the answer (`apps/api/src/lib/packages-answer.ts`)
+
+The licence rules are the ones `routes/entries.ts` applies, via `displayFor` and `creditsFor`.
+
+- **Hidden** (`wait`, or a `SETTINGS` override): the source's records are dropped before matching. Its signals
+  are ignored. `cvss` is null when `vulns.cvss_source` is hidden. A hidden source id appears nowhere in the
+  answer.
+- **Link-only:** the record can match. It shows only its id, source and URL. Its `summary`, `severity` and
+  fix versions are neither shown nor used.
+- **Full:** every field.
+- **Hot-set fields:** `vulns.title`, `epss`, `kev_added`, `ransomware` and `exploit_public` are used the way
+  `entries.ts` uses them.
+
+Each `CheckMatch` field:
+
+- **`url`:** the MTI entry page `<origin>/e/<id>` when a `vulns` row exists. Otherwise the first visible
+  record URL starting with `https://`, by source id. Otherwise `<origin>/search?q=<id>`. `<origin>` is
+  `SITE_ORIGIN`, else `https://mti.motiontic.com`.
+- **`title`:** `vulns.title`, else null.
+- **`summary`:** from the first full-display record (reviewed ones first, then by source id), else null.
+- **`sources`:** the visible sources of the match's records and of the signals used.
+
+The response's `credits` is `creditsFor` over every source in the answer, so the NVD notice appears when NVD
+data is used. Text is returned as stored; the MCP server cleans it before it reaches an agent.
+
+`asOf` is the request time. `checked` is the number of accepted entries; `matched` is the number of `results`.
+
+`notes` are fixed strings, in this order:
+
+1. Always: "No record means none in MTI as of asOf. It does not mean safe."
+2. Always: "Reachability isn't checked: MTI doesn't know whether your code uses the affected part."
+3. Always: "Fix versions come only from reviewed sources. Confirm a release exists and isn't brand new before
+   installing it."
+4. When `uncertain` isn't empty: "Some records couldn't be matched to a version yet. They are listed under
+   uncertain, not as matches."
+5. When an entry was marked private: "Packages marked private are checked only against public malicious
+   packages with the same name."
+6. Always: "Which sources MTI holds, and how fresh each one is: /sources on the MTI site."
+
+### 7. Route (`apps/api/src/routes/packages.ts`)
+
+```ts
+export interface PackagesDeps { now?: () => Date; versions?: { inRange: typeof inRange; comparerFor: typeof comparerFor } }
+export function createPackagesRoute(deps?: PackagesDeps): Hono<AppEnv>;
+export default createPackagesRoute();   // index.ts stays as it is
+```
+
+`POST /v1/packages/check`:
+
+1. **No-store first.** A small middleware sets `Cache-Control: no-store`, so every answer carries it, 401
+   included.
+2. **Sign-in.** `requireUser`. Web users come with a Clerk session. MCP users come with the signed identity,
+   which mcp-seams already accepts for this route with `mti:read`. Nothing else is needed for access.
+3. **Body.**
+   - Over 1 MiB (checked on `content-length`, then on the bytes): 413 `{ error: 'body_too_large' }`.
+   - Not JSON: 400 `{ error: 'invalid_body' }`.
+   - Then `readCheckBody`: 400 `{ error: 'invalid_body' }` or 400 `{ error: 'too_many_packages', max: 1000 }`.
+4. **Nothing accepted:** answer 200 with `rejected` and `notes` only. No quota charge and no D1 reads.
+5. **Quota:** `chargeQuota`, then 429 or 503 as in section 3.
+6. **Answer:** lookup, match, build. Any error here refunds the charge and answers 500
+   `{ error: 'internal' }`, logging only the route and the error name, as `guarded()` does.
+7. **Success:** 200 with the `CheckResponse`.
+
+### 8. Logging and privacy
+
+- **One line per call.** `logEvent('info', 'packages_check', …)` with only these fields:
+  - `requestId` and `outcome` (`ok`, `all_rejected`, `quota_exceeded`, `quota_unavailable`, `failed`);
+  - `checked`, `matched`, `rejected`, `uncertain`, `confusion`, `unknownNames`, and `ecosystems` (a count);
+  - `ms`, `msQuota`, `msLookup`, `msMatch`.
+- **`unknownNames`** counts accepted, non-private names with no `affected` row at all. It lets a later alert
+  spot accounts that probe names MTI doesn't know. The answer itself never says whether MTI knows a name.
+- **Never logged:** names, versions, purls, rejected values, record ids, upgrade targets, and zod or D1 error
+  messages.
+- **Nothing stored.** The only write is the usage counter.
+- **No outbound calls.** No `fetch`, and no registry, OSV or deps.dev calls. The route reads only D1 and the
+  `SETTINGS` KV.
+
+### 9. Speed
+
+The target is p95 under 1.5 s for 500 packages. The design keeps it to three D1 round trips plus one KV read
+that runs alongside them.
+
+Measure it on staging after merge:
+
+1. Wait for staging to run main, and for the package data to be loaded there. Record the `affected` row count
+   (`wrangler d1 execute ti_advisories_staging --remote --command "SELECT COUNT(*) FROM affected"`). If the
+   table is empty, the measurement waits. If the staging deploy hasn't run yet, `pnpm preview` from an
+   up-to-date main checkout serves the same code.
+2. For the body, use 500 npm packages and versions from this repository's own `pnpm-lock.yaml`. That is public
+   data, never a user's list. Build it with a one-off command and don't commit it.
+3. Sign in as a staging test user and send the Clerk session token as `Authorization: Bearer`.
+4. Make 3 warm-up calls, then 30 timed calls, one at a time, with `curl -w '%{time_total}'`. That is 16,500
+   packages, inside one day's quota.
+5. p95 is the 29th of the 30 sorted times. Post the times, the median, the p95, the row count and the
+   server-side `ms` values from `wrangler tail` (the `packages_check` lines) on the merged PR. It passes when
+   p95 is under 1.5 s.
+
+## Tests
+
+### Workers: `apps/api/test/packages-check.workers.test.ts`
+
+**Setup.**
+
+- Most cases use the test app from `account.workers.test.ts`: `createPackagesRoute(deps)` behind a middleware
+  that sets `clerkAuth` from `x-test-user`.
+- The log and MCP cases use `createApp(stubClerk)` from `launch.workers.test.ts`.
+- `beforeEach` clears `affected`, `package_advisories`, `package_usage`, the test `vulns` and `signals` rows,
+  and the `source:*` keys in `SETTINGS`.
+- A `fetch` spy fails the test on any call.
+- Helpers seed records, ranges, vulns and signals.
+- Token-shaped test values are put together at runtime (for example `['ghp', '_', tail].join('')`), so no
+  token-like literal is committed and secret scanners stay quiet.
+
+**Cases.**
+
+- **Access.**
+  - Signed out: 401 with `no-store`.
+  - Clerk session: 200.
+  - A request signed with `signMcpAssertion` (scope `mti:read`, test env with `MCP_HMAC_SECRET` set): 200, and
+    today's `package_usage` row belongs to the assertion's `sub`.
+- **Ranking bands.** Each fixture ranks as listed. Real version rules apply, so fixtures use `EXACT` rows and
+  all-versions rows:
+
+  | Fixture | Priority |
+  | ------- | -------- |
+  | `vulns.kev_added` set | fix_now |
+  | visible `exploited_wild` signal, no KEV | fix_now |
+  | `vulns.ransomware = 1` | fix_now |
+  | all-versions record from `openssf-malicious-packages` | fix_now |
+  | `MAL-` id from the `osv` source | fix_now |
+  | `exploited_wild` signal from a hidden source only, CVSS 5.0 | note |
+  | `public_exploit` signal | fix_soon |
+  | `vulns.exploit_public = 1` | fix_soon |
+  | `poc` signal | fix_soon |
+  | EPSS 0.10 | fix_soon |
+  | EPSS 0.099 with CVSS 7.0 | plan |
+  | no `vulns` row, record `severity` `HIGH` | plan |
+  | CVSS 6.9 | note |
+  | a record and nothing else | note |
+  | one `note` match plus one `fix_now` match | fix_now, with matches in that order |
+
+- **Malicious → fix_now.** An all-versions `MAL-` record gives fix_now with no comparer at all. `signals`
+  includes `malicious`, `upgradeTo` is null and the note is the malicious one.
+- **Rejections.**
+  - One request holds an example of every reason. `rejected` equals the exact `{ index, reason }` list.
+  - The response text contains none of the rejected values.
+  - The valid entries in the same request are still answered.
+- **Secrets.** Every row of the token table, `user:pass@` in a name, a JWT, 40 random base64 characters, 64
+  random hex characters, and a purl with `?repository_url=https://u:p@host`: all are `looks_like_secret`.
+  Every value in the must-accept corpus below is answered, not rejected.
+- **Caps.**
+  - 1,001 entries: 400 `too_many_packages`, and no usage row.
+  - 1,000 entries: 200.
+  - A body over 1 MiB: 413.
+- **Quota edge** (`now` injected):
+  - At 19,000 used, 1,000 more gives 200 and the row reads 20,000.
+  - One more then gives 429 with `remaining: 0`. At 23:59:30Z, `Retry-After` and `retryAfter` are 30.
+  - At 19,500 used, 501 more gives 429 with `remaining: 500`, and the row is unchanged.
+  - Yesterday's row at 20,000 doesn't block today.
+  - Two parallel calls of 400 at 19,500 used: exactly one gets 200.
+  - Rejected entries aren't charged.
+  - A `DB_USERS` whose `prepare` throws gives 503 `quota_unavailable`, and no `DB_ADVISORIES` statement runs.
+  - A `DB_ADVISORIES` that throws gives 500, and the usage row goes back to its earlier value.
+- **Upgrade advice** (toy integer comparer injected):
+  - A reviewed range with `fixed: '5'` and the checked version `3` gives `upgradeTo: '5'`. The note holds the
+    source's display name, the record id, the date and the confirm sentence.
+  - An unreviewed record with `fixed: '9'` is never offered, and its match has `fixedIn: null`.
+  - **The candidate is itself affected:** a malicious `EXACT ["5"]` record gives null and the "affected too"
+    note. A second range with `introduced: '5'` and `fixed: '7'` gives the same.
+  - A candidate check that returns `'unsupported'` gives null and the "can't check" note.
+  - Two matches fixed in `5` and `7`, with `7` clear, give `7`.
+  - No comparer and two distinct fixes give null and the "can't order" note.
+  - A `fixed` of `other-pkg@1.0` is ignored.
+  - In every answer, `upgradeTo` passes the version grammar and `package` equals the normalised input.
+- **Licence hiding.**
+  - `source:github-advisory-db` set to `hidden`: its only record no longer matches, so the package is in
+    `noRecord`, and `github-advisory-db` appears nowhere in the response.
+  - A hidden signal source doesn't raise priority.
+  - A hidden `cvss_source` gives `cvss: null`.
+  - `link` mode shows the id, URL and source only (`summary` and `fixedIn` are null, and severity doesn't
+    count).
+  - `credits` lists only visible sources.
+- **Dependency confusion.**
+  - A private entry whose name has a public malicious record lands in `confusion` with the ids, not in
+    `results`.
+  - The same entry without `private` gives fix_now in `results`.
+  - A private entry whose name has only ordinary advisories goes in `noRecord`, with no match.
+- **Uncertain path** (an `inRange` stub that returns `'unsupported'`):
+  - The package is listed in `uncertain` with its ids and `version_rules_pending`, not in `noRecord`, and
+    note 4 is present.
+  - A package with one matched record and one uncertain record appears in both `results` and `uncertain`.
+- **Headers and notes.**
+  - Every answer has `Cache-Control: no-store`: 200, 400, 401, 413, 429, 500 and 503.
+  - Every 200 has note 1, word for word.
+- **Logs.**
+  - Use the full app with spies on `console.log`, `warn` and `error`.
+  - Make an ok call, a call with rejected secrets, a 429, a 503 and a 500, using canary names, versions, purls
+    and record ids.
+  - No captured line holds any of them, and every line is JSON.
+  - Each call writes exactly one `packages_check` line, with only the fields in section 8.
+- **Scale.**
+  - Seed 3,000 `affected` rows (600 npm names, 5 rows each) with their records, then check 500 of those
+    names. The counts are right.
+  - `DB_ADVISORIES.batch` runs once with 5 statements; `vulns` and `signals` run one batch each.
+- **Query plans.** `EXPLAIN QUERY PLAN` for the three lookup statements shows a `SEARCH` on each table's
+  primary key, and no `SCAN` of `affected`, `vulns` or `signals`.
+- **No outbound calls.** The `fetch` spy is never called anywhere in the file.
+
+### Node: `apps/api/test/packages-input.test.ts` and `packages-match.test.ts`
+
+- **Input.**
+  - Every ecosystem's name and version grammar, with good and bad examples.
+  - Steps 2–4 against both corpora.
+  - NFKC: full-width `ｌｏｄａｓｈ` becomes `lodash`.
+  - Duplicate folding after npm lower-casing, and the private flag carrying over.
+  - The purl re-check after decoding: `%E2%80%8B` gives `bad_characters`.
+- **Matching.**
+  - `rowCovers` on all-versions rows.
+  - The upgrade picker with a toy comparer.
+  - Each note template.
+  - `secondsToUtcMidnight`: 00:00:00Z gives 86,400, and 23:59:59.5Z gives 1.
+
+**Must accept:**
+
+- `actions/checkout` at `a5ac7e51b41094c92402da3b24376905380afc29`
+- `github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5` at `v5.7.0`
+- `golang.org/x/net` at `v0.0.0-20231115185253-1b2c3d4e5f60`
+- `org.springframework.boot:spring-boot-starter-web` at `3.2.0`
+- `Microsoft.Extensions.DependencyInjection.Abstractions` at `8.0.0`
+- PyPI `torch` at `2.1.0+cu121`, and `pypi-simple` at `1.4.0`
+- npm `@typescript-eslint/eslint-plugin` at `6.13.2-alpha.0`, and `sk-utils` at `1.0.0`
+- Debian `glibc` at `2.36-9+deb12u4`, and at `1:2.36-9`
+- Red Hat `openssl` at `1:3.0.7-24.el9`
+- RubyGems `nokogiri` at `1.15.4-x86_64-linux`
+- SwiftURL `github.com/apple/swift-nio` at `2.62.0`
+- `pkg:npm/left-pad@1.3.0?repository_url=https://registry.npmjs.org`
+
+**Must reject:**
+
+- every token-table prefix with a matching tail;
+- `AKIA` plus 16 characters;
+- a 40-character AWS-style secret key containing `/`;
+- a three-part JWT;
+- 40 random base64 characters;
+- 64 random hex characters;
+- `deploy:s3cr3t@registry` as a name;
+- `https://evil.test/x` as a name and `git+https://host/x.git` as a version (both `looks_like_url`).
 
 ## Not in scope
 
-- Any MCP protocol handling, OAuth token checks, tools, skills, Tasks, report view or change notices. `/mcp` answers "not ready".
-- Writing `affected` or `package_advisories` rows. Emitting `new_advisory` changes.
-- Version comparers.
-- The logic of the package-check route.
-- Creating Cloudflare resources. KV, the Durable Object namespace and rate limits come with the deploy. Secrets are set outside this change.
-- Switching MCP on in production (`MCP_ENABLED` stays `"0"`).
+- **Version comparers.** They land separately. Until then, ranges are reported under `uncertain`.
+- **Loading** `affected` and `package_advisories`.
+- **MCP formatting.** The `check_packages` MCP tool, cleaning untrusted text and shaping answer size belong
+  to the MCP server.
+- **Bigger inputs.** Lists over 1,000 packages, background jobs, and SBOM input.
+- **Abuse detection.** Alerts on probing patterns, canary records, bot protection, and per-account caps on
+  unknown names. A cap needs a new column, which belongs to a later change.
+- **Guessing which packages are private** from scopes or naming. Only the explicit `private: true` counts.
+- **Reachability analysis**, and a "report a wrong match" link.
+- **Storage.** Inputs and answers are never stored.
+- **A web page** for this route.
+- **Platform changes.** Changes to `RL_USER` limits, the MCP route allow-list, migrations or Wrangler config.
 
 ## Acceptance criteria
 
-1. `pnpm build` and `pnpm test:workers` pass. The new `apps/mcp` Workers project is picked up by the root config.
-2. All three migrations apply on a fresh local D1, and `schema.workers.test.ts` passes. A Workers test applies signals `0001`–`0002`, inserts rows into `changes`, applies `0003`, and finds the same rows, plus one `new_advisory` row it can now insert.
-3. `@ti/core/packages`, `@ti/core/versions` and `@ti/core/mcp-user` exist with the exports above and unit tests: `rankPriority` for every band, `normaliseName` per ecosystem, `parsePurl` (including that qualifiers are dropped), the range walk, and every signing case in section 4.
-4. ti-api Workers tests show:
-   - a signed MCP call to an allowed route succeeds as that user and is rate-limited on `u:<sub>`;
-   - the same call to `/v1/admin/ops`, `/internal/jobs/x` or `DELETE /v1/me` gets 403 `not_allowed_for_mcp`, even for an admin user;
-   - `mti:read` alone on a watch write gets 403 `insufficient_scope`;
-   - a changed body, an old timestamp or a wrong secret gets 401;
-   - an MCP header with a cookie or `Authorization` gets 400;
-   - a blocked user or client gets 403 `blocked`;
-   - `deleteUserData` removes the new rows and leaves a 30-day block;
-   - web and session behaviour is unchanged (the existing tests pass untouched).
-5. ti-mcp Workers tests show the 405, 503, 404 and header behaviour, and that `callApi` sends a verifiable assertion with no client headers.
-6. ti-web tests show forwarding, cookie and `x-ti-mcp-*` stripping, the off switch, and no forwarding of look-alike paths.
-7. `node scripts/deploy.mjs production` exits with an explanation on a dirty tree or an unpushed commit, without running wrangler.
-8. `pnpm lint` fails on a planted `fetch(` in `apps/mcp/src/tools/` (shown in a test of the check script).
-9. The only dependency changes are the `apps/mcp` packages and the pnpm version, and `pnpm install --frozen-lockfile` passes.
-10. No secret or account ID is added to the repo. Wrangler configs use `${VAR}` placeholders only.
+1. `pnpm build` and `pnpm test:workers` pass with the tests above. `pnpm typecheck` passes repo-wide.
+2. `git diff --name-only main` lists only the paths in "What to build".
+   `git diff main -- packages/core/src/packages.ts` only adds: the types and fields in section 1, the new
+   reason literals, and `private` in the request schema. It removes nothing.
+3. `rg -n "fetch\(" apps/api/src/routes/packages.ts apps/api/src/lib/packages-*.ts` finds nothing. The
+   no-`fetch` lint check passes. In Workers tests, `fetch` is never called. Save the `rg` output.
+4. Every fixture in the ranking table ranks as listed, including malicious → fix_now with no comparer.
+5. Each rejection reason has a test. Every must-reject value is refused with the listed reason, and every
+   must-accept value is answered. A rejected entry is `{ index, reason }` only, and no rejected value appears
+   in any response body or log line.
+6. Inputs with control, zero-width, bidi, Unicode Tag or variation-selector characters are refused as
+   `bad_characters`. Full-width names are NFKC-normalised.
+7. The quota holds at exactly 20,000 per user per UTC day:
+   - one statement adds and checks;
+   - an over-quota call is refused whole, with 429, `remaining` and the seconds to 00:00 UTC;
+   - a D1 error gives 503 and runs no lookup;
+   - a failed lookup refunds the charge.
+8. `upgradeTo` comes only from reviewed records. It is null, with the right note, when:
+   - any match has no reviewed fix;
+   - the candidate is affected or malicious itself;
+   - the candidate can't be checked;
+   - versions can't be ordered.
+
+   It is never another package. Each suggestion's note names the source, the record id and the date, and
+   says to confirm the release exists and isn't brand new.
+9. Licence rules match `entries.ts`:
+   - hidden sources appear nowhere in an answer and don't count toward a match or a priority;
+   - link-only sources show id, source and URL only;
+   - `credits` lists only visible sources.
+10. A private entry whose name has a public malicious record gets a `confusion` warning, and never appears in
+    `results`.
+11. When ranges can't be evaluated, the package is listed under `uncertain`, never as a match and never in
+    `noRecord`.
+12. Every response has `Cache-Control: no-store`. Every 200 includes the note "No record means none in MTI as
+    of asOf. It does not mean safe."
+13. Across the whole Workers test run, no log line holds a package name, version, purl, rejected value or
+    record id. Each call writes one `packages_check` line with counts and timing only.
+14. Web sessions and MCP identities with `mti:read` both get answers. Signed-out calls get 401.
+15. Each lookup statement's query plan is an index search. A 500-package check of one ecosystem uses one
+    advisories batch of 5 statements, plus one batch each for `vulns` and `signals`.
+16. The PR states each platform fact it relies on, with a docs link:
+    - D1's limit of 100 bound parameters per statement;
+    - `json_each` in D1;
+    - D1 `batch()`;
+    - SQLite `INSERT … ON CONFLICT DO UPDATE … WHERE` with `RETURNING`.
+17. After merge, the staging measurement in section 9 is posted on the PR. p95 for 500 packages is under 1.5 s.
+    If staging has no package data yet, the PR says the measurement is still to come.
+
+## Decisions added at review
+
+- **OS packages:** OS rows are stored with their release, exactly as OSV writes them (`Debian:12`,
+  `Ubuntu:22.04:LTS`, `Alpine:v3.20`).
+  - Input accepts those keys, and maps the purl `distro` qualifier (`pkg:deb/debian/openssl@…?distro=debian-12`)
+    to them.
+  - A bare `Debian` or `Ubuntu` with no release is rejected with reason `bad_ecosystem` and a note asking for the
+    release.
+  - The lookup uses the full key.
+- **`vuln_key`** in `affected` and `package_advisories` is the CVE the record names when it has one, else the
+  record's own ID. Join it to `vulns` and `signals` on that.
+- **Import path:** if `main` puts the version module at `packages/core/src/versions/index.ts`, import it as
+  `@ti/core/versions/index`, or add a one-line `packages/core/src/versions.ts` re-export. This change may add
+  that file.
+- **Request shape:** the body is `{ packages: [...] }`, as assumed above.

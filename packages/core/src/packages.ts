@@ -4,6 +4,7 @@
  * `POST /v1/packages/check`. Pure code; the only dependency is zod.
  */
 import { z } from 'zod';
+import type { Credit } from './api';
 
 export const ECOSYSTEMS = [
   'npm',
@@ -215,12 +216,13 @@ export const MAX_CHECK_PACKAGES = 1000;
 
 /** One package to check: a purl, or an ecosystem, name and version. */
 export const CheckEntrySchema = z.union([
-  z.object({ purl: z.string().max(MAX_PURL) }).strict(),
+  z.object({ purl: z.string().max(MAX_PURL), private: z.boolean().optional() }).strict(),
   z
     .object({
       ecosystem: z.string().max(40),
       name: z.string().max(MAX_NAME),
       version: z.string().max(MAX_VERSION),
+      private: z.boolean().optional(),
     })
     .strict(),
 ]);
@@ -239,11 +241,25 @@ export interface CheckRequest {
 
 export interface RejectedEntry {
   index: number;
-  reason: 'bad_ecosystem' | 'bad_name' | 'bad_version' | 'bad_purl' | 'looks_like_secret' | 'duplicate';
+  reason:
+    | 'bad_entry'
+    | 'bad_ecosystem'
+    | 'bad_name'
+    | 'bad_version'
+    | 'bad_purl'
+    | 'bad_characters'
+    | 'looks_like_url'
+    | 'looks_like_secret'
+    | 'duplicate';
 }
+
+/** Values used in CheckMatch.signals. */
+export type MatchSignal = 'malicious' | 'exploited_wild' | 'ransomware' | 'public_exploit' | 'poc';
+
 export interface CheckMatch {
   id: string;
   title: string | null;
+  summary: string | null;
   fixedIn: string | null;
   signals: string[];
   cvss: number | null;
@@ -257,6 +273,19 @@ export interface CheckResult {
   upgradeTo: string | null;
   upgradeNote: string | null;
   matches: CheckMatch[];
+  omitted: number;
+}
+/** Records that name this package but whose version ranges MTI can't evaluate yet. */
+export interface UncertainEntry {
+  package: PackageRef;
+  ids: string[];
+  reason: 'version_rules_pending';
+}
+/** A package marked private whose name is also a known malicious public package. */
+export interface ConfusionWarning {
+  package: PackageRef;
+  ids: string[];
+  reason: 'public_malicious_name';
 }
 export interface CheckResponse {
   asOf: string;
@@ -265,6 +294,9 @@ export interface CheckResponse {
   summary: Record<Priority, number>;
   results: CheckResult[];
   noRecord: PackageRef[];
+  uncertain: UncertainEntry[];
+  confusion: ConfusionWarning[];
   rejected: RejectedEntry[];
   notes: string[];
+  credits: Credit[];
 }

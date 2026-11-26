@@ -272,7 +272,6 @@ describe('block list', () => {
 describe('stubs', () => {
   it('answer 501 for a signed-in caller and 401 for an anonymous one', async () => {
     const stubs: [string, string][] = [
-      ['POST', '/v1/packages/check'],
       ['GET', '/v1/me/watch/packages'],
       ['PUT', '/v1/me/watch/packages/npm/lodash'],
       ['DELETE', '/v1/me/watch/packages/npm/lodash'],
