@@ -127,7 +127,8 @@ export async function runSmoke(fetchImpl, { web, api }) {
       if (d.resource !== `${trim(web)}/mcp`) return 'resource is not <web>/mcp';
       if (!Array.isArray(d.authorization_servers) || d.authorization_servers.length !== 1)
         return 'authorization_servers is not one entry';
-      if (JSON.stringify(d.bearer_methods_supported) !== '["header"]') return 'bearer_methods_supported is not ["header"]';
+      if (JSON.stringify(d.bearer_methods_supported) !== '["header"]')
+        return 'bearer_methods_supported is not ["header"]';
       if (JSON.stringify(d).includes('offline_access')) return 'offline_access is listed';
       return null;
     },
@@ -169,7 +170,8 @@ export async function runSmoke(fetchImpl, { web, api }) {
     }),
     expect: async (res) => {
       const c = res.headers.get('www-authenticate') ?? '';
-      if (!c.includes(`resource_metadata="${trim(web)}${wellKnown}"`)) return 'challenge has no resource_metadata';
+      if (!c.includes(`resource_metadata="${trim(web)}${wellKnown}"`))
+        return 'challenge has no resource_metadata';
       if (!c.includes('scope="mti:read"')) return 'challenge has no scope';
       return /error=/.test(c) ? 'challenge has an error=' : null;
     },

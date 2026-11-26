@@ -2,7 +2,11 @@
 export type JsonSchema = Record<string, unknown>;
 export const DRAFT = 'https://json-schema.org/draft/2020-12/schema';
 
-export const str = (maxLength: number, extra: JsonSchema = {}): JsonSchema => ({ type: 'string', maxLength, ...extra });
+export const str = (maxLength: number, extra: JsonSchema = {}): JsonSchema => ({
+  type: 'string',
+  maxLength,
+  ...extra,
+});
 export const nstr = (maxLength: number, extra: JsonSchema = {}): JsonSchema => ({
   type: ['string', 'null'],
   maxLength,
@@ -20,8 +24,5 @@ export const obj = (properties: Record<string, JsonSchema>, required?: string[])
 });
 export const root = (schema: JsonSchema): JsonSchema => ({ $schema: DRAFT, ...schema });
 
-export const CREDITS = arr(
-  obj({ source: str(64), text: str(300), url: nstr(2048) }),
-  20,
-);
+export const CREDITS = arr(obj({ source: str(64), text: str(300), url: nstr(2048) }), 20);
 export const COMMON_OUT = { asOf: str(40), credits: CREDITS, notes: arr(str(200), 10) };

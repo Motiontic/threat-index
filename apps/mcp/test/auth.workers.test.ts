@@ -1,9 +1,19 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { resetJwksCacheForTests } from '../src/auth/jwks';
 import { bearerFrom } from '../src/auth/token';
-import { MODERN, BASE_ENV, bodyOf, modernCall, send } from './support/mcp';
 import { fakeApi, ok, withApi } from './support/fake-api';
-import { b64u, goodPayload, ISS, JWKS_URL, makeKey, mockJwks, RES, signJwt, type TestKey } from './support/tokens';
+import { BASE_ENV, bodyOf, MODERN, modernCall, send } from './support/mcp';
+import {
+  b64u,
+  goodPayload,
+  ISS,
+  JWKS_URL,
+  makeKey,
+  mockJwks,
+  RES,
+  signJwt,
+  type TestKey,
+} from './support/tokens';
 
 let key: TestKey;
 let other: TestKey;
@@ -24,7 +34,8 @@ const list = (token: string | undefined, extra: Record<string, string> = {}, env
 const WWW = (res: Response) => res.headers.get('www-authenticate') ?? '';
 
 describe('bearerFrom', () => {
-  const req = (h?: string) => new Request('https://x.test/', { headers: h === undefined ? {} : { authorization: h } });
+  const req = (h?: string) =>
+    new Request('https://x.test/', { headers: h === undefined ? {} : { authorization: h } });
   it('reads only a Bearer header', () => {
     expect(bearerFrom(req())).toEqual({ kind: 'none' });
     expect(bearerFrom(req('Basic abc'))).toEqual({ kind: 'none' });
@@ -50,24 +61,49 @@ describe('token matrix', () => {
 
   const bad: [string, () => Promise<string>][] = [
     ['typ JWT', () => signJwt(key, goodPayload(), { typ: 'JWT' })],
-    ['alg none', async () => `${b64u(JSON.stringify({ alg: 'none', typ: 'at+jwt', kid: 'k1' }))}.${b64u(JSON.stringify(goodPayload()))}.${b64u('x')}`],
-    ['HS256 signed with the public key bytes', async () => {
-      const mac = await crypto.subtle.importKey('raw', new TextEncoder().encode(String(key.publicJwk.n)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-      const signing = `${b64u(JSON.stringify({ alg: 'HS256', typ: 'at+jwt', kid: 'k1' }))}.${b64u(JSON.stringify(goodPayload()))}`;
-      return `${signing}.${b64u(await crypto.subtle.sign('HMAC', mac, new TextEncoder().encode(signing)))}`;
-    }],
+    [
+      'alg none',
+      async () =>
+        `${b64u(JSON.stringify({ alg: 'none', typ: 'at+jwt', kid: 'k1' }))}.${b64u(JSON.stringify(goodPayload()))}.${b64u('x')}`,
+    ],
+    [
+      'HS256 signed with the public key bytes',
+      async () => {
+        const mac = await crypto.subtle.importKey(
+          'raw',
+          new TextEncoder().encode(String(key.publicJwk.n)),
+          { name: 'HMAC', hash: 'SHA-256' },
+          false,
+          ['sign'],
+        );
+        const signing = `${b64u(JSON.stringify({ alg: 'HS256', typ: 'at+jwt', kid: 'k1' }))}.${b64u(JSON.stringify(goodPayload()))}`;
+        return `${signing}.${b64u(await crypto.subtle.sign('HMAC', mac, new TextEncoder().encode(signing)))}`;
+      },
+    ],
     ['wrong iss', () => signJwt(key, goodPayload({ iss: 'https://evil.test' }))],
     ['iss with trailing slash', () => signJwt(key, goodPayload({ iss: `${ISS}/` }))],
     ['wrong aud', () => signJwt(key, goodPayload({ aud: 'https://mti.test/other' }))],
     ['aud with trailing slash', () => signJwt(key, goodPayload({ aud: `${RES}/` }))],
-    ['aud array without the URL', () => signJwt(key, goodPayload({ aud: ['https://a.test', 'https://b.test'] }))],
+    [
+      'aud array without the URL',
+      () => signJwt(key, goodPayload({ aud: ['https://a.test', 'https://b.test'] })),
+    ],
     ['expired by 6 s', () => signJwt(key, goodPayload({ exp: Math.floor(Date.now() / 1000) - 6 }))],
     ['nbf 60 s ahead', () => signJwt(key, goodPayload({ nbf: Math.floor(Date.now() / 1000) + 60 }))],
     ['iat in the future', () => signJwt(key, goodPayload({ iat: Math.floor(Date.now() / 1000) + 60 }))],
-    ['lifetime over 7 days', () => signJwt(key, goodPayload({ exp: Math.floor(Date.now() / 1000) + 8 * 86400 }))],
+    [
+      'lifetime over 7 days',
+      () => signJwt(key, goodPayload({ exp: Math.floor(Date.now() / 1000) + 8 * 86400 })),
+    ],
     ['missing client_id', () => signJwt(key, goodPayload({ client_id: undefined }))],
     ['machine subject', () => signJwt(key, goodPayload({ sub: 'mch_2abcdefghijk' }))],
-    ['session token shape', () => signJwt(key, goodPayload({ client_id: undefined, sid: 'sess_1', azp: 'https://app.test' }), { typ: 'JWT' })],
+    [
+      'session token shape',
+      () =>
+        signJwt(key, goodPayload({ client_id: undefined, sid: 'sess_1', azp: 'https://app.test' }), {
+          typ: 'JWT',
+        }),
+    ],
     ['ID token shape', () => signJwt(key, goodPayload({ aud: 'client-abc', nonce: 'n' }), { typ: 'JWT' })],
     ['opaque oat_', async () => 'oat_abcdefghijklmnop'],
     ['unknown kid', () => signJwt({ ...key, kid: 'nope' })],
@@ -79,16 +115,26 @@ describe('token matrix', () => {
     const res = await list(await make());
     expect(res.status).toBe(401);
     expect(WWW(res)).toContain('error="invalid_token"');
-    expect(WWW(res)).toContain(`resource_metadata="https://mti.test/.well-known/oauth-protected-resource/mcp"`);
+    expect(WWW(res)).toContain(
+      `resource_metadata="https://mti.test/.well-known/oauth-protected-resource/mcp"`,
+    );
     expect(WWW(res)).toContain('scope="mti:read"');
-    expect((await res.json() as { error: string }).error).toBe('invalid_token');
+    expect(((await res.json()) as { error: string }).error).toBe('invalid_token');
     spy.restore();
   });
 
   it('a jku header pointing elsewhere is ignored and never fetched', async () => {
     const spy = mockJwks([key]);
     const api = fakeApi(() => ok({}));
-    const res = await list(await signJwt(key, goodPayload(), { jku: 'https://evil.test/jwks.json', x5u: 'https://evil.test/x', jwk: {} }), {}, withApi(BASE_ENV, api));
+    const res = await list(
+      await signJwt(key, goodPayload(), {
+        jku: 'https://evil.test/jwks.json',
+        x5u: 'https://evil.test/x',
+        jwk: {},
+      }),
+      {},
+      withApi(BASE_ENV, api),
+    );
     expect(res.status).toBe(200);
     expect(spy.calls).toEqual([JWKS_URL]);
     spy.restore();
@@ -166,14 +212,17 @@ describe('scopes', () => {
 });
 
 describe('keys', () => {
-  it.each(['500', 'timeout', 'redirect', 'badjson', 'weak'] as const)('JWKS %s with no cache → 503 with Retry-After and no challenge', async (mode) => {
-    const spy = mockJwks([key], mode);
-    const res = await list(await signJwt(key, goodPayload(), {}));
-    expect(res.status).toBe(503);
-    expect(res.headers.get('retry-after')).toBe('30');
-    expect(res.headers.get('www-authenticate')).toBeNull();
-    spy.restore();
-  });
+  it.each(['500', 'timeout', 'redirect', 'badjson', 'weak'] as const)(
+    'JWKS %s with no cache → 503 with Retry-After and no challenge',
+    async (mode) => {
+      const spy = mockJwks([key], mode);
+      const res = await list(await signJwt(key, goodPayload(), {}));
+      expect(res.status).toBe(503);
+      expect(res.headers.get('retry-after')).toBe('30');
+      expect(res.headers.get('www-authenticate')).toBeNull();
+      spy.restore();
+    },
+  );
 
   it('keys are cached: two requests make one fetch', async () => {
     const spy = mockJwks([key]);
@@ -201,7 +250,7 @@ describe('keys', () => {
     spy.restore();
   });
 
-  it('the JWKS URL is only ever the issuer\'s', async () => {
+  it("the JWKS URL is only ever the issuer's", async () => {
     const spy = mockJwks([key]);
     await list(await signJwt(key, goodPayload(), { kid: 'k1', jku: 'https://evil.test/x' }));
     await list(await signJwt({ ...key, kid: '../../etc' }));
@@ -221,16 +270,36 @@ describe('metadata', () => {
       scopes_supported: ['mti:read', 'mti:watch'],
       bearer_methods_supported: ['header'],
     });
-    expect((await send({ method: 'GET' }, BASE_ENV, '/.well-known/oauth-protected-resource')).status).toBe(404);
-    expect((await send({ method: 'POST' }, BASE_ENV, '/.well-known/oauth-protected-resource/mcp')).headers.get('allow')).toBe('GET, HEAD');
-    expect((await send({ method: 'HEAD' }, BASE_ENV, '/.well-known/oauth-protected-resource/mcp')).status).toBe(200);
+    expect((await send({ method: 'GET' }, BASE_ENV, '/.well-known/oauth-protected-resource')).status).toBe(
+      404,
+    );
+    expect(
+      (await send({ method: 'POST' }, BASE_ENV, '/.well-known/oauth-protected-resource/mcp')).headers.get(
+        'allow',
+      ),
+    ).toBe('GET, HEAD');
+    expect(
+      (await send({ method: 'HEAD' }, BASE_ENV, '/.well-known/oauth-protected-resource/mcp')).status,
+    ).toBe(200);
   });
   it('gives CORS only to allowed origins', async () => {
-    const yes = await send({ method: 'GET', headers: { origin: 'https://app.allowed.test' } }, BASE_ENV, '/.well-known/oauth-protected-resource/mcp');
+    const yes = await send(
+      { method: 'GET', headers: { origin: 'https://app.allowed.test' } },
+      BASE_ENV,
+      '/.well-known/oauth-protected-resource/mcp',
+    );
     expect(yes.headers.get('access-control-allow-origin')).toBe('https://app.allowed.test');
-    const no = await send({ method: 'GET', headers: { origin: 'https://evil.test' } }, BASE_ENV, '/.well-known/oauth-protected-resource/mcp');
+    const no = await send(
+      { method: 'GET', headers: { origin: 'https://evil.test' } },
+      BASE_ENV,
+      '/.well-known/oauth-protected-resource/mcp',
+    );
     expect(no.headers.get('access-control-allow-origin')).toBeNull();
-    const pre = await send({ method: 'OPTIONS', headers: { origin: 'https://app.allowed.test' } }, BASE_ENV, '/.well-known/oauth-protected-resource/mcp');
+    const pre = await send(
+      { method: 'OPTIONS', headers: { origin: 'https://app.allowed.test' } },
+      BASE_ENV,
+      '/.well-known/oauth-protected-resource/mcp',
+    );
     expect(pre.status).toBe(204);
     expect(pre.headers.get('access-control-allow-methods')).toBe('GET');
   });

@@ -1,4 +1,4 @@
-import { canonicalEcosystem, CheckRequestSchema, ECOSYSTEMS, type CheckResponse } from '@ti/core/packages';
+import { CheckRequestSchema, type CheckResponse, canonicalEcosystem, ECOSYSTEMS } from '@ti/core/packages';
 import { CAPS, clean } from '../clean';
 import { openCursor, sealCursor } from '../cursor';
 import { ENTRY_ID } from '../input';
@@ -17,7 +17,11 @@ type Args = { packages: unknown[]; cursor?: string };
 const pkgOut = obj({ ecosystem: str(40), name: str(214), version: str(128) });
 const pkgIn = {
   oneOf: [
-    obj({ ecosystem: { type: 'string', enum: [...ECOSYSTEMS] }, name: str(214, { minLength: 1 }), version: str(128, { minLength: 1 }) }),
+    obj({
+      ecosystem: { type: 'string', enum: [...ECOSYSTEMS] },
+      name: str(214, { minLength: 1 }),
+      version: str(128, { minLength: 1 }),
+    }),
     obj({ purl: str(512, { minLength: 5, pattern: '^pkg:' }) }),
   ],
 };
@@ -36,9 +40,7 @@ export const tool: ToolDef<Args> = {
   title: 'Check packages',
   description:
     'Checks package versions against MTI records of known vulnerabilities, malicious packages and exploitation signals. Takes up to 1,000 packages, each as ecosystem, name and version, or as a purl. Returns a priority per package (fix_now, fix_soon, plan or note), the version that fixes the matches where one is known, and the matching records. A package with no match is listed under noRecord, which means MTI has no record as of asOf, not that the package is safe. Reachability is not checked.',
-  inputSchema: root(
-    obj({ packages: { ...arr(pkgIn, 1000), minItems: 1 }, cursor: str(512) }, ['packages']),
-  ),
+  inputSchema: root(obj({ packages: { ...arr(pkgIn, 1000), minItems: 1 }, cursor: str(512) }, ['packages'])),
   outputSchema: root(
     obj({
       ...COMMON_OUT,
@@ -80,18 +82,36 @@ export const tool: ToolDef<Args> = {
     const secrets = [deps.env.MCP_HMAC_SECRET, deps.env.MCP_HMAC_SECRET_NEXT];
     let offset = 0;
     if (args.cursor !== undefined) {
-      const st = await openCursor(secrets, 'mti_check_packages', args as Record<string, unknown>, args.cursor);
+      const st = await openCursor(
+        secrets,
+        'mti_check_packages',
+        args as Record<string, unknown>,
+        args.cursor,
+      );
       if (!st || !('o' in st)) return { ok: false, code: 'invalid_argument', field: 'cursor' };
       offset = st.o;
     }
-    const body = { packages: args.packages.map((p) => {
-      const r = rec(p);
-      return 'purl' in r ? { purl: r.purl } : { ecosystem: r.ecosystem, name: r.name, version: r.version };
-    }) };
-    if (!CheckRequestSchema.safeParse(body).success) return { ok: false, code: 'invalid_argument', field: 'packages' };
+    const body = {
+      packages: args.packages.map((p) => {
+        const r = rec(p);
+        return 'purl' in r ? { purl: r.purl } : { ecosystem: r.ecosystem, name: r.name, version: r.version };
+      }),
+    };
+    if (!CheckRequestSchema.safeParse(body).success)
+      return { ok: false, code: 'invalid_argument', field: 'packages' };
 
-    const res = await apiJson<CheckResponse>(deps, { method: 'POST', path: '/v1/packages/check', body }, signal);
-    if (!res.ok) return { ok: false, code: res.code, retryAfter: res.retryAfter, ...(res.code === 'invalid_argument' ? { field: 'packages' } : {}) };
+    const res = await apiJson<CheckResponse>(
+      deps,
+      { method: 'POST', path: '/v1/packages/check', body },
+      signal,
+    );
+    if (!res.ok)
+      return {
+        ok: false,
+        code: res.code,
+        retryAfter: res.retryAfter,
+        ...(res.code === 'invalid_argument' ? { field: 'packages' } : {}),
+      };
     const api = rec(res.body);
     const notes = [NOTE_NO_RECORD, NOTE_REACH];
 
@@ -103,7 +123,10 @@ export const tool: ToolDef<Args> = {
       const fixed = (v: unknown) => {
         if (v === null || v === undefined) return null;
         const m = matching(v, VERSION_RE);
-        if (!m && !notes.includes('Some fixed versions were dropped because they were not in a known format.'))
+        if (
+          !m &&
+          !notes.includes('Some fixed versions were dropped because they were not in a known format.')
+        )
           notes.push('Some fixed versions were dropped because they were not in a known format.');
         return m;
       };
@@ -126,7 +149,15 @@ export const tool: ToolDef<Args> = {
           },
         ];
       });
-      return [{ package: p, priority, upgradeTo: fixed(x.upgradeTo), upgradeNote: clean(x.upgradeNote, CAPS.title), matches: matches.slice(0, 50) }];
+      return [
+        {
+          package: p,
+          priority,
+          upgradeTo: fixed(x.upgradeTo),
+          upgradeNote: clean(x.upgradeNote, CAPS.title),
+          matches: matches.slice(0, 50),
+        },
+      ];
     });
     const noRecord = list(api.noRecord).flatMap((v) => {
       const p = pkg(v);
@@ -139,7 +170,9 @@ export const tool: ToolDef<Args> = {
         : [];
     });
     const sm = rec(api.summary);
-    const summary = Object.fromEntries(PRIORITIES.map((k) => [k, Number.isInteger(sm[k]) ? (sm[k] as number) : 0]));
+    const summary = Object.fromEntries(
+      PRIORITIES.map((k) => [k, Number.isInteger(sm[k]) ? (sm[k] as number) : 0]),
+    );
 
     // One sequence, results then noRecord, so a cursor offset names a place in it.
     const seq: { r?: (typeof results)[number]; n?: (typeof noRecord)[number] }[] = [
@@ -159,7 +192,8 @@ export const tool: ToolDef<Args> = {
       credits: credits(api.credits),
       notes,
     });
-    const size = (n: number, more: boolean) => JSON.stringify({ ...build(n, more), nextCursor: 'x'.repeat(480) }).length;
+    const size = (n: number, more: boolean) =>
+      JSON.stringify({ ...build(n, more), nextCursor: 'x'.repeat(480) }).length;
     let kept = page.length;
     if (size(kept, false) > MAX_STRUCTURED_CHARS) {
       let lo = 0;
@@ -174,10 +208,14 @@ export const tool: ToolDef<Args> = {
     const more = kept < page.length;
     const nextCursor =
       more && deps.env.MCP_HMAC_SECRET
-        ? await sealCursor(deps.env.MCP_HMAC_SECRET, 'mti_check_packages', args as Record<string, unknown>, { o: offset + kept })
+        ? await sealCursor(deps.env.MCP_HMAC_SECRET, 'mti_check_packages', args as Record<string, unknown>, {
+            o: offset + kept,
+          })
         : null;
     const data = { ...build(kept, more), nextCursor };
-    const ecos = [...new Set([...results.map((r) => r.package.ecosystem), ...noRecord.map((n) => n.ecosystem)])].sort();
+    const ecos = [
+      ...new Set([...results.map((r) => r.package.ecosystem), ...noRecord.map((n) => n.ecosystem)]),
+    ].sort();
     deps.stats.ecosystems = ecos.join(',');
     return { ok: true, data, nIn: args.packages.length, nOut: kept };
   },

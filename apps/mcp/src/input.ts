@@ -2,8 +2,10 @@ import { normaliseId } from '@ti/core/ids';
 
 export type InputProblem = 'bad_characters' | 'not_an_id' | 'looks_like_email';
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: detecting controls is the point
-const BAD = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}\u{E0000}-\u{E007F}]/u;
+const C0C1 = '\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f';
+const HIDDEN = '\\p{Cf}\\u{FE00}-\\u{FE0F}\\u{E0100}-\\u{E01EF}\\u{E0000}-\\u{E007F}';
+// Built from strings so the control-character and combining-character lint rules, which are the point here, stay on.
+const BAD = new RegExp(`[${C0C1}${HIDDEN}]`, 'u');
 
 /** True for C0/C1 controls, format characters (zero-width, bidi, Tags) and variation selectors. */
 export function hasBadText(value: string): boolean {

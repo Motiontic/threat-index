@@ -7,7 +7,7 @@ import {
 } from '@modelcontextprotocol/server';
 import type { Env } from '../../src/env';
 import worker from '../../src/index';
-import { RES, ISS } from './tokens';
+import { ISS, RES } from './tokens';
 
 export const MODERN = '2026-07-28';
 export const BASE_ENV = {
@@ -45,7 +45,12 @@ export function modernHeaders(method: string, name?: string, token?: string): Re
   };
 }
 
-export function modernCall(token: string | undefined, method: string, params: Record<string, unknown> = {}, extra: Record<string, string> = {}) {
+export function modernCall(
+  token: string | undefined,
+  method: string,
+  params: Record<string, unknown> = {},
+  extra: Record<string, string> = {},
+) {
   const name = typeof params.name === 'string' ? params.name : undefined;
   return {
     headers: { ...modernHeaders(method, name, token), ...extra },

@@ -46,23 +46,46 @@ export const tool: ToolDef<{ kind: Kind }> = {
     const res = await apiJson<HomeResponse>(deps, { method: 'GET', path: '/v1/home' }, signal);
     if (!res.ok) return { ok: false, code: res.code, retryAfter: res.retryAfter };
     const lists = rec(rec(res.body).lists);
-    const items = list(lists[apiKey]).flatMap((v) => {
-      const x = rec(v);
-      const key = matching(x.key, ID_RE);
-      const type = ['vuln', 'breach', 'ai', 'mal'].find((t) => t === x.type) as 'vuln' | 'breach' | 'ai' | 'mal' | undefined;
-      if (!key || !type) return [];
-      let url: string | null = null;
-      if (type === 'vuln' || type === 'mal') url = mtiLink(deps.env, 'entry', key);
-      else if (type === 'breach') url = mtiLink(deps.env, 'breach', key);
-      else {
-        const src = matching(x.source, SRC_RE);
-        url = src ? mtiLink(deps.env, 'incident', src, key) : null;
-      }
-      if (!url) return [];
-      return [{ key, type, date: date(x.date), url, signal: clean(x.signal, 60), untrusted: { title: clean(x.title, CAPS.title) } }];
-    }).slice(0, 50);
+    const items = list(lists[apiKey])
+      .flatMap((v) => {
+        const x = rec(v);
+        const key = matching(x.key, ID_RE);
+        const type = ['vuln', 'breach', 'ai', 'mal'].find((t) => t === x.type) as
+          | 'vuln'
+          | 'breach'
+          | 'ai'
+          | 'mal'
+          | undefined;
+        if (!key || !type) return [];
+        let url: string | null = null;
+        if (type === 'vuln' || type === 'mal') url = mtiLink(deps.env, 'entry', key);
+        else if (type === 'breach') url = mtiLink(deps.env, 'breach', key);
+        else {
+          const src = matching(x.source, SRC_RE);
+          url = src ? mtiLink(deps.env, 'incident', src, key) : null;
+        }
+        if (!url) return [];
+        return [
+          {
+            key,
+            type,
+            date: date(x.date),
+            url,
+            signal: clean(x.signal, 60),
+            untrusted: { title: clean(x.title, CAPS.title) },
+          },
+        ];
+      })
+      .slice(0, 50);
     const fit = fitToBudget(
-      { asOf: asOfFrom(undefined, deps), credits: credits(undefined), notes: [], kind: args.kind, items, truncated: false },
+      {
+        asOf: asOfFrom(undefined, deps),
+        credits: credits(undefined),
+        notes: [],
+        kind: args.kind,
+        items,
+        truncated: false,
+      },
       'items',
     );
     return { ok: true, data: fit.data, nIn: 1, nOut: fit.kept };

@@ -72,9 +72,10 @@ export function clientIp(request: Request): string | null {
 /** True when the request is over the no-token limit. A limiter error lets it through. */
 export async function limitAnon(env: Env, request: Request): Promise<boolean> {
   const ip = clientIp(request);
-  const cidrs = env.MCP_ANON_EXEMPT_CIDRS !== undefined
-    ? parseCidrs(env.MCP_ANON_EXEMPT_CIDRS)
-    : parseCidrs(DEFAULT_ANON_EXEMPT_CIDRS.join(','));
+  const cidrs =
+    env.MCP_ANON_EXEMPT_CIDRS !== undefined
+      ? parseCidrs(env.MCP_ANON_EXEMPT_CIDRS)
+      : parseCidrs(DEFAULT_ANON_EXEMPT_CIDRS.join(','));
   if (ip && ipInCidrs(ip, cidrs)) return false;
   if (!env.RL_MCP_ANON) return false;
   try {

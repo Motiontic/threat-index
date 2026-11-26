@@ -19,7 +19,14 @@ export const tool: ToolDef<Args> = {
   description:
     'Searches breach notices grouped by company: notice count, affected-record counts by unit and jurisdiction, dates and sources. Company-level data only, with no personal data. Searches by company name or domain, not by email address.',
   inputSchema: root(
-    obj({ query: str(100, { minLength: 1 }), limit: int({ minimum: 1, maximum: 25, default: 10 }), cursor: str(512) }, []),
+    obj(
+      {
+        query: str(100, { minLength: 1 }),
+        limit: int({ minimum: 1, maximum: 25, default: 10 }),
+        cursor: str(512),
+      },
+      [],
+    ),
   ),
   outputSchema: root(
     obj({
@@ -30,7 +37,12 @@ export const tool: ToolDef<Args> = {
           url: str(300),
           companyKey: nstr(260),
           firstSeen: nstr(40),
-          dates: { type: ['object', 'null'], properties: { from: nstr(40), to: nstr(40) }, required: ['from', 'to'], additionalProperties: false },
+          dates: {
+            type: ['object', 'null'],
+            properties: { from: nstr(40), to: nstr(40) },
+            required: ['from', 'to'],
+            additionalProperties: false,
+          },
           noticeCount: int(),
           counts: arr(
             obj({ unit: { type: 'string', enum: UNITS }, jurisdiction: nstr(8), count: { type: 'number' } }),
@@ -48,8 +60,10 @@ export const tool: ToolDef<Args> = {
   ),
   async run(args, deps, signal) {
     const query = args.query?.normalize('NFKC').trim();
-    if (query?.includes('@')) return { ok: false, code: 'invalid_argument', field: 'query', problem: 'looks_like_email' };
-    if (query && hasBadText(query)) return { ok: false, code: 'invalid_argument', field: 'query', problem: 'bad_characters' };
+    if (query?.includes('@'))
+      return { ok: false, code: 'invalid_argument', field: 'query', problem: 'looks_like_email' };
+    if (query && hasBadText(query))
+      return { ok: false, code: 'invalid_argument', field: 'query', problem: 'bad_characters' };
     const limit = args.limit ?? 10;
     const at = await readPage(deps, 'mti_search_breaches', args as Record<string, unknown>);
     if (!at) return { ok: false, code: 'invalid_argument', field: 'cursor' };
@@ -61,7 +75,13 @@ export const tool: ToolDef<Args> = {
       { method: 'GET', path: `/v1/breaches${q.size ? `?${q}` : ''}` },
       signal,
     );
-    if (!res.ok) return { ok: false, code: res.code, retryAfter: res.retryAfter, ...(res.code === 'invalid_argument' ? { field: 'query' } : {}) };
+    if (!res.ok)
+      return {
+        ok: false,
+        code: res.code,
+        retryAfter: res.retryAfter,
+        ...(res.code === 'invalid_argument' ? { field: 'query' } : {}),
+      };
     const api = rec(res.body);
     const all = list(api.items).flatMap((v) => {
       const x = rec(v);
@@ -80,20 +100,50 @@ export const tool: ToolDef<Args> = {
           firstSeen: date(x.firstSeen),
           dates: from && to ? { from, to } : null,
           noticeCount: Number.isInteger(x.noticeCount) ? (x.noticeCount as number) : 0,
-          counts: list(x.counts).flatMap((c) => {
-            const y = rec(c);
-            if (!UNITS.includes(y.unit as string) || typeof y.count !== 'number' || !Number.isFinite(y.count)) return [];
-            return [{ unit: y.unit as string, jurisdiction: matching(y.jurisdiction, JURISDICTION), count: y.count }];
-          }).slice(0, 50),
-          jurisdictions: list(x.jurisdictions).filter((j): j is string => typeof j === 'string' && JURISDICTION.test(j)).slice(0, 60),
+          counts: list(x.counts)
+            .flatMap((c) => {
+              const y = rec(c);
+              if (
+                !UNITS.includes(y.unit as string) ||
+                typeof y.count !== 'number' ||
+                !Number.isFinite(y.count)
+              )
+                return [];
+              return [
+                {
+                  unit: y.unit as string,
+                  jurisdiction: matching(y.jurisdiction, JURISDICTION),
+                  count: y.count,
+                },
+              ];
+            })
+            .slice(0, 50),
+          jurisdictions: list(x.jurisdictions)
+            .filter((j): j is string => typeof j === 'string' && JURISDICTION.test(j))
+            .slice(0, 60),
           sources: sources(x.sources),
           untrusted: { company: clean(company.name, CAPS.name) },
         },
       ];
     });
-    const sliced = await slicePage(deps, 'mti_search_breaches', args as Record<string, unknown>, at, all, api.next, limit);
+    const sliced = await slicePage(
+      deps,
+      'mti_search_breaches',
+      args as Record<string, unknown>,
+      at,
+      all,
+      api.next,
+      limit,
+    );
     const fit = fitToBudget(
-      { asOf: asOfFrom(undefined, deps), credits: credits(api.credits), notes: [], items: sliced.items, truncated: false, nextCursor: sliced.nextCursor },
+      {
+        asOf: asOfFrom(undefined, deps),
+        credits: credits(api.credits),
+        notes: [],
+        items: sliced.items,
+        truncated: false,
+        nextCursor: sliced.nextCursor,
+      },
       'items',
     );
     return { ok: true, data: fit.data, nIn: 1, nOut: fit.kept };

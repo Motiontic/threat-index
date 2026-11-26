@@ -2,15 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { CAPS, clean } from '../src/clean';
 import cases from './fixtures/injection.json';
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the point of the test
-const NASTY = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿­︀-️<>]|[\u{E0000}-\u{E01EF}]/u;
+/** True for any control, hidden, format or markup character. */
+function nasty(text: string): boolean {
+  for (const ch of text) {
+    const c = ch.codePointAt(0) as number;
+    if (c <= 0x1f || (c >= 0x7f && c <= 0x9f) || (c >= 0x200b && c <= 0x200f)) return true;
+    if ((c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)) return true;
+    if (c === 0xfeff || c === 0xad || (c >= 0xfe00 && c <= 0xfe0f) || (c >= 0xe0000 && c <= 0xe01ef))
+      return true;
+    if (ch === '<' || ch === '>') return true;
+  }
+  return false;
+}
 
 describe('clean', () => {
   it('has at least 30 hostile cases', () => expect(cases.length).toBeGreaterThanOrEqual(30));
   it.each(cases)('$name', ({ input, absent, kept }: { input: string; absent: string[]; kept?: string }) => {
     const out = clean(input, CAPS.summary) ?? '';
     for (const bad of absent) expect(out).not.toContain(bad);
-    expect(out).not.toMatch(NASTY);
+    expect(nasty(out)).toBe(false);
     expect(out).not.toMatch(/https?:\/\//i);
     if (kept) expect(out).toContain(kept);
   });

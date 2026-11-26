@@ -6,7 +6,13 @@ import { arr, bool, COMMON_OUT, int, nstr, num, obj, root, str } from '../schema
 import { credits, date, ID_RE, list, matching, numOrNull, rec } from './common';
 import { apiJson, asOfFrom, fitToBudget, type ToolDef } from './shared';
 
-type Args = { query: string; kind?: 'vulnerability' | 'malicious'; exploitedOnly?: boolean; limit?: number; cursor?: string };
+type Args = {
+  query: string;
+  kind?: 'vulnerability' | 'malicious';
+  exploitedOnly?: boolean;
+  limit?: number;
+  cursor?: string;
+};
 
 export const tool: ToolDef<Args> = {
   name: 'mti_search',
@@ -60,21 +66,49 @@ export const tool: ToolDef<Args> = {
       q.set('cursor', st.c);
     }
     const res = await apiJson<SearchResponse>(deps, { method: 'GET', path: `/v1/search?${q}` }, signal);
-    if (!res.ok) return { ok: false, code: res.code, retryAfter: res.retryAfter, ...(res.code === 'invalid_argument' ? { field: 'query' } : {}) };
+    if (!res.ok)
+      return {
+        ok: false,
+        code: res.code,
+        retryAfter: res.retryAfter,
+        ...(res.code === 'invalid_argument' ? { field: 'query' } : {}),
+      };
     const api = rec(res.body);
-    const hits = list(api.hits).flatMap((h) => {
-      const x = rec(h);
-      const key = matching(x.key, ID_RE);
-      const url = key ? mtiLink(deps.env, 'entry', key) : null;
-      if (!key || !url) return [];
-      return [{ key, url, cvss: numOrNull(x.cvss), exploited: x.exploited === true, published: date(x.published), untrusted: { title: clean(x.title, CAPS.title), summary: clean(x.summary, CAPS.summary) } }];
-    }).slice(0, limit);
+    const hits = list(api.hits)
+      .flatMap((h) => {
+        const x = rec(h);
+        const key = matching(x.key, ID_RE);
+        const url = key ? mtiLink(deps.env, 'entry', key) : null;
+        if (!key || !url) return [];
+        return [
+          {
+            key,
+            url,
+            cvss: numOrNull(x.cvss),
+            exploited: x.exploited === true,
+            published: date(x.published),
+            untrusted: { title: clean(x.title, CAPS.title), summary: clean(x.summary, CAPS.summary) },
+          },
+        ];
+      })
+      .slice(0, limit);
     const apiCursor = matching(api.cursor, /^[A-Za-z0-9_-]{1,200}$/);
-    const nextCursor = apiCursor && deps.env.MCP_HMAC_SECRET
-      ? await sealCursor(deps.env.MCP_HMAC_SECRET, 'mti_search', args as Record<string, unknown>, { c: apiCursor })
-      : null;
+    const nextCursor =
+      apiCursor && deps.env.MCP_HMAC_SECRET
+        ? await sealCursor(deps.env.MCP_HMAC_SECRET, 'mti_search', args as Record<string, unknown>, {
+            c: apiCursor,
+          })
+        : null;
     const fit = fitToBudget(
-      { asOf: asOfFrom(undefined, deps), credits: credits(api.credits), notes: [], total: Number.isInteger(api.total) ? (api.total as number) : hits.length, hits, truncated: false, nextCursor },
+      {
+        asOf: asOfFrom(undefined, deps),
+        credits: credits(api.credits),
+        notes: [],
+        total: Number.isInteger(api.total) ? (api.total as number) : hits.length,
+        hits,
+        truncated: false,
+        nextCursor,
+      },
       'hits',
     );
     return { ok: true, data: fit.data, nIn: 1, nOut: fit.kept };

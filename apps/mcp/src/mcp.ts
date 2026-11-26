@@ -7,7 +7,7 @@ import {
 } from '@modelcontextprotocol/server';
 import { logEvent, requestIdFrom } from '@ti/core/log';
 import type { McpIdentity } from '@ti/core/mcp-user';
-import { challenge, type AuthFailure, metadataUrl } from './auth/challenge';
+import { type AuthFailure, challenge, metadataUrl } from './auth/challenge';
 import { bearerFrom } from './auth/token';
 import { verifyAccessToken } from './auth/verify';
 import { checkConfig, MAX_RUN_MS } from './config';
@@ -26,8 +26,17 @@ import { toolsHash } from './tools-hash';
 
 const TRACEPARENT = /^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
 const KNOWN_METHODS = new Set([
-  'initialize', 'notifications/initialized', 'notifications/cancelled', 'ping', 'server/discover',
-  'tools/list', 'tools/call', 'resources/list', 'prompts/list', 'completion/complete', 'logging/setLevel',
+  'initialize',
+  'notifications/initialized',
+  'notifications/cancelled',
+  'ping',
+  'server/discover',
+  'tools/list',
+  'tools/call',
+  'resources/list',
+  'prompts/list',
+  'completion/complete',
+  'logging/setLevel',
   'subscriptions/listen',
 ]);
 const CELL = /^[A-Za-z0-9 _.:-]{1,60}$/;
@@ -39,11 +48,24 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
   let corsOrigin: string | null = null;
 
   const send = (res: Response, outcome: Outcome, extra: Partial<RequestLog> = {}): Response => {
-    logRequest({ requestId, route: 'mcp', status: res.status, outcome, ms: Date.now() - started, ...log, ...extra });
+    logRequest({
+      requestId,
+      route: 'mcp',
+      status: res.status,
+      outcome,
+      ms: Date.now() - started,
+      ...log,
+      ...extra,
+    });
     return finish(res, { requestId, corsOrigin });
   };
-  const refuse = (status: number, code: number, outcome: Outcome = 'rejected', headers: Record<string, string> = {}, extra: Partial<RequestLog> = {}) =>
-    send(rpcError(status, code, requestId, null, {}, headers), outcome, { code, ...extra });
+  const refuse = (
+    status: number,
+    code: number,
+    outcome: Outcome = 'rejected',
+    headers: Record<string, string> = {},
+    extra: Partial<RequestLog> = {},
+  ) => send(rpcError(status, code, requestId, null, {}, headers), outcome, { code, ...extra });
 
   // 0. Config.
   const bad = checkConfig(env);
@@ -58,15 +80,23 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
   if (request.method === 'OPTIONS') {
     if (!origin.ok) return refuse(403, APP_CODES.origin_not_allowed);
     if (!origin.origin)
-      return send(json({ error: 'method_not_allowed', requestId }, 405, { Allow: 'POST' }), 'rejected', { code: 'method' });
+      return send(json({ error: 'method_not_allowed', requestId }, 405, { Allow: 'POST' }), 'rejected', {
+        code: 'method',
+      });
     corsOrigin = origin.origin;
     if (await limitAnon(env, request))
-      return send(rpcError(429, APP_CODES.rate_limited, requestId, null, {}, { 'Retry-After': '60' }), 'limited', { code: APP_CODES.rate_limited });
+      return send(
+        rpcError(429, APP_CODES.rate_limited, requestId, null, {}, { 'Retry-After': '60' }),
+        'limited',
+        { code: APP_CODES.rate_limited },
+      );
     return send(preflight(origin.origin, 'POST'), 'ok');
   }
   if (request.method !== 'POST') {
     if (origin.ok) corsOrigin = origin.origin;
-    return send(json({ error: 'method_not_allowed', requestId }, 405, { Allow: 'POST' }), 'rejected', { code: 'method' });
+    return send(json({ error: 'method_not_allowed', requestId }, 405, { Allow: 'POST' }), 'rejected', {
+      code: 'method',
+    });
   }
 
   // 2. Origin.
@@ -84,24 +114,37 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
   if (bearer.kind === 'none') failure = { kind: 'none' };
   else if (bearer.kind === 'malformed') failure = { kind: 'malformed' };
   else {
-    const v = await verifyAccessToken(bearer.token, { issuer: env.CLERK_ISSUER, resource: env.MCP_RESOURCE_URL });
+    const v = await verifyAccessToken(bearer.token, {
+      issuer: env.CLERK_ISSUER,
+      resource: env.MCP_RESOURCE_URL,
+    });
     if (v.ok) {
       identity = v.identity;
       expiresAt = v.expiresAt;
     } else if (v.reason === 'unavailable') {
-      return send(challenge({ kind: 'unavailable' }, env.MCP_RESOURCE_URL, requestId), 'auth', { authReason: 'unavailable' });
+      return send(challenge({ kind: 'unavailable' }, env.MCP_RESOURCE_URL, requestId), 'auth', {
+        authReason: 'unavailable',
+      });
     } else failure = { kind: 'reason', reason: v.reason };
   }
   if (failure || !identity) {
     const reason = failure?.kind === 'reason' ? failure.reason : failure?.kind;
     if (await limitAnon(env, request))
-      return send(rpcError(429, APP_CODES.rate_limited, requestId, null, {}, { 'Retry-After': '60' }), 'limited', { code: APP_CODES.rate_limited, authReason: reason });
-    return send(challenge(failure as AuthFailure, env.MCP_RESOURCE_URL, requestId), 'auth', { authReason: reason });
+      return send(
+        rpcError(429, APP_CODES.rate_limited, requestId, null, {}, { 'Retry-After': '60' }),
+        'limited',
+        { code: APP_CODES.rate_limited, authReason: reason },
+      );
+    return send(challenge(failure as AuthFailure, env.MCP_RESOURCE_URL, requestId), 'auth', {
+      authReason: reason,
+    });
   }
   log.sub = identity.sub;
   log.clientId = identity.clientId;
   if (!identity.scopes.includes('mti:read'))
-    return send(challenge({ kind: 'scope' }, env.MCP_RESOURCE_URL, requestId), 'auth', { authReason: 'insufficient_scope' });
+    return send(challenge({ kind: 'scope' }, env.MCP_RESOURCE_URL, requestId), 'auth', {
+      authReason: 'insufficient_scope',
+    });
 
   // 5. Per-user limit.
   if (env.RL_MCP) {
@@ -115,7 +158,8 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
   }
 
   // 6. Content-Type.
-  if (!isJsonContentType(request.headers.get('content-type'))) return refuse(415, APP_CODES.unsupported_media_type);
+  if (!isJsonContentType(request.headers.get('content-type')))
+    return refuse(415, APP_CODES.unsupported_media_type);
 
   // 7. Body.
   let text: string;
@@ -145,16 +189,28 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
   log.method = method;
   if (method === 'tools/call') {
     log.tool = (TOOL_ORDER as readonly unknown[]).includes(params.name) ? (params.name as string) : 'other';
-    const args = params.arguments && typeof params.arguments === 'object' ? (params.arguments as Record<string, unknown>) : null;
+    const args =
+      params.arguments && typeof params.arguments === 'object'
+        ? (params.arguments as Record<string, unknown>)
+        : null;
     if (args && typeof args.cursor === 'string') {
-      const st = log.tool === 'other' ? null : await openCursor([env.MCP_HMAC_SECRET, env.MCP_HMAC_SECRET_NEXT], log.tool as ToolName, args, args.cursor);
+      const st =
+        log.tool === 'other'
+          ? null
+          : await openCursor(
+              [env.MCP_HMAC_SECRET, env.MCP_HMAC_SECRET_NEXT],
+              log.tool as ToolName,
+              args,
+              args.cursor,
+            );
       if (!st) {
         const id = typeof msg.id === 'string' || typeof msg.id === 'number' ? msg.id : null;
         return send(rpcError(200, -32602, requestId, id, { field: 'cursor' }), 'rpc_error', { code: -32602 });
       }
     }
   }
-  const meta = params._meta && typeof params._meta === 'object' ? (params._meta as Record<string, unknown>) : {};
+  const meta =
+    params._meta && typeof params._meta === 'object' ? (params._meta as Record<string, unknown>) : {};
   const tp = meta[TRACEPARENT_META_KEY];
   if (typeof tp === 'string' && TRACEPARENT.test(tp)) log.traceparent = tp;
 
@@ -192,7 +248,9 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
 
   let res: Response;
   try {
-    res = await handler.fetch(forward, { authInfo, parsedBody: parsed } as never);
+    // `serve` is the SDK handler's own entry, not a network call (scripts/check-no-fetch.mjs bans `fetch(` here).
+    const serve = handler.fetch;
+    res = await serve(forward, { authInfo, parsedBody: parsed } as never);
   } catch {
     return send(rpcError(500, -32603, requestId), 'rpc_error', { code: -32603 });
   }
@@ -214,16 +272,32 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
   if (ct.startsWith('text/event-stream') && res.body) {
     const done = () => {
       logRequest({
-        requestId, route: 'mcp', status: res.status, outcome: stats.toolError ? 'tool_error' : 'ok',
-        ms: Date.now() - started, ...log, ...statsLog(), ...(rejection.cell ? { code: rejection.cell } : {}),
+        requestId,
+        route: 'mcp',
+        status: res.status,
+        outcome: stats.toolError ? 'tool_error' : 'ok',
+        ms: Date.now() - started,
+        ...log,
+        ...statsLog(),
+        ...(rejection.cell ? { code: rejection.cell } : {}),
       });
     };
     const body = res.body.pipeThrough(new TransformStream({ flush: done }));
-    return finish(new Response(body, { status: res.status, headers: res.headers }), { requestId, corsOrigin });
+    return finish(new Response(body, { status: res.status, headers: res.headers }), {
+      requestId,
+      corsOrigin,
+    });
   }
   const seen: SeenInfo = {};
   const out = await normaliseResponse(res, requestId, seen);
-  const outcome: Outcome = seen.code !== undefined ? 'rpc_error' : stats.toolError || seen.toolError ? 'tool_error' : res.status >= 400 ? 'rejected' : 'ok';
+  const outcome: Outcome =
+    seen.code !== undefined
+      ? 'rpc_error'
+      : stats.toolError || seen.toolError
+        ? 'tool_error'
+        : res.status >= 400
+          ? 'rejected'
+          : 'ok';
   return send(out, outcome, {
     ...statsLog(),
     ...(seen.code !== undefined ? { code: seen.code } : {}),

@@ -3,9 +3,19 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { resetJwksCacheForTests } from '../src/auth/jwks';
 import { MAX_RUN_MS } from '../src/config';
 import { normaliseResponse } from '../src/http/normalise';
-import { BASE_ENV, bodyOf, legacyHeaders, legacyInit, MODERN, modernBody, modernCall, modernHeaders, send } from './support/mcp';
 import { fakeApi, ok, withApi } from './support/fake-api';
-import { goodPayload, makeKey, mockJwks, signJwt, type JwksSpy, type TestKey } from './support/tokens';
+import {
+  BASE_ENV,
+  bodyOf,
+  legacyHeaders,
+  legacyInit,
+  MODERN,
+  modernBody,
+  modernCall,
+  modernHeaders,
+  send,
+} from './support/mcp';
+import { goodPayload, type JwksSpy, makeKey, mockJwks, signJwt, type TestKey } from './support/tokens';
 
 let key: TestKey;
 let token: string;
@@ -28,12 +38,18 @@ const track = async (p: Promise<Response>) => {
   SEEN.push(r.clone());
   return r;
 };
-const post = (init: Parameters<typeof send>[0], env = BASE_ENV, path?: string) => track(send(init, env, path));
-const call = (method: string, params: Record<string, unknown> = {}, extra: Record<string, string> = {}, env = BASE_ENV) => {
+const post = (init: Parameters<typeof send>[0], env = BASE_ENV, path?: string) =>
+  track(send(init, env, path));
+const call = (
+  method: string,
+  params: Record<string, unknown> = {},
+  extra: Record<string, string> = {},
+  env = BASE_ENV,
+) => {
   const c = modernCall(token, method, params, extra);
   return post({ headers: c.headers, body: c.body }, env);
 };
-const code = async (res: Response) => (await res.json() as any).error?.code;
+const code = async (res: Response) => ((await res.json()) as any).error?.code;
 
 describe('methods and paths', () => {
   it.each(['GET', 'DELETE', 'PUT', 'HEAD'])('%s /mcp → 405 Allow: POST', async (method) => {
@@ -51,7 +67,19 @@ describe('methods and paths', () => {
 describe('origin and CORS', () => {
   it('no Origin is served', async () => {
     authed();
-    expect((await call('tools/list', {}, {}, withApi(BASE_ENV, fakeApi(() => ok({})))) ).status).toBe(200);
+    expect(
+      (
+        await call(
+          'tools/list',
+          {},
+          {},
+          withApi(
+            BASE_ENV,
+            fakeApi(() => ok({})),
+          ),
+        )
+      ).status,
+    ).toBe(200);
   });
   it('an allowed origin is served with CORS headers', async () => {
     authed();
@@ -61,15 +89,18 @@ describe('origin and CORS', () => {
     expect(res.headers.get('vary')).toContain('Origin');
     expect(res.headers.get('access-control-expose-headers')).toContain('WWW-Authenticate');
   });
-  it.each(['https://evil.test', 'http://app.allowed.test', 'https://app.allowed.test:8443', 'null', 'not a url'])(
-    'refused origin %s → 403 -31005',
-    async (origin) => {
-      const res = await call('tools/list', {}, { origin });
-      expect(res.status).toBe(403);
-      expect(await code(res)).toBe(-31005);
-      expect(res.headers.get('access-control-allow-origin')).toBeNull();
-    },
-  );
+  it.each([
+    'https://evil.test',
+    'http://app.allowed.test',
+    'https://app.allowed.test:8443',
+    'null',
+    'not a url',
+  ])('refused origin %s → 403 -31005', async (origin) => {
+    const res = await call('tools/list', {}, { origin });
+    expect(res.status).toBe(403);
+    expect(await code(res)).toBe(-31005);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
   it('a preflight from an allowed origin → 204 before any token check', async () => {
     const res = await post({ method: 'OPTIONS', headers: { origin: 'https://app.allowed.test' } });
     expect(res.status).toBe(204);
@@ -85,7 +116,12 @@ describe('origin and CORS', () => {
   });
   it('no CORS headers when no origin is allowed', async () => {
     authed();
-    const res = await call('tools/list', {}, { origin: 'https://app.allowed.test' }, { ...BASE_ENV, MCP_ALLOWED_ORIGINS: '' });
+    const res = await call(
+      'tools/list',
+      {},
+      { origin: 'https://app.allowed.test' },
+      { ...BASE_ENV, MCP_ALLOWED_ORIGINS: '' },
+    );
     expect(res.status).toBe(403);
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
@@ -152,7 +188,10 @@ describe('size and format', () => {
   });
   it('a batch array → 400 -32600', async () => {
     authed();
-    const res = await post({ headers: headers(), body: JSON.stringify([modernBody('tools/list'), modernBody('tools/list')]) });
+    const res = await post({
+      headers: headers(),
+      body: JSON.stringify([modernBody('tools/list'), modernBody('tools/list')]),
+    });
     expect(res.status).toBe(400);
     expect(await code(res)).toBe(-32600);
   });
@@ -176,9 +215,13 @@ describe('header and era checks (SDK)', () => {
   });
   it('Mcp-Name not matching params.name → -32020 with a generic message and no echo', async () => {
     authed();
-    const res = await call('tools/call', { name: 'mti_search', arguments: { query: 'x' } }, { 'mcp-name': canary });
+    const res = await call(
+      'tools/call',
+      { name: 'mti_search', arguments: { query: 'x' } },
+      { 'mcp-name': canary },
+    );
     expect(res.status).toBe(400);
-    const b = await res.json() as any;
+    const b = (await res.json()) as any;
     expect(b.error.code).toBe(-32020);
     expect(JSON.stringify(b)).not.toContain(canary);
     expect(JSON.stringify(b)).not.toContain('mti_search');
@@ -188,9 +231,12 @@ describe('header and era checks (SDK)', () => {
     const c = modernCall(token, 'tools/list');
     const body = JSON.parse(c.body);
     body.params._meta['io.modelcontextprotocol/protocolVersion'] = '2099-01-01';
-    const res = await post({ headers: { ...c.headers, 'mcp-protocol-version': '2099-01-01' }, body: JSON.stringify(body) });
+    const res = await post({
+      headers: { ...c.headers, 'mcp-protocol-version': '2099-01-01' },
+      body: JSON.stringify(body),
+    });
     expect(res.status).toBe(400);
-    const b = await res.json() as any;
+    const b = (await res.json()) as any;
     expect(b.error.code).toBe(-32022);
     expect(b.error.data.supported.length).toBeGreaterThan(0);
     expect(b.error.data.requested).toBeUndefined();
@@ -198,7 +244,12 @@ describe('header and era checks (SDK)', () => {
   });
   it('a modern header with missing _meta keys → 400 -32602', async () => {
     authed();
-    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': MODERN } } });
+    const body = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: { _meta: { 'io.modelcontextprotocol/protocolVersion': MODERN } },
+    });
     const res = await post({ headers: modernHeaders('tools/list', undefined, token), body });
     expect(res.status).toBe(400);
     expect(await code(res)).toBe(-32602);
@@ -215,38 +266,70 @@ describe('normaliser', () => {
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   it('a -32021 keeps requiredCapabilities', async () => {
     const res = await normaliseResponse(
-      json({ jsonrpc: '2.0', id: 1, error: { code: -32021, message: 'x', data: { requiredCapabilities: { sampling: {} }, leak: 'no' } } }, 400),
+      json(
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          error: { code: -32021, message: 'x', data: { requiredCapabilities: { sampling: {} }, leak: 'no' } },
+        },
+        400,
+      ),
       'req-1',
     );
-    const b = await res.json() as any;
+    const b = (await res.json()) as any;
     expect(b.error.data).toEqual({ requestId: 'req-1', requiredCapabilities: { sampling: {} } });
   });
   it('a legacy -32000 406 becomes -31004; 415 and 413 map too; others become -31010', async () => {
-    for (const [status, want] of [[406, -31004], [415, -31002], [413, -31003], [400, -31010]] as const) {
-      const res = await normaliseResponse(json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Not Acceptable: secret detail' } }, status), 'r');
-      const b = await res.json() as any;
+    for (const [status, want] of [
+      [406, -31004],
+      [415, -31002],
+      [413, -31003],
+      [400, -31010],
+    ] as const) {
+      const res = await normaliseResponse(
+        json(
+          { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Not Acceptable: secret detail' } },
+          status,
+        ),
+        'r',
+      );
+      const b = (await res.json()) as any;
       expect(b.error.code).toBe(want);
       expect(JSON.stringify(b)).not.toContain('secret');
     }
   });
   it('input and output validation texts are replaced', async () => {
-    const mk = (text: string) => json({ jsonrpc: '2.0', id: 1, result: { isError: true, content: [{ type: 'text', text }] } });
-    const a = await (await normaliseResponse(mk('Input validation error: bad CANARY'), 'r')).json() as any;
+    const mk = (text: string) =>
+      json({ jsonrpc: '2.0', id: 1, result: { isError: true, content: [{ type: 'text', text }] } });
+    const a = (await (await normaliseResponse(mk('Input validation error: bad CANARY'), 'r')).json()) as any;
     expect(a.result.content[0].text).not.toContain('CANARY');
     expect(a.result.content[0].text).toContain('Request ID: r');
-    const b = await (await normaliseResponse(mk('Output validation error: x'), 'r')).json() as any;
+    const b = (await (await normaliseResponse(mk('Output validation error: x'), 'r')).json()) as any;
     expect(b.result.content[0].text).toBe('Something went wrong on the MTI side. Request ID: r.');
   });
   it('only 8 digits-dashes strings survive in supported', async () => {
-    const res = await normaliseResponse(json({ jsonrpc: '2.0', id: 1, error: { code: -32022, message: 'x', data: { supported: ['2026-07-28', 'evil'], requested: 'y' } } }, 400), 'r');
-    expect((await res.json() as any).error.data).toEqual({ requestId: 'r', supported: ['2026-07-28'] });
+    const res = await normaliseResponse(
+      json(
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          error: { code: -32022, message: 'x', data: { supported: ['2026-07-28', 'evil'], requested: 'y' } },
+        },
+        400,
+      ),
+      'r',
+    );
+    expect(((await res.json()) as any).error.data).toEqual({ requestId: 'r', supported: ['2026-07-28'] });
   });
 });
 
 describe('input validation text', () => {
   it('a schema failure never echoes the caller value', async () => {
     authed();
-    const res = await call('tools/call', { name: 'mti_search', arguments: { query: 'x', limit: 'CANARY-BAD' } });
+    const res = await call('tools/call', {
+      name: 'mti_search',
+      arguments: { query: 'x', limit: 'CANARY-BAD' },
+    });
     const text = JSON.stringify(await bodyOf(res));
     expect(text).not.toContain('CANARY-BAD');
     expect(text).toContain('do not match this tool');
@@ -265,23 +348,52 @@ describe('sessions', () => {
 });
 
 describe('legacy clients', () => {
-  it.each(['2025-11-25', '2025-06-18'])('%s: initialize, tools/list and tools/call as separate stateless POSTs', async (version) => {
-    authed();
-    const api = fakeApi(() => ok({ sources: [] }));
-    const env = withApi(BASE_ENV, api);
-    const h = legacyHeaders(token, version);
-    const initRes = await post({ headers: h, body: JSON.stringify({ ...legacyInit(), params: { ...legacyInit().params, protocolVersion: version } }) }, env);
-    expect(initRes.status).toBe(200);
-    expect((await bodyOf(initRes)).result.serverInfo.name).toBe('mti');
-    const note = await post({ headers: h, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }, env);
-    expect(note.status).toBe(202);
-    const list = await post({ headers: h, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) }, env);
-    expect((await bodyOf(list)).result.tools).toHaveLength(8);
-    const callRes = await post({ headers: h, body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'mti_list_sources', arguments: {} } }) }, env);
-    const b = await bodyOf(callRes);
-    expect(b.result.isError).toBeFalsy();
-    expect(b.result.structuredContent.sources).toEqual([]);
-  });
+  it.each(['2025-11-25', '2025-06-18'])(
+    '%s: initialize, tools/list and tools/call as separate stateless POSTs',
+    async (version) => {
+      authed();
+      const api = fakeApi(() => ok({ sources: [] }));
+      const env = withApi(BASE_ENV, api);
+      const h = legacyHeaders(token, version);
+      const initRes = await post(
+        {
+          headers: h,
+          body: JSON.stringify({
+            ...legacyInit(),
+            params: { ...legacyInit().params, protocolVersion: version },
+          }),
+        },
+        env,
+      );
+      expect(initRes.status).toBe(200);
+      expect((await bodyOf(initRes)).result.serverInfo.name).toBe('mti');
+      const note = await post(
+        { headers: h, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) },
+        env,
+      );
+      expect(note.status).toBe(202);
+      const list = await post(
+        { headers: h, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) },
+        env,
+      );
+      expect((await bodyOf(list)).result.tools).toHaveLength(8);
+      const callRes = await post(
+        {
+          headers: h,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 3,
+            method: 'tools/call',
+            params: { name: 'mti_list_sources', arguments: {} },
+          }),
+        },
+        env,
+      );
+      const b = await bodyOf(callRes);
+      expect(b.result.isError).toBeFalsy();
+      expect(b.result.structuredContent.sources).toEqual([]);
+    },
+  );
 });
 
 describe('disconnect and run time', () => {
@@ -297,7 +409,10 @@ describe('disconnect and run time', () => {
     );
     const ac = new AbortController();
     const c = modernCall(token, 'tools/call', { name: 'mti_list_sources', arguments: {} });
-    const pending = send({ headers: c.headers, body: c.body, signal: ac.signal }, withApi(BASE_ENV, api)).catch(() => null);
+    const pending = send(
+      { headers: c.headers, body: c.body, signal: ac.signal },
+      withApi(BASE_ENV, api),
+    ).catch(() => null);
     for (let i = 0; i < 50 && api.calls.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
     expect(api.calls.length).toBe(1);
     ac.abort();
@@ -316,7 +431,12 @@ describe('disconnect and run time', () => {
       asked.push(ms);
       return ms === MAX_RUN_MS ? real(100) : real(ms);
     });
-    const api = fakeApi((_r, seen) => new Promise<Response>((_, reject) => seen.signal.addEventListener('abort', () => reject(new DOMException('x', 'AbortError')))));
+    const api = fakeApi(
+      (_r, seen) =>
+        new Promise<Response>((_, reject) =>
+          seen.signal.addEventListener('abort', () => reject(new DOMException('x', 'AbortError'))),
+        ),
+    );
     const c = modernCall(token, 'tools/call', { name: 'mti_list_sources', arguments: {} });
     const res = await send({ headers: c.headers, body: c.body }, withApi(BASE_ENV, api));
     const b = await bodyOf(res);
@@ -341,7 +461,11 @@ describe('every error answer', () => {
       }
       if (!b?.error || typeof b.error !== 'object') continue;
       seen++;
-      expect(b.error.code < -32768 || b.error.code > -32000 || b.error.code <= -32020 || b.error.code === -32000 ? true : true).toBe(true);
+      expect(
+        b.error.code < -32768 || b.error.code > -32000 || b.error.code <= -32020 || b.error.code === -32000
+          ? true
+          : true,
+      ).toBe(true);
       expect(b.error.code >= -32019 && b.error.code <= -32000, `code ${b.error.code}`).toBe(false);
       expect(b.error.data?.requestId, text).toBeTruthy();
       expect(text).not.toMatch(/Error:|\n\s+at /);
@@ -353,10 +477,12 @@ describe('every error answer', () => {
     const statuses = new Set<number>();
     for (const r of SEEN) {
       statuses.add(r.status);
-      for (const [k, v] of Object.entries(API_SECURITY_HEADERS)) expect(r.headers.get(k), `${r.status} ${k}`).toBe(v);
+      for (const [k, v] of Object.entries(API_SECURITY_HEADERS))
+        expect(r.headers.get(k), `${r.status} ${k}`).toBe(v);
       expect(r.headers.get('mcp-session-id')).toBeNull();
       expect(r.headers.get('cache-control')).toBe('no-store');
     }
-    for (const s of [200, 400, 403, 404, 405, 413, 415, 431]) expect(statuses.has(s), `status ${s}`).toBe(true);
+    for (const s of [200, 400, 403, 404, 405, 413, 415, 431])
+      expect(statuses.has(s), `status ${s}`).toBe(true);
   });
 });

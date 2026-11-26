@@ -42,7 +42,11 @@ export function fakeApi(handler: Handler): FakeApi {
   return { fetcher, calls };
 }
 
-export const withApi = (env: Env, api: FakeApi, extra: Partial<Env> = {}): Env => ({ ...env, API: api.fetcher, ...extra });
+export const withApi = (env: Env, api: FakeApi, extra: Partial<Env> = {}): Env => ({
+  ...env,
+  API: api.fetcher,
+  ...extra,
+});
 export const ok = (body: unknown) => Response.json(body);
 export const status = (code: number, body: unknown = { error: 'x' }, headers: Record<string, string> = {}) =>
   Response.json(body, { status: code, headers });

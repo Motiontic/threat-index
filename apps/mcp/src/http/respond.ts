@@ -3,7 +3,10 @@ import { API_SECURITY_HEADERS } from '@ti/core/security-headers';
 import { corsHeaders } from './origin';
 
 export function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
 }
 
 /** Every response leaves through here: security headers, request id, no-store, no session id. */

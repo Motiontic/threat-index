@@ -7,9 +7,17 @@ let toolsHashMemo: string | undefined;
 export async function toolsHash(): Promise<string> {
   if (toolsHashMemo) return toolsHashMemo;
   const defs = enabledTools().map((t) => ({
-    name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, outputSchema: t.outputSchema, hints: HINTS,
+    name: t.name,
+    title: t.title,
+    description: t.description,
+    inputSchema: t.inputSchema,
+    outputSchema: t.outputSchema,
+    hints: HINTS,
   }));
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(defs)));
-  toolsHashMemo = [...new Uint8Array(d)].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('');
+  toolsHashMemo = [...new Uint8Array(d)]
+    .slice(0, 6)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
   return toolsHashMemo;
 }

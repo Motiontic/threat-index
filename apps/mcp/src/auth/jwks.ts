@@ -11,7 +11,11 @@ interface Cache {
   fetchedAt: number;
   keys: Map<string, CryptoKey>;
 }
-const state: { cache: Cache | null; inflight: { issuer: string; promise: Promise<Cache> } | null; lastRefreshAt: number } = {
+const state: {
+  cache: Cache | null;
+  inflight: { issuer: string; promise: Promise<Cache> } | null;
+  lastRefreshAt: number;
+} = {
   cache: null,
   inflight: null,
   lastRefreshAt: 0,
@@ -66,7 +70,13 @@ async function load(issuer: string, now: number): Promise<Cache> {
     try {
       keys.set(
         k.kid,
-        await crypto.subtle.importKey('jwk', { kty: 'RSA', n: k.n, e: 'AQAB', alg: 'RS256', ext: true }, RS256, false, ['verify']),
+        await crypto.subtle.importKey(
+          'jwk',
+          { kty: 'RSA', n: k.n, e: 'AQAB', alg: 'RS256', ext: true },
+          RS256,
+          false,
+          ['verify'],
+        ),
       );
     } catch {
       // skip a key that will not import
@@ -91,7 +101,11 @@ function refresh(issuer: string, now: number): Promise<Cache> {
   return promise;
 }
 
-export async function getSigningKey(issuer: string, kid: string, now = Date.now()): Promise<CryptoKey | null> {
+export async function getSigningKey(
+  issuer: string,
+  kid: string,
+  now = Date.now(),
+): Promise<CryptoKey | null> {
   const cache = state.cache;
   if (cache && cache.issuer === issuer && now - cache.fetchedAt < FRESH_MS) {
     const hit = cache.keys.get(kid);

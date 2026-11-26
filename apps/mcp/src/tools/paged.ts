@@ -1,6 +1,6 @@
 import { openCursor, sealCursor } from '../cursor';
-import type { ToolName } from './index';
 import type { CallDeps } from '../server';
+import type { ToolName } from './index';
 
 /** Reads a `{ p, k }` cursor: the API page and how many items of it were already given. */
 export async function readPage(
@@ -9,7 +9,12 @@ export async function readPage(
   args: Record<string, unknown>,
 ): Promise<{ page: number; skip: number } | null> {
   if (typeof args.cursor !== 'string') return { page: 1, skip: 0 };
-  const st = await openCursor([deps.env.MCP_HMAC_SECRET, deps.env.MCP_HMAC_SECRET_NEXT], tool, args, args.cursor);
+  const st = await openCursor(
+    [deps.env.MCP_HMAC_SECRET, deps.env.MCP_HMAC_SECRET_NEXT],
+    tool,
+    args,
+    args.cursor,
+  );
   return st && 'p' in st ? { page: st.p, skip: st.k } : null;
 }
 

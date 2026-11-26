@@ -1,6 +1,6 @@
-import { requestIdFrom } from '@ti/core/log';
 import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/server';
-import { SERVER_INFO, siteOrigin } from './config';
+import { requestIdFrom } from '@ti/core/log';
+import { MODERN_PROTOCOL_VERSION, SERVER_INFO, siteOrigin } from './config';
 import type { Env } from './env';
 import { finish, json } from './http/respond';
 import { logRequest } from './log';
@@ -25,11 +25,16 @@ export function serverCard(env: Env): ServerCard {
     name: 'com.motiontic/mti',
     version: SERVER_INFO.version,
     title: SERVER_INFO.title,
-    description: 'Known vulnerabilities, malicious packages, exploitation signals, breaches and AI incidents.',
+    description:
+      'Known vulnerabilities, malicious packages, exploitation signals, breaches and AI incidents.',
     websiteUrl: siteOrigin(env),
     repository: { url: 'https://github.com/Motiontic/threat-index', source: 'github', subfolder: 'apps/mcp' },
     remotes: [
-      { type: 'streamable-http', url: env.MCP_RESOURCE_URL, supportedProtocolVersions: [...SUPPORTED_PROTOCOL_VERSIONS] },
+      {
+        type: 'streamable-http',
+        url: env.MCP_RESOURCE_URL,
+        supportedProtocolVersions: [MODERN_PROTOCOL_VERSION, ...SUPPORTED_PROTOCOL_VERSIONS],
+      },
     ],
   };
 }
@@ -57,15 +62,25 @@ export async function handleCard(request: Request, env: Env, _ctx: ExecutionCont
     return done(
       new Response(null, {
         status: 204,
-        headers: { ...CORS, 'Access-Control-Allow-Methods': 'GET, HEAD', 'Access-Control-Allow-Headers': 'Content-Type, If-None-Match' },
+        headers: {
+          ...CORS,
+          'Access-Control-Allow-Methods': 'GET, HEAD',
+          'Access-Control-Allow-Headers': 'Content-Type, If-None-Match',
+        },
       }),
       'ok',
     );
   if (request.method !== 'GET' && request.method !== 'HEAD')
-    return done(json({ error: 'method_not_allowed', requestId }, 405, { Allow: 'GET, HEAD, OPTIONS' }), 'rejected');
+    return done(
+      json({ error: 'method_not_allowed', requestId }, 405, { Allow: 'GET, HEAD, OPTIONS' }),
+      'rejected',
+    );
   const body = JSON.stringify(serverCard(env));
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
-  const etag = `"${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32)}"`;
+  const etag = `"${[...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32)}"`;
   const headers = {
     'Content-Type': 'application/mcp-server-card+json',
     ...CORS,
@@ -73,6 +88,7 @@ export async function handleCard(request: Request, env: Env, _ctx: ExecutionCont
     'Cache-Control': 'public, max-age=3600',
     ETag: etag,
   };
-  if (matches(request.headers.get('if-none-match'), etag)) return done(new Response(null, { status: 304, headers }), 'ok');
+  if (matches(request.headers.get('if-none-match'), etag))
+    return done(new Response(null, { status: 304, headers }), 'ok');
   return done(new Response(request.method === 'HEAD' ? null : body, { status: 200, headers }), 'ok');
 }

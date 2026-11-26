@@ -55,7 +55,13 @@ export const tool: ToolDef<{ id: string }> = {
           50,
         ),
         advisories: arr(
-          obj({ source: str(64), sourceId: str(128), status: nstr(32), published: nstr(40), url: nstr(2048) }),
+          obj({
+            source: str(64),
+            sourceId: str(128),
+            status: nstr(32),
+            published: nstr(40),
+            url: nstr(2048),
+          }),
           30,
         ),
         recentChanges: arr(obj({ kind: str(40), at: str(40), source: nstr(64) }), 20),
@@ -67,16 +73,43 @@ export const tool: ToolDef<{ id: string }> = {
   async run(args, deps, signal) {
     const id = normaliseEntryId(args.id);
     if (!ENTRY_ID.test(id)) return { ok: false, code: 'invalid_argument', field: 'id', problem: 'not_an_id' };
-    const res = await apiJson<EntryResponse>(deps, { method: 'GET', path: `/v1/entries/${encodeURIComponent(id)}` }, signal);
+    const res = await apiJson<EntryResponse>(
+      deps,
+      { method: 'GET', path: `/v1/entries/${encodeURIComponent(id)}` },
+      signal,
+    );
     if (!res.ok && res.status === 404)
-      return { ok: true, data: { found: false, id, asOf: deps.now().toISOString(), credits: [], notes: ['No MTI record for this ID.'] }, nIn: 1, nOut: 0 };
-    if (!res.ok) return { ok: false, code: res.code, retryAfter: res.retryAfter, ...(res.code === 'invalid_argument' ? { field: 'id', problem: 'not_an_id' as const } : {}) };
+      return {
+        ok: true,
+        data: {
+          found: false,
+          id,
+          asOf: deps.now().toISOString(),
+          credits: [],
+          notes: ['No MTI record for this ID.'],
+        },
+        nIn: 1,
+        nOut: 0,
+      };
+    if (!res.ok)
+      return {
+        ok: false,
+        code: res.code,
+        retryAfter: res.retryAfter,
+        ...(res.code === 'invalid_argument' ? { field: 'id', problem: 'not_an_id' as const } : {}),
+      };
     const top = rec(res.body);
     const e = rec(top.entry);
     const full = top.access === 'full';
     const key = matching(e.key, ID_RE);
     const signals = full ? list(e.signals).map(rec) : [];
-    const counts = { exploitedInWild: 0, ransomware: 0, publicExploits: 0, proofsOfConcept: 0, detections: 0 };
+    const counts = {
+      exploitedInWild: 0,
+      ransomware: 0,
+      publicExploits: 0,
+      proofsOfConcept: 0,
+      detections: 0,
+    };
     const sigSources = new Set<string>();
     for (const s of signals) {
       const name = SIGNAL_COUNTS[s.kind as keyof typeof SIGNAL_COUNTS];
@@ -105,7 +138,15 @@ export const tool: ToolDef<{ id: string }> = {
         const source = matching(a.source, SRC_RE);
         const sourceId = matching(a.sourceId, ID_RE);
         if (!source || !sourceId) return [];
-        return [{ source, sourceId, status: matching(a.status, /^[a-z_ -]{1,32}$/), published: date(a.published), url: sourceLink(a.url) }];
+        return [
+          {
+            source,
+            sourceId,
+            status: matching(a.status, /^[a-z_ -]{1,32}$/),
+            published: date(a.published),
+            url: sourceLink(a.url),
+          },
+        ];
       })
       .slice(0, 30);
     const recentChanges = (full ? list(e.changes).map(rec) : [])
@@ -132,8 +173,12 @@ export const tool: ToolDef<{ id: string }> = {
       epss: numOrNull(e.epss),
       exploited: e.exploited === true,
       kevAdded: date(e.kevAdded),
-      cwe: list(e.cwe).filter((c): c is string => typeof c === 'string' && /^CWE-\d{1,6}$/.test(c)).slice(0, 20),
-      aliases: list(e.aliases).filter((a): a is string => typeof a === 'string' && ENTRY_ID.test(a)).slice(0, 50),
+      cwe: list(e.cwe)
+        .filter((c): c is string => typeof c === 'string' && /^CWE-\d{1,6}$/.test(c))
+        .slice(0, 20),
+      aliases: list(e.aliases)
+        .filter((a): a is string => typeof a === 'string' && ENTRY_ID.test(a))
+        .slice(0, 50),
       exploitation: { ...counts, sources: [...sigSources].slice(0, 20) },
       fixes,
       advisories,

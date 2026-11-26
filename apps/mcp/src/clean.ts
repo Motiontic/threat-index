@@ -6,13 +6,14 @@ const CSI = new RegExp(`(?:${ESC}\\[|\\u009b)[0-?]*[ -/]*[@-~]?`, 'g');
 const ESC2 = new RegExp(`${ESC}[ -~]?`, 'g');
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping controls is the point
 const CONTROLS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
-const HIDDEN = /[\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}\p{Co}\p{Cn}]/gu;
+const HIDDEN = /\p{Cf}|[\u{FE00}-\u{FE0F}]|[\u{E0100}-\u{E01EF}]|\p{Co}|\p{Cn}/gu;
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
 function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-fA-F]{1,6}|#\d{1,7}|[a-zA-Z]{2,6});/g, (m, body: string) => {
     if (body.startsWith('#')) {
-      const n = body[1] === 'x' || body[1] === 'X' ? Number.parseInt(body.slice(2), 16) : Number(body.slice(1));
+      const n =
+        body[1] === 'x' || body[1] === 'X' ? Number.parseInt(body.slice(2), 16) : Number(body.slice(1));
       return Number.isInteger(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : ' ';
     }
     return ENTITIES[body.toLowerCase()] ?? m;

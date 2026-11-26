@@ -8,10 +8,10 @@ import { tool as mti_list_sources } from './mti_list_sources';
 import { tool as mti_search } from './mti_search';
 import { tool as mti_search_breaches } from './mti_search_breaches';
 import { tool as mti_search_incidents } from './mti_search_incidents';
-import type { ToolDef } from './shared';
 import { tool as mti_watch_add } from './mti_watch_add';
 import { tool as mti_watch_list } from './mti_watch_list';
 import { tool as mti_watch_remove } from './mti_watch_remove';
+import type { ToolDef } from './shared';
 
 /** The fixed order tools are listed in. A tool is enabled by its own change, which flips `enabled` in its file. */
 export const TOOL_ORDER = [

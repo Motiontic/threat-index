@@ -1,17 +1,28 @@
-import { type McpServer, fromJsonSchema, requireScopes } from '@modelcontextprotocol/server';
+import { fromJsonSchema, type McpServer, requireScopes } from '@modelcontextprotocol/server';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/server/validators/cf-worker';
 import { logEvent } from '@ti/core/log';
 import { callApi } from '../api';
-import type { CallDeps } from '../server';
 import { findBadText, type InputProblem } from '../input';
 import type { JsonSchema } from '../schema';
+import type { CallDeps } from '../server';
 import { TRUST_META } from '../trust';
 import type { ToolName } from './index';
 
 export type ToolErrorCode =
-  | 'invalid_argument' | 'not_available_yet' | 'rate_limited' | 'blocked' | 'tool_off'
-  | 'upstream_unavailable' | 'timeout' | 'internal';
-export const HINTS = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+  | 'invalid_argument'
+  | 'not_available_yet'
+  | 'rate_limited'
+  | 'blocked'
+  | 'tool_off'
+  | 'upstream_unavailable'
+  | 'timeout'
+  | 'internal';
+export const HINTS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
 export const MAX_STRUCTURED_CHARS = 32_000;
 const MAX_UPSTREAM_BYTES = 4 * 1024 * 1024;
 
@@ -72,7 +83,8 @@ export function fitToBudget(
   let hi = list.length;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    if (size({ ...data, [key as string]: list.slice(0, mid), truncated: true }) <= MAX_STRUCTURED_CHARS) lo = mid;
+    if (size({ ...data, [key as string]: list.slice(0, mid), truncated: true }) <= MAX_STRUCTURED_CHARS)
+      lo = mid;
     else hi = mid - 1;
   }
   return { data: { ...data, [key as string]: list.slice(0, lo), truncated: true }, kept: lo };
@@ -113,7 +125,12 @@ export async function apiJson<T>(
     }
     if (status === 429) {
       const n = Number(res.headers.get('retry-after'));
-      return { ok: false, status, code: 'rate_limited', retryAfter: Number.isInteger(n) && n > 0 && n <= 3600 ? n : 60 };
+      return {
+        ok: false,
+        status,
+        code: 'rate_limited',
+        retryAfter: Number.isInteger(n) && n > 0 && n <= 3600 ? n : 60,
+      };
     }
     if (status === 501) return { ok: false, status, code: 'not_available_yet' };
     return { ok: false, status, code: 'upstream_unavailable' };
@@ -176,7 +193,13 @@ export function registerTool(server: McpServer, def: ToolDef<never>, deps: CallD
         if (off !== null && off !== undefined) return failure(deps, { ok: false, code: 'tool_off' });
 
         const bad = findBadText(args);
-        if (bad) return failure(deps, { ok: false, code: 'invalid_argument', field: bad, problem: 'bad_characters' });
+        if (bad)
+          return failure(deps, {
+            ok: false,
+            code: 'invalid_argument',
+            field: bad,
+            problem: 'bad_characters',
+          });
 
         const signal = AbortSignal.any([deps.signal, ctx.mcpReq.signal]);
         const answer = await def.run(args as never, deps, signal);

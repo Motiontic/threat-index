@@ -1,6 +1,8 @@
 import type { Env } from './env';
 
 export const SERVER_INFO = { name: 'mti', title: 'MTI (Motiontic Threat Index)', version: '1.0.0' } as const;
+/** The 2026-07-28 revision `server/discover` lists. SDK 2.4.0 does not export it. */
+export const MODERN_PROTOCOL_VERSION = '2026-07-28';
 export const MAX_RUN_MS = 30_000;
 export const TOOLS_LIST_CACHE = { ttlMs: 3_600_000, cacheScope: 'public' } as const;
 
@@ -17,7 +19,9 @@ function badUrl(raw: string | undefined): boolean {
     return true;
   }
   const secure = u.protocol === 'https:' || (u.protocol === 'http:' && u.hostname === 'localhost');
-  return !secure || u.search !== '' || u.hash !== '' || raw.endsWith('/') || u.username !== '' || u.password !== '';
+  return (
+    !secure || u.search !== '' || u.hash !== '' || raw.endsWith('/') || u.username !== '' || u.password !== ''
+  );
 }
 
 /** Names of the variables that are missing or malformed. Never their values. */

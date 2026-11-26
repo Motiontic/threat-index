@@ -21,7 +21,12 @@ export interface TestKey {
 }
 export async function makeKey(kid = 'k1', bits = 2048): Promise<TestKey> {
   const pair = (await crypto.subtle.generateKey(
-    { name: 'RSASSA-PKCS1-v1_5', modulusLength: bits, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+    {
+      name: 'RSASSA-PKCS1-v1_5',
+      modulusLength: bits,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: 'SHA-256',
+    },
     true,
     ['sign', 'verify'],
   )) as CryptoKeyPair;
@@ -49,11 +54,13 @@ export async function signJwt(
   header: Record<string, unknown> = {},
   opts: { sigBytes?: Uint8Array } = {},
 ): Promise<string> {
-  const h = { alg: 'RS256', typ: 'at+jwt', kid: key.kid, ...header };
-  for (const o of [h, payload]) for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
+  const h: Record<string, unknown> = { alg: 'RS256', typ: 'at+jwt', kid: key.kid, ...header };
+  for (const o of [h, payload] as Record<string, unknown>[])
+    for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
   const signing = `${b64u(JSON.stringify(h))}.${b64u(JSON.stringify(payload))}`;
   const sig =
-    opts.sigBytes ?? new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key.privateKey, enc.encode(signing)));
+    opts.sigBytes ??
+    new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key.privateKey, enc.encode(signing)));
   return `${signing}.${b64u(sig)}`;
 }
 
@@ -70,30 +77,39 @@ export function mockJwks(keys: TestKey[], mode: JwksMode = 'ok'): JwksSpy {
   resetJwksCacheForTests();
   const real = globalThis.fetch;
   const spy: JwksSpy = { calls: [], mode, keys, restore: () => {} };
-  const mock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    spy.calls.push(url);
-    if (url !== JWKS_URL) throw new Error(`unexpected fetch ${url}`);
-    expectInit(init);
-    switch (spy.mode) {
-      case '500':
-        return new Response('nope', { status: 500 });
-      case 'timeout':
-        throw new DOMException('timed out', 'TimeoutError');
-      case 'redirect':
-        throw new TypeError('redirect mode is set to error');
-      case 'badjson':
-        return new Response('{not json', { status: 200 });
-      case 'weak': {
-        const weak = await makeKey('weak', 1024);
-        return Response.json({ keys: [{ ...weak.publicJwk, kid: 'weak', use: 'sig', alg: 'RS256' }] });
+  const mock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      spy.calls.push(url);
+      if (url !== JWKS_URL) throw new Error(`unexpected fetch ${url}`);
+      expectInit(init);
+      switch (spy.mode) {
+        case '500':
+          return new Response('nope', { status: 500 });
+        case 'timeout':
+          throw new DOMException('timed out', 'TimeoutError');
+        case 'redirect':
+          throw new TypeError('redirect mode is set to error');
+        case 'badjson':
+          return new Response('{not json', { status: 200 });
+        case 'weak': {
+          const weak = await makeKey('weak', 1024);
+          return Response.json({ keys: [{ ...weak.publicJwk, kid: 'weak', use: 'sig', alg: 'RS256' }] });
+        }
+        default:
+          return Response.json({
+            keys: spy.keys.map((k) => ({
+              ...k.publicJwk,
+              kid: k.kid,
+              use: 'sig',
+              alg: 'RS256',
+              ext: undefined,
+              key_ops: undefined,
+            })),
+          });
       }
-      default:
-        return Response.json({
-          keys: spy.keys.map((k) => ({ ...k.publicJwk, kid: k.kid, use: 'sig', alg: 'RS256', ext: undefined, key_ops: undefined })),
-        });
-    }
-  });
+    });
   spy.restore = () => {
     mock.mockRestore();
     globalThis.fetch = real;

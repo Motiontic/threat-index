@@ -11,8 +11,7 @@ export function bearerFrom(
   const scheme = sp < 0 ? header : header.slice(0, sp);
   if (scheme.toLowerCase() !== 'bearer') return { kind: 'none' };
   const value = sp < 0 ? '' : header.slice(sp + 1);
-  if (value === '' || value.length > MAX_TOKEN_CHARS || /[,\s]/.test(value))
-    return { kind: 'malformed' };
+  if (value === '' || value.length > MAX_TOKEN_CHARS || /[,\s]/.test(value)) return { kind: 'malformed' };
   if (!B64TOKEN.test(value)) return { kind: 'malformed' };
   return { kind: 'token', token: value };
 }

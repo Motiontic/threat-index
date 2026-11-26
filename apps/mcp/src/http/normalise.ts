@@ -12,8 +12,14 @@ function fixError(err: Record<string, unknown>, status: number, requestId: strin
   const old = err.data as Record<string, unknown> | undefined;
   const isOurs = Object.values(APP_CODES).includes(code as never);
   if (!isOurs && inReserved(code) && !(code in FIXED_MESSAGES)) {
-    code = status === 415 ? APP_CODES.unsupported_media_type : status === 413 ? APP_CODES.body_too_large
-      : status === 406 ? APP_CODES.not_acceptable : APP_CODES.bad_request;
+    code =
+      status === 415
+        ? APP_CODES.unsupported_media_type
+        : status === 413
+          ? APP_CODES.body_too_large
+          : status === 406
+            ? APP_CODES.not_acceptable
+            : APP_CODES.bad_request;
   }
   err.code = code;
   err.message = FIXED_MESSAGES[code] ?? 'Error';
@@ -32,7 +38,11 @@ export interface SeenInfo {
   toolError?: boolean;
 }
 
-export async function normaliseResponse(res: Response, requestId: string, seen: SeenInfo = {}): Promise<Response> {
+export async function normaliseResponse(
+  res: Response,
+  requestId: string,
+  seen: SeenInfo = {},
+): Promise<Response> {
   if (!res.headers.get('content-type')?.toLowerCase().startsWith('application/json')) return res;
   const text = await res.text();
   let body: unknown;

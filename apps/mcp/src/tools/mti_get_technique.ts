@@ -29,7 +29,13 @@ export const tool: ToolDef<{ id: string }> = {
         children: arr(ref(), 50),
         childrenMore: bool(),
         vulns: arr(
-          obj({ key: str(128), url: str(300), cvss: num(), exploited: bool(), untrusted: obj({ title: nstr(CAPS.title) }) }),
+          obj({
+            key: str(128),
+            url: str(300),
+            cvss: num(),
+            exploited: bool(),
+            untrusted: obj({ title: nstr(CAPS.title) }),
+          }),
           20,
         ),
         vulnsMore: bool(),
@@ -40,11 +46,33 @@ export const tool: ToolDef<{ id: string }> = {
   ),
   async run(args, deps, signal) {
     const id = normaliseEntryId(args.id);
-    if (!TECHNIQUE_ID.test(id)) return { ok: false, code: 'invalid_argument', field: 'id', problem: 'not_an_id' };
-    const res = await apiJson<TechniqueDetail>(deps, { method: 'GET', path: `/v1/techniques/${encodeURIComponent(id)}` }, signal);
+    if (!TECHNIQUE_ID.test(id))
+      return { ok: false, code: 'invalid_argument', field: 'id', problem: 'not_an_id' };
+    const res = await apiJson<TechniqueDetail>(
+      deps,
+      { method: 'GET', path: `/v1/techniques/${encodeURIComponent(id)}` },
+      signal,
+    );
     if (!res.ok && res.status === 404)
-      return { ok: true, data: { found: false, id, asOf: deps.now().toISOString(), credits: [], notes: ['No MTI record for this ID.'] }, nIn: 1, nOut: 0 };
-    if (!res.ok) return { ok: false, code: res.code, retryAfter: res.retryAfter, ...(res.code === 'invalid_argument' ? { field: 'id', problem: 'not_an_id' as const } : {}) };
+      return {
+        ok: true,
+        data: {
+          found: false,
+          id,
+          asOf: deps.now().toISOString(),
+          credits: [],
+          notes: ['No MTI record for this ID.'],
+        },
+        nIn: 1,
+        nOut: 0,
+      };
+    if (!res.ok)
+      return {
+        ok: false,
+        code: res.code,
+        retryAfter: res.retryAfter,
+        ...(res.code === 'invalid_argument' ? { field: 'id', problem: 'not_an_id' as const } : {}),
+      };
     const t = rec(res.body);
     const tid = (v: unknown) => matching(v, TECHNIQUE_ID);
     const link = (v: unknown) => {
@@ -62,7 +90,17 @@ export const tool: ToolDef<{ id: string }> = {
       const x = rec(v);
       const key = matching(x.key, ID_RE);
       const url = key ? mtiLink(deps.env, 'entry', key) : null;
-      return key && url ? [{ key, url, cvss: numOrNull(x.cvss), exploited: x.exploited === true, untrusted: { title: clean(x.title, CAPS.title) } }] : [];
+      return key && url
+        ? [
+            {
+              key,
+              url,
+              cvss: numOrNull(x.cvss),
+              exploited: x.exploited === true,
+              untrusted: { title: clean(x.title, CAPS.title) },
+            },
+          ]
+        : [];
     });
     const framework = FRAMEWORKS.find((f) => f === t.framework) ?? null;
     const data = {
@@ -73,7 +111,9 @@ export const tool: ToolDef<{ id: string }> = {
       id,
       framework,
       url: link(id),
-      parent: parentId ? { id: parentId, url: link(parentId), untrusted: { name: clean(pr.name, CAPS.name) } } : null,
+      parent: parentId
+        ? { id: parentId, url: link(parentId), untrusted: { name: clean(pr.name, CAPS.name) } }
+        : null,
       children: children.slice(0, 50),
       childrenMore: children.length > 50,
       vulns: vulnsAll.slice(0, 20),

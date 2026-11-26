@@ -50,7 +50,8 @@ export const tool: ToolDef<Args> = {
   ),
   async run(args, deps, signal) {
     const query = args.query?.normalize('NFKC').trim();
-    if (query && hasBadText(query)) return { ok: false, code: 'invalid_argument', field: 'query', problem: 'bad_characters' };
+    if (query && hasBadText(query))
+      return { ok: false, code: 'invalid_argument', field: 'query', problem: 'bad_characters' };
     const limit = args.limit ?? 10;
     const at = await readPage(deps, 'mti_search_incidents', args as Record<string, unknown>);
     if (!at) return { ok: false, code: 'invalid_argument', field: 'cursor' };
@@ -63,7 +64,13 @@ export const tool: ToolDef<Args> = {
       { method: 'GET', path: `/v1/incidents${q.size ? `?${q}` : ''}` },
       signal,
     );
-    if (!res.ok) return { ok: false, code: res.code, retryAfter: res.retryAfter, ...(res.code === 'invalid_argument' ? { field: 'query' } : {}) };
+    if (!res.ok)
+      return {
+        ok: false,
+        code: res.code,
+        retryAfter: res.retryAfter,
+        ...(res.code === 'invalid_argument' ? { field: 'query' } : {}),
+      };
     const api = rec(res.body);
     const all = list(api.items).flatMap((v) => {
       const x = rec(v);
@@ -85,9 +92,24 @@ export const tool: ToolDef<Args> = {
         },
       ];
     });
-    const sliced = await slicePage(deps, 'mti_search_incidents', args as Record<string, unknown>, at, all, api.next, limit);
+    const sliced = await slicePage(
+      deps,
+      'mti_search_incidents',
+      args as Record<string, unknown>,
+      at,
+      all,
+      api.next,
+      limit,
+    );
     const fit = fitToBudget(
-      { asOf: asOfFrom(undefined, deps), credits: credits(api.credits), notes: [], items: sliced.items, truncated: false, nextCursor: sliced.nextCursor },
+      {
+        asOf: asOfFrom(undefined, deps),
+        credits: credits(api.credits),
+        notes: [],
+        items: sliced.items,
+        truncated: false,
+        nextCursor: sliced.nextCursor,
+      },
       'items',
     );
     return { ok: true, data: fit.data, nIn: 1, nOut: fit.kept };
