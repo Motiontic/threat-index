@@ -1,7 +1,7 @@
 import { inboxChunkKey } from '@ti/core/inbox';
 import { indexLetterKey } from '@ti/core/r2-keys';
 import { searchShardKey, shardPrefixAt } from '@ti/core/search';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { launcherFromEnv, newJobId, parseApiBase, parseManifest } from '../src/lib/e2b';
 import type { Bindings } from '../src/lib/env';
 import { allowedPrefixes, presignPut, r2SigningConfig, uploadKeyError } from '../src/lib/presign';
@@ -93,6 +93,31 @@ describe('launcherFromEnv', () => {
   ])('is null for %o', (o) => {
     expect(launcherFromEnv(env({ ...ok, ...o } as Record<string, string>))).toBeNull();
   });
+  it('limits a backfill sandbox to the API host, and no other kind', async () => {
+    const created: Record<string, unknown>[] = [];
+    vi.doMock('e2b', () => ({
+      Sandbox: {
+        create: async (_t: string, opts: Record<string, unknown>) => {
+          created.push(opts);
+          return { sandboxId: 'sbx1' };
+        },
+      },
+    }));
+    try {
+      const l = launcherFromEnv(env(ok));
+      await l?.create({ timeoutMs: 1000, metadata: { jobId: 'j', kind: 'affected-backfill' } });
+      await l?.create({ timeoutMs: 1000, metadata: { jobId: 'j', kind: 'first-load' } });
+    } finally {
+      vi.doUnmock('e2b');
+    }
+    const net = created[0]?.network as {
+      allowOut: string[];
+      denyOut: (c: { allTraffic: string }) => string[];
+    };
+    expect(net.allowOut).toEqual(['api.example.com']);
+    expect(net.denyOut({ allTraffic: '0.0.0.0/0' })).toEqual(['0.0.0.0/0']);
+    expect(created[1]).not.toHaveProperty('network');
+  });
   it('normalises API_BASE to an origin', () => {
     expect(parseApiBase('https://api.example.com/')).toBe('https://api.example.com');
   });
@@ -136,6 +161,27 @@ describe('presign', () => {
       new URL(await presignPut(cfg, `jobs/${ID}/a`, n)).searchParams.get('X-Amz-Expires');
     expect(await ttl(0)).toBe('1');
     expect(await ttl(99999)).toBe('3600');
+  });
+});
+
+describe('affected-backfill and big-file prefixes', () => {
+  it('the backfill may write its own state and nothing else outside its job and inbox', () => {
+    const p = allowedPrefixes('affected-backfill', ID);
+    expect(uploadKeyError('lake/state/affected-backfill/state.json', p)).toBeNull();
+    expect(uploadKeyError(`inbox/${ID}/0.ndjson.gz`, p)).toBeNull();
+    expect(uploadKeyError('lake/state/other/state.json', p)).not.toBeNull();
+    expect(uploadKeyError('lake/records/osv/2026/part-x.ndjson.gz', p)).not.toBeNull();
+  });
+  it('no other kind may write the backfill state', () => {
+    for (const kind of ['first-load', 'big-file', 'epss-diff', 'nightly-fold', 'search-index'] as const)
+      expect(
+        uploadKeyError('lake/state/affected-backfill/state.json', allowedPrefixes(kind, ID, 'osv')),
+      ).not.toBeNull();
+  });
+  it("big-file may write its own source's lake records, as first-load may", () => {
+    const p = allowedPrefixes('big-file', ID, 'osv');
+    expect(uploadKeyError('lake/records/osv/2026/part-x.ndjson.gz', p)).toBeNull();
+    expect(uploadKeyError('lake/records/debian/2026/part-x.ndjson.gz', p)).not.toBeNull();
   });
 });
 
