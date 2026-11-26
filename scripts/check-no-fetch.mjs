@@ -37,7 +37,34 @@ function withoutComments(text) {
     .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, (m, lead) => lead + ' '.repeat(m.length - lead.length));
 }
 
-/** Every `fetch(` call outside the allowed files: [{ file, line }]. */
+/**
+ * What counts as a violation on one line:
+ *   - a `fetch(` call, bare or as a property (`globalThis.fetch(`, `env.X.fetch(`), except `handler.fetch(`, the
+ *     MCP SDK handler's own entry point (it serves a request, it does not fetch a URL);
+ *   - aliasing: `fetch` used without a call (`const f = fetch`, `= globalThis.fetch`, `{ fetch }`, `.bind`,
+ *     `.call`, `.apply`, `['fetch']`).
+ * Method definitions (`async fetch(request ...)`) are not calls.
+ */
+function lineViolates(line) {
+  // The `['fetch']` form is checked on the raw line; everything else ignores the text inside quotes.
+  if (/\[\s*['"`]fetch['"`]\s*\]/.test(line)) return true;
+  const noDefs = line.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, "''").replace(/\basync\s+fetch\s*\(/g, ' ');
+  for (const m of noDefs.matchAll(/(?<recv>[\w$.]*?)\.?\bfetch\s*\(/g)) {
+    if (m.groups.recv === 'handler' && noDefs[m.index + m.groups.recv.length] === '.') continue;
+    return true;
+  }
+  if (/\bfetch\s*\.\s*(?:bind|call|apply)\b/.test(noDefs)) return true;
+  // `fetch` as a value: assigned, passed, returned, destructured or exported.
+  if (
+    /(?:[=:,(?]|\breturn|\bexport)\s*(?:globalThis\s*\.\s*|self\s*\.\s*)?fetch\s*(?:[,;)}\]]|$)/.test(noDefs)
+  )
+    return true;
+  if (/\{[^}]*\bfetch\b[^}]*\}\s*=/.test(noDefs)) return true;
+  if (/\.fetch\b(?!\s*\()/.test(noDefs)) return true;
+  return false;
+}
+
+/** Every `fetch` call or alias outside the allowed files: [{ file, line }]. */
 export function findViolations(root = ROOT, rules = RULES) {
   const found = [];
   for (const { dir, allowed } of rules) {
@@ -49,8 +76,7 @@ export function findViolations(root = ROOT, rules = RULES) {
       withoutComments(readFileSync(file, 'utf8'))
         .split('\n')
         .forEach((line, i) => {
-          if (/\bfetch\s*\(/.test(line) && !/\basync\s+fetch\s*\(/.test(line))
-            found.push({ file: `${dir}/${rel}`, line: i + 1 });
+          if (lineViolates(line)) found.push({ file: `${dir}/${rel}`, line: i + 1 });
         });
     }
   }
