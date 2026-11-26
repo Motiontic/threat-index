@@ -150,14 +150,13 @@ describe('size and format', () => {
     const b = await post({ headers: headers(), body: chunked, duplex: 'half' } as never);
     expect(b.status).toBe(413);
   });
-  it('a 3 MB body with Mcp-Name: mti_check_sbom is read, then refused because the tool is off', async () => {
+  it('a 3 MB body is refused with 413 even with Mcp-Name: mti_check_sbom (1 MiB cap for every tool until it ships)', async () => {
     authed();
     const pad = 'x'.repeat(3_000_000);
     const body = JSON.stringify(modernBody('tools/call', { name: 'mti_check_sbom', arguments: { pad } }));
     const res = await post({ headers: modernHeaders('tools/call', 'mti_check_sbom', token), body });
-    expect(res.status).not.toBe(413);
-    const b = await bodyOf(res);
-    expect(b.error ?? b.result?.isError).toBeTruthy();
+    expect(res.status).toBe(413);
+    expect(await code(res)).toBe(-31003);
   });
   it('headers over 16 KiB → 431', async () => {
     authed();

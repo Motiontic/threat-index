@@ -61,7 +61,13 @@ export const tool: ToolDef<Args> = {
     if (args.exploitedOnly) q.set('sig', 'kev');
     q.set('limit', String(limit));
     if (args.cursor !== undefined) {
-      const st = await openCursor(secrets, 'mti_search', args as Record<string, unknown>, args.cursor);
+      const st = await openCursor(
+        secrets,
+        'mti_search',
+        args as Record<string, unknown>,
+        args.cursor,
+        deps.identity.sub,
+      );
       if (!st || !('c' in st)) return { ok: false, code: 'invalid_argument', field: 'cursor' };
       q.set('cursor', st.c);
     }
@@ -95,9 +101,15 @@ export const tool: ToolDef<Args> = {
     const apiCursor = matching(api.cursor, /^[A-Za-z0-9_-]{1,200}$/);
     const nextCursor =
       apiCursor && deps.env.MCP_HMAC_SECRET
-        ? await sealCursor(deps.env.MCP_HMAC_SECRET, 'mti_search', args as Record<string, unknown>, {
-            c: apiCursor,
-          })
+        ? await sealCursor(
+            deps.env.MCP_HMAC_SECRET,
+            'mti_search',
+            args as Record<string, unknown>,
+            {
+              c: apiCursor,
+            },
+            deps.identity.sub,
+          )
         : null;
     const fit = fitToBudget(
       {

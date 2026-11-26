@@ -264,7 +264,7 @@ describe('mti_search_incidents', () => {
     const sc = result.structuredContent;
     validates('mti_search_incidents', sc);
     expect(sc.items[0].url).toBe('https://mti.test/incident/aiid/42');
-    expect(sc.items[0].sourceUrl).toBe('https://attack.mitre.org/x');
+    expect(sc.items[0].sourceUrl).toBe('https://attack.mitre.org/techniques/T1000');
     expect(sc.items[1].sourceUrl).toBeNull();
     checkStrings(sc);
   });
@@ -312,7 +312,7 @@ describe('mti_check_packages', () => {
       {
         packages: [
           { ecosystem: 'npm', name: 'left-pad', version: '1.0.0' },
-          { purl: 'pkg:pypi/requests@2.0.0' },
+          { ecosystem: 'npm', name: 'pkg-0', version: '1.0.0' },
         ],
       },
       () => ok(F.checkBody(2)),
@@ -323,7 +323,7 @@ describe('mti_check_packages', () => {
     expect(JSON.parse(seen.body)).toEqual({
       packages: [
         { ecosystem: 'npm', name: 'left-pad', version: '1.0.0' },
-        { purl: 'pkg:pypi/requests@2.0.0' },
+        { ecosystem: 'npm', name: 'pkg-0', version: '1.0.0' },
       ],
     });
     const sc = result.structuredContent;
@@ -502,8 +502,33 @@ describe('links', () => {
     expect(mtiLink(BASE_ENV, 'sources')).toBe('https://mti.test/sources');
   });
   it('sourceLink allows only listed hosts over https, and GHSA pages on github', () => {
-    for (const host of SOURCE_LINK_HOSTS) expect(sourceLink(`https://${host}/x`)).toBe(`https://${host}/x`);
+    const good = [
+      'https://nvd.nist.gov/vuln/detail/CVE-2026-1234',
+      'https://osv.dev/vulnerability/GHSA-cfgh-2345-jmpq',
+      'https://attack.mitre.org/techniques/T1059/001',
+      'https://cwe.mitre.org/data/definitions/79.html',
+      'https://www.cisa.gov/news-events/alerts/2026/01/01/alert',
+      'https://kb.cert.org/vuls/id/123456',
+    ];
+    for (const g of good) expect(sourceLink(g), g).toBe(g);
+    // Every allow-listed host has a known path shape, so none passes with a made-up path.
+    for (const host of SOURCE_LINK_HOSTS) expect(sourceLink(`https://${host}/x`), host).toBeNull();
+    // Query and fragment are dropped, not passed on.
+    expect(sourceLink('https://nvd.nist.gov/vuln/detail/CVE-2026-1234?x=1#frag')).toBe(
+      'https://nvd.nist.gov/vuln/detail/CVE-2026-1234',
+    );
     for (const bad of [
+      'https://www.cisa.gov/news-events/x)![a](https://evil.test/p.png)',
+      'https://www.cisa.gov/news-events/x(1)',
+      'https://www.cisa.gov/news-events/a%29%21%5Bb%5D',
+      'https://www.cisa.gov/news-events/<b>',
+      "https://www.cisa.gov/news-events/a'b",
+      'https://www.cisa.gov/news-events/a\\b',
+      'https://www.cisa.gov/news-events/a%20b',
+      'https://www.cisa.gov/news-events//b',
+      'https://www.cisa.gov/news-events/../etc',
+      'https://www.cisa.gov/news-events/%2e%2e/etc',
+      `https://www.cisa.gov/news-events/${'a'.repeat(120)}/${'b'.repeat(120)}/${'c'.repeat(120)}`,
       'http://nvd.nist.gov/x',
       'https://evil.test/',
       'https://nvd.nist.gov:8443/x',

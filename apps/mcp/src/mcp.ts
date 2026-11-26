@@ -41,7 +41,20 @@ const KNOWN_METHODS = new Set([
 ]);
 const CELL = /^[A-Za-z0-9 _.:-]{1,60}$/;
 
-export async function handleMcp(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+/** An `Mcp-Name` value is plain text or `=?base64?…?=` (UTF-8). Null when it cannot be decoded. */
+function decodeMcpName(raw: string): string | null {
+  const m = /^=\?base64\?([A-Za-z0-9+/]*={0,2})\?=$/.exec(raw);
+  if (!m) return raw;
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(
+      Uint8Array.from(atob(m[1] as string), (c) => c.charCodeAt(0)),
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function handleMcp(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const started = Date.now();
   const requestId = requestIdFrom(request.headers.get('x-request-id'));
   const log: Partial<RequestLog> = {};
@@ -114,10 +127,12 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
   if (bearer.kind === 'none') failure = { kind: 'none' };
   else if (bearer.kind === 'malformed') failure = { kind: 'malformed' };
   else {
-    const v = await verifyAccessToken(bearer.token, {
-      issuer: env.CLERK_ISSUER,
-      resource: env.MCP_RESOURCE_URL,
-    });
+    const v = await verifyAccessToken(
+      bearer.token,
+      { issuer: env.CLERK_ISSUER, resource: env.MCP_RESOURCE_URL },
+      undefined,
+      ctx,
+    );
     if (v.ok) {
       identity = v.identity;
       expiresAt = v.expiresAt;
@@ -202,6 +217,7 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
               log.tool as ToolName,
               args,
               args.cursor,
+              identity.sub,
             );
       if (!st) {
         const id = typeof msg.id === 'string' || typeof msg.id === 'number' ? msg.id : null;
@@ -244,13 +260,17 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
     extra: { sub: identity.sub },
   };
   log.era = (await isLegacyRequest(forward, parsed)) ? 'legacy' : 'modern';
+  // The SDK checks Mcp-Name only on modern requests. On the legacy leg, refuse a mismatch here.
+  if (log.era === 'legacy' && method === 'tools/call') {
+    const hdr = request.headers.get('mcp-name');
+    if (hdr !== null && decodeMcpName(hdr) !== params.name) return refuse(400, -32020);
+  }
   log.toolsHash = await toolsHash();
 
   let res: Response;
   try {
-    // `serve` is the SDK handler's own entry, not a network call (the no-fetch lint bans the call form here).
-    const serve = handler.fetch;
-    res = await serve(forward, { authInfo, parsedBody: parsed } as never);
+    // `handler.fetch` is the SDK handler's own entry, not a network call (the no-fetch lint allows this receiver).
+    res = await handler.fetch(forward, { authInfo, parsedBody: parsed } as never);
   } catch {
     return send(rpcError(500, -32603, requestId), 'rpc_error', { code: -32603 });
   }

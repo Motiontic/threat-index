@@ -131,7 +131,7 @@ export const incidentPage = {
       kind: 'ai',
       title: HOSTILE,
       date: '2026-03-01',
-      url: 'https://attack.mitre.org/x',
+      url: 'https://attack.mitre.org/techniques/T1000',
       display: 'full',
     },
     {

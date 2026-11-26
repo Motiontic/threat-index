@@ -14,6 +14,7 @@ export async function readPage(
     tool,
     args,
     args.cursor,
+    deps.identity.sub,
   );
   return st && 'p' in st ? { page: st.p, skip: st.k } : null;
 }
@@ -34,5 +35,8 @@ export async function slicePage<T>(
   else if (typeof apiNext === 'number' && Number.isInteger(apiNext) && apiNext >= 1 && apiNext <= 40)
     state = { p: apiNext, k: 0 };
   const secret = deps.env.MCP_HMAC_SECRET;
-  return { items: take, nextCursor: state && secret ? await sealCursor(secret, tool, args, state) : null };
+  return {
+    items: take,
+    nextCursor: state && secret ? await sealCursor(secret, tool, args, state, deps.identity.sub) : null,
+  };
 }

@@ -33,9 +33,10 @@ function canonical(v: unknown): string {
   return JSON.stringify(v) ?? 'null';
 }
 
-async function argsHash(args: Record<string, unknown>): Promise<string> {
+/** Hash of the arguments without `cursor`, and of the caller, so a cursor only opens for who it was made for. */
+async function argsHash(args: Record<string, unknown>, sub: string): Promise<string> {
   const { cursor: _cursor, ...rest } = args;
-  const d = await crypto.subtle.digest('SHA-256', enc.encode(canonical(rest)));
+  const d = await crypto.subtle.digest('SHA-256', enc.encode(canonical({ args: rest, sub })));
   return [...new Uint8Array(d)]
     .slice(0, 8)
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -51,10 +52,13 @@ export async function sealCursor(
   tool: ToolName,
   args: Record<string, unknown>,
   state: CursorState,
+  sub: string,
   now = Math.floor(Date.now() / 1000),
 ): Promise<string> {
   const payload = b64u(
-    enc.encode(JSON.stringify({ v: 1, t: tool, h: await argsHash(args), x: now + CURSOR_TTL_S, s: state })),
+    enc.encode(
+      JSON.stringify({ v: 1, t: tool, h: await argsHash(args, sub), x: now + CURSOR_TTL_S, s: state }),
+    ),
   );
   return `${payload}.${b64u(enc.encode(await macKey(secret, payload)))}`;
 }
@@ -78,6 +82,7 @@ export async function openCursor(
   tool: ToolName,
   args: Record<string, unknown>,
   cursor: string,
+  sub: string,
   now = Math.floor(Date.now() / 1000),
 ): Promise<CursorState | null> {
   if (typeof cursor !== 'string' || cursor.length > MAX_CURSOR_CHARS) return null;
@@ -100,7 +105,7 @@ export async function openCursor(
     return null;
   }
   if (!body || typeof body !== 'object') return null;
-  if (body.v !== 1 || body.t !== tool || body.h !== (await argsHash(args))) return null;
+  if (body.v !== 1 || body.t !== tool || body.h !== (await argsHash(args, sub))) return null;
   if (typeof body.x !== 'number' || body.x < now) return null;
   return validState(body.s) ? body.s : null;
 }

@@ -1,3 +1,4 @@
+import { ipKey } from '@ti/core/edge';
 import { logEvent } from '@ti/core/log';
 import type { Env } from './env';
 
@@ -79,7 +80,7 @@ export async function limitAnon(env: Env, request: Request): Promise<boolean> {
   if (ip && ipInCidrs(ip, cidrs)) return false;
   if (!env.RL_MCP_ANON) return false;
   try {
-    const { success } = await env.RL_MCP_ANON.limit({ key: `ip:${ip ?? 'unknown'}` });
+    const { success } = await env.RL_MCP_ANON.limit({ key: `ip:${ip ? ipKey(ip) : 'unknown'}` });
     return !success;
   } catch {
     logEvent('warn', 'mcp_limiter_error', { limiter: 'anon' });

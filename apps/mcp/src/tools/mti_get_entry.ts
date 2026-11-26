@@ -5,9 +5,11 @@ import { ENTRY_ID, normaliseEntryId } from '../input';
 import { mtiLink, sourceLink } from '../links';
 import { arr, bool, COMMON_OUT, int, nstr, num, obj, root, str } from '../schema';
 import { credits, date, ID_RE, list, matching, numOrNull, rec, SRC_RE, VERSION_RE } from './common';
-import { apiJson, asOfFrom, type ToolDef } from './shared';
+import { apiJson, asOfFrom, fitToBudget, type ToolDef } from './shared';
 
-const NAME_RE = /^[A-Za-z0-9@/._+:-]{1,214}$/;
+// A package name, never a URL: no `//`, no `:/`, no scheme prefix, no `www.` and no `host.tld/` start.
+const NAME_RE =
+  /^(?!.*\/\/)(?!.*:\/)(?!(?:https?|ftp|javascript|data|vbscript|file|mailto):)(?!www\.)(?!(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\/)[A-Za-z0-9@/._+:-]{1,214}$/i;
 const SIGNAL_COUNTS = {
   exploited_wild: 'exploitedInWild',
   ransomware: 'ransomware',
@@ -28,6 +30,7 @@ export const tool: ToolDef<{ id: string }> = {
       {
         ...COMMON_OUT,
         found: bool(),
+        truncated: bool(),
         id: str(64),
         key: nstr(128),
         url: nstr(300),
@@ -186,6 +189,11 @@ export const tool: ToolDef<{ id: string }> = {
       untrusted: { title: clean(e.title, CAPS.title), summary: clean(e.summary, CAPS.summary) },
     };
     if (!full) data.notes.push('Only the preview of this record is available to this account.');
-    return { ok: true, data, nIn: 1, nOut: 1 };
+    // Over budget: shorten the lists that can grow, longest first, then say so.
+    let fitted: Record<string, unknown> = { ...data, truncated: false };
+    for (const key of ['advisories', 'fixes', 'recentChanges']) {
+      fitted = fitToBudget(fitted, key).data;
+    }
+    return { ok: true, data: fitted, nIn: 1, nOut: 1 };
   },
 };

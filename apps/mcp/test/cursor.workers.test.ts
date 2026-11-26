@@ -3,27 +3,36 @@ import { resetJwksCacheForTests } from '../src/auth/jwks';
 import { MAX_CURSOR_CHARS, openCursor, sealCursor } from '../src/cursor';
 import { fakeApi, ok, withApi } from './support/fake-api';
 import { BASE_ENV, bodyOf, modernCall, send } from './support/mcp';
-import { goodPayload, type JwksSpy, makeKey, mockJwks, signJwt, type TestKey } from './support/tokens';
+import {
+  goodPayload,
+  type JwksSpy,
+  makeKey,
+  mockJwks,
+  SUB as SUB_OF_TOKEN,
+  signJwt,
+  type TestKey,
+} from './support/tokens';
 
 const S = 'secret-one';
 const N = 'secret-next';
 const args = { query: 'a', limit: 5 };
 const NOW = 1_800_000_000;
+const SUB = 'user_abcdefghij1';
 
 describe('cursor seal and open', () => {
   it('round-trips each state shape', async () => {
     for (const st of [{ c: 'abc_DEF-1' }, { p: 3, k: 24 }, { o: 1000 }] as const) {
-      const c = await sealCursor(S, 'mti_search', args, st, NOW);
-      expect(await openCursor([S], 'mti_search', args, c, NOW + 10)).toEqual(st);
+      const c = await sealCursor(S, 'mti_search', args, st, SUB, NOW);
+      expect(await openCursor([S], 'mti_search', args, c, SUB, NOW + 10)).toEqual(st);
     }
   });
   it('a cursor sealed with the NEXT secret opens', async () => {
-    const c = await sealCursor(N, 'mti_search', args, { o: 5 }, NOW);
-    expect(await openCursor([S, N], 'mti_search', args, c, NOW)).toEqual({ o: 5 });
-    expect(await openCursor([S], 'mti_search', args, c, NOW)).toBeNull();
+    const c = await sealCursor(N, 'mti_search', args, { o: 5 }, SUB, NOW);
+    expect(await openCursor([S, N], 'mti_search', args, c, SUB, NOW)).toEqual({ o: 5 });
+    expect(await openCursor([S], 'mti_search', args, c, SUB, NOW)).toBeNull();
   });
   it('fails for every kind of bad cursor', async () => {
-    const good = await sealCursor(S, 'mti_search', args, { o: 5 }, NOW);
+    const good = await sealCursor(S, 'mti_search', args, { o: 5 }, SUB, NOW);
     const [p, m] = good.split('.') as [string, string];
     const flip = (s: string) => `${s.slice(0, -2)}${s.endsWith('A') ? 'B' : 'A'}${s.slice(-1)}`;
     const bad: [string, string | null][] = [
@@ -33,25 +42,29 @@ describe('cursor seal and open', () => {
       ['bad shape 2', 'a.b.c'],
       ['over 512 characters', `${'a'.repeat(600)}.${m}`],
       ['not base64url', '!!!.???'],
-      ['expired', await sealCursor(S, 'mti_search', args, { o: 5 }, NOW - 7200)],
-      ['out of range offset', await sealCursor(S, 'mti_search', args, { o: 1001 }, NOW)],
-      ['out of range page', await sealCursor(S, 'mti_search', args, { p: 41, k: 0 }, NOW)],
-      ['out of range skip', await sealCursor(S, 'mti_search', args, { p: 1, k: 25 }, NOW)],
-      ['bad api cursor', await sealCursor(S, 'mti_search', args, { c: 'has space' }, NOW)],
-      ['empty api cursor', await sealCursor(S, 'mti_search', args, { c: '' }, NOW)],
+      ['expired', await sealCursor(S, 'mti_search', args, { o: 5 }, SUB, NOW - 7200)],
+      ['out of range offset', await sealCursor(S, 'mti_search', args, { o: 1001 }, SUB, NOW)],
+      ['out of range page', await sealCursor(S, 'mti_search', args, { p: 41, k: 0 }, SUB, NOW)],
+      ['out of range skip', await sealCursor(S, 'mti_search', args, { p: 1, k: 25 }, SUB, NOW)],
+      ['bad api cursor', await sealCursor(S, 'mti_search', args, { c: 'has space' }, SUB, NOW)],
+      ['empty api cursor', await sealCursor(S, 'mti_search', args, { c: '' }, SUB, NOW)],
     ];
     for (const [name, c] of bad)
-      expect(await openCursor([S], 'mti_search', args, c as string, NOW), name).toBeNull();
-    expect(await openCursor([S], 'mti_get_entry', args, good, NOW), 'other tool').toBeNull();
+      expect(await openCursor([S], 'mti_search', args, c as string, SUB, NOW), name).toBeNull();
+    expect(await openCursor([S], 'mti_get_entry', args, good, SUB, NOW), 'other tool').toBeNull();
     expect(
-      await openCursor([S], 'mti_search', { ...args, query: 'b' }, good, NOW),
+      await openCursor([S], 'mti_search', { ...args, query: 'b' }, good, SUB, NOW),
       'other arguments',
+    ).toBeNull();
+    expect(
+      await openCursor([S], 'mti_search', args, good, 'user_zzzzzzzzzz9', NOW),
+      'another user',
     ).toBeNull();
     expect(MAX_CURSOR_CHARS).toBe(512);
   });
   it('the arguments hash ignores the cursor itself and key order', async () => {
-    const c = await sealCursor(S, 'mti_search', { limit: 5, query: 'a' }, { o: 1 }, NOW);
-    expect(await openCursor([S], 'mti_search', { query: 'a', cursor: c, limit: 5 }, c, NOW)).toEqual({
+    const c = await sealCursor(S, 'mti_search', { limit: 5, query: 'a' }, { o: 1 }, SUB, NOW);
+    expect(await openCursor([S], 'mti_search', { query: 'a', cursor: c, limit: 5 }, c, SUB, NOW)).toEqual({
       o: 1,
     });
   });
@@ -94,12 +107,14 @@ describe('cursor at the edge', () => {
       'mti_get_entry',
       { query: 'a' },
       { o: 1 },
+      SUB_OF_TOKEN,
     );
     const changed = await sealCursor(
       BASE_ENV.MCP_HMAC_SECRET as string,
       'mti_search',
       { query: 'zzz' },
       { o: 1 },
+      SUB_OF_TOKEN,
     );
     for (const cursor of [other, changed, 'a'.repeat(600)]) {
       const c = modernCall(token, 'tools/call', { name: 'mti_search', arguments: { query: 'a', cursor } });

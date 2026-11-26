@@ -184,7 +184,11 @@ describe('logs', () => {
       [
         'mti_check_packages',
         {
-          packages: [{ ecosystem: 'npm', name: CANARY, version: '1.0.0' }, { purl: `pkg:pypi/${CANARY}@1` }],
+          packages: [
+            { ecosystem: 'npm', name: 'left-pad', version: '1.0.0' },
+            { ecosystem: 'npm', name: CANARY, version: '1.0.0' },
+            { purl: `pkg:pypi/${CANARY}@1` },
+          ],
         },
       ],
       ['mti_get_entry', { id: 'CVE-2026-0001' }],
@@ -231,7 +235,7 @@ describe('logs', () => {
     const pk = lines
       .map((l) => (l.includes('mti_check_packages') && l.includes('mcp_request') ? JSON.parse(l) : null))
       .find(Boolean);
-    expect(pk.nIn).toBe(2);
+    expect(pk.nIn).toBe(3);
     expect(pk.ecosystems).toBe('npm');
   });
 

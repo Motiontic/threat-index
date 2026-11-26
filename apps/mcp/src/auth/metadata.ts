@@ -1,5 +1,7 @@
-import { requestIdFrom } from '@ti/core/log';
+import { logEvent, requestIdFrom } from '@ti/core/log';
+import { checkConfig } from '../config';
 import type { Env } from '../env';
+import { APP_CODES, rpcError } from '../http/errors';
 import { allowedOrigins, checkOrigin, preflight } from '../http/origin';
 import { finish, json } from '../http/respond';
 import { logRequest } from '../log';
@@ -15,6 +17,11 @@ export async function handleMetadata(request: Request, env: Env, _ctx: Execution
     logRequest({ requestId, route: 'metadata', status: res.status, outcome, ms: Date.now() - started });
     return finish(res, { requestId, corsOrigin: cors });
   };
+  const bad = checkConfig(env);
+  if (bad.length) {
+    for (const name of bad) logEvent('error', 'mcp_bad_config', { variable: name });
+    return done(rpcError(503, APP_CODES.unavailable, requestId), 'rejected');
+  }
   if (await limitAnon(env, request))
     return done(json({ error: 'rate_limited', requestId }, 429, { 'Retry-After': '60' }), 'limited');
   if (request.method === 'OPTIONS') {

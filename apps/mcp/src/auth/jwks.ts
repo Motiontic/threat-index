@@ -1,6 +1,9 @@
+import { logEvent } from '@ti/core/log';
+
 export class JwksUnavailable extends Error {}
 
 const FRESH_MS = 10 * 60_000;
+const STALE_GRACE_MS = 60 * 60_000;
 const REFRESH_GAP_MS = 30_000;
 const MAX_BYTES = 65_536;
 const MAX_KEYS = 20;
@@ -86,7 +89,11 @@ async function load(issuer: string, now: number): Promise<Cache> {
   return { issuer, fetchedAt: now, keys };
 }
 
-function refresh(issuer: string, now: number): Promise<Cache> {
+/**
+ * One shared refresh. It runs under `ctx.waitUntil` when given one, so a request that is cancelled cannot break
+ * the others waiting on the same promise.
+ */
+function refresh(issuer: string, now: number, ctx?: Pick<ExecutionContext, 'waitUntil'>): Promise<Cache> {
   if (state.inflight && state.inflight.issuer === issuer) return state.inflight.promise;
   state.lastRefreshAt = now;
   const promise = load(issuer, now)
@@ -94,10 +101,21 @@ function refresh(issuer: string, now: number): Promise<Cache> {
       state.cache = c;
       return c;
     })
+    .catch((e: unknown) => {
+      // Any failure at all, not only a fetch failure, means "keys unavailable".
+      throw e instanceof JwksUnavailable ? e : new JwksUnavailable('refresh failed');
+    })
     .finally(() => {
       state.inflight = null;
     });
   state.inflight = { issuer, promise };
+  // Keep the refresh alive without leaving an unhandled rejection behind.
+  ctx?.waitUntil(
+    promise.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
   return promise;
 }
 
@@ -105,13 +123,24 @@ export async function getSigningKey(
   issuer: string,
   kid: string,
   now = Date.now(),
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
 ): Promise<CryptoKey | null> {
   const cache = state.cache;
-  if (cache && cache.issuer === issuer && now - cache.fetchedAt < FRESH_MS) {
+  const sameIssuer = cache !== null && cache.issuer === issuer;
+  if (cache && sameIssuer && now - cache.fetchedAt < FRESH_MS) {
     const hit = cache.keys.get(kid);
     if (hit) return hit;
     if (now - state.lastRefreshAt < REFRESH_GAP_MS) return null;
-    return (await refresh(issuer, now)).keys.get(kid) ?? null;
+    return (await refresh(issuer, now, ctx)).keys.get(kid) ?? null;
   }
-  return (await refresh(issuer, now)).keys.get(kid) ?? null;
+  try {
+    return (await refresh(issuer, now, ctx)).keys.get(kid) ?? null;
+  } catch (e) {
+    // Keep serving the last good keys for a while past their normal expiry.
+    if (cache && sameIssuer && now - cache.fetchedAt < FRESH_MS + STALE_GRACE_MS) {
+      logEvent('warn', 'jwks_stale', { ageS: Math.round((now - cache.fetchedAt) / 1000) });
+      return cache.keys.get(kid) ?? null;
+    }
+    throw e;
+  }
 }

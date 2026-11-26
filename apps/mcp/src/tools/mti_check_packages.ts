@@ -1,4 +1,11 @@
-import { CheckRequestSchema, type CheckResponse, canonicalEcosystem, ECOSYSTEMS } from '@ti/core/packages';
+import {
+  CheckRequestSchema,
+  type CheckResponse,
+  canonicalEcosystem,
+  ECOSYSTEMS,
+  normaliseName,
+  parsePurl,
+} from '@ti/core/packages';
 import { CAPS, clean } from '../clean';
 import { openCursor, sealCursor } from '../cursor';
 import { ENTRY_ID } from '../input';
@@ -32,6 +39,35 @@ function pkg(v: unknown): { ecosystem: string; name: string; version: string } |
   if (!ecosystem || typeof p.name !== 'string' || typeof p.version !== 'string') return null;
   if (p.name.length > 214 || p.version.length > 128) return null;
   return { ecosystem, name: p.name, version: p.version };
+}
+
+type Ref = { ecosystem: string; name: string; version: string };
+const refKey = (r: Ref) => JSON.stringify([r.ecosystem, r.version, r.name]);
+
+/**
+ * The caller's own packages by their normalised identity. An answer entry is shown only if it matches one of
+ * these, and then the caller's own text is what goes out, never a string that came back from ti-api.
+ */
+function callerPackages(input: unknown[]): Map<string, Ref> {
+  const own = new Map<string, Ref>();
+  for (const p of input) {
+    const r = rec(p);
+    let ref: Ref | null = null;
+    if (typeof r.purl === 'string') {
+      const parsed = parsePurl(r.purl);
+      if (parsed.ok) ref = parsed.ref;
+    } else if (
+      typeof r.ecosystem === 'string' &&
+      typeof r.name === 'string' &&
+      typeof r.version === 'string'
+    ) {
+      const eco = canonicalEcosystem(r.ecosystem);
+      const name = eco ? normaliseName(eco, r.name) : null;
+      if (eco && name) ref = { ecosystem: eco, name, version: r.version };
+    }
+    if (ref && !own.has(refKey(ref))) own.set(refKey(ref), ref);
+  }
+  return own;
 }
 
 export const tool: ToolDef<Args> = {
@@ -87,6 +123,7 @@ export const tool: ToolDef<Args> = {
         'mti_check_packages',
         args as Record<string, unknown>,
         args.cursor,
+        deps.identity.sub,
       );
       if (!st || !('o' in st)) return { ok: false, code: 'invalid_argument', field: 'cursor' };
       offset = st.o;
@@ -113,11 +150,19 @@ export const tool: ToolDef<Args> = {
         ...(res.code === 'invalid_argument' ? { field: 'packages' } : {}),
       };
     const api = rec(res.body);
+    const own = callerPackages(args.packages);
+    const ownPkg = (v: unknown): Ref | null => {
+      const p = pkg(v);
+      const mine = p
+        ? own.get(refKey({ ...p, name: normaliseName(p.ecosystem as never, p.name) ?? p.name }))
+        : null;
+      return mine ? { ...mine } : null;
+    };
     const notes = [NOTE_NO_RECORD, NOTE_REACH];
 
     const results = list(api.results).flatMap((r) => {
       const x = rec(r);
-      const p = pkg(x.package);
+      const p = ownPkg(x.package);
       const priority = PRIORITIES.find((q) => q === x.priority);
       if (!p || !priority) return [];
       const fixed = (v: unknown) => {
@@ -160,7 +205,7 @@ export const tool: ToolDef<Args> = {
       ];
     });
     const noRecord = list(api.noRecord).flatMap((v) => {
-      const p = pkg(v);
+      const p = ownPkg(v);
       return p ? [p] : [];
     });
     const rejected = list(api.rejected).flatMap((v) => {
@@ -208,9 +253,15 @@ export const tool: ToolDef<Args> = {
     const more = kept < page.length;
     const nextCursor =
       more && deps.env.MCP_HMAC_SECRET
-        ? await sealCursor(deps.env.MCP_HMAC_SECRET, 'mti_check_packages', args as Record<string, unknown>, {
-            o: offset + kept,
-          })
+        ? await sealCursor(
+            deps.env.MCP_HMAC_SECRET,
+            'mti_check_packages',
+            args as Record<string, unknown>,
+            {
+              o: offset + kept,
+            },
+            deps.identity.sub,
+          )
         : null;
     const data = { ...build(kept, more), nextCursor };
     const ecos = [

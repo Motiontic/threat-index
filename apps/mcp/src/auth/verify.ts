@@ -50,6 +50,7 @@ export async function verifyAccessToken(
   token: string,
   cfg: { issuer: string; resource: string },
   now = Math.floor(Date.now() / 1000),
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
 ): Promise<TokenResult> {
   if (token.startsWith('oat_')) return fail('opaque');
   const parts = token.split('.');
@@ -91,10 +92,10 @@ export async function verifyAccessToken(
 
   let key: CryptoKey | null;
   try {
-    key = await getSigningKey(cfg.issuer, header.kid);
-  } catch (e) {
-    if (e instanceof JwksUnavailable) return { ok: false, reason: 'unavailable' };
-    throw e;
+    key = await getSigningKey(cfg.issuer, header.kid, undefined, ctx);
+  } catch {
+    // Any key-refresh error is "unavailable" (503), never a sign-in failure.
+    return { ok: false, reason: 'unavailable' };
   }
   if (!key) return fail('unknown_kid');
   const sig = unb64u(s);

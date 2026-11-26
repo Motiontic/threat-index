@@ -18,8 +18,9 @@ export function headersTooLarge(headers: Headers): boolean {
   return false;
 }
 
-export function bodyLimitFor(headers: Headers): number {
-  return headers.get('mcp-name') === 'mti_check_sbom' ? MAX_SBOM_BODY_BYTES : MAX_BODY_BYTES;
+/** 1 MiB for every tool. `MAX_SBOM_BODY_BYTES` takes over for `mti_check_sbom` when that tool ships. */
+export function bodyLimitFor(_headers: Headers): number {
+  return MAX_BODY_BYTES;
 }
 
 /** Linear scan of `{`/`[` nesting that skips string contents and escapes. */
