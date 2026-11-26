@@ -1,0 +1,23 @@
+# written for this repo (Apache-2.0), from PHP's version_compare rules, replacing the GPL-marked php-src
+# and composer lines of scalibr's packagist-versions.txt
+1.0.0 < 1.0.1
+1.9.0 < 1.10.0
+v1.2.3 = 1.2.3
+V1.2.3 = 1.2.3
+1.0.0-dev < 1.0.0-alpha1
+1.0.0-alpha1 < 1.0.0-beta1
+1.0.0-a1 = 1.0.0-alpha1
+1.0.0-b1 = 1.0.0-beta1
+1.0.0-beta1 < 1.0.0-RC1
+1.0.0-RC1 = 1.0.0-rc1
+1.0.0-RC1 < 1.0.0
+1.0.0 < 1.0.0-patch1
+1.0.0-p1 = 1.0.0-patch1
+1.0.0-pl1 = 1.0.0-p1
+1.0.0-patch1 < 1.0.1
+1.2-dev < 1.2
+1.0.0RC1 = 1.0.0-RC1
+1.0.0.RC1 = 1.0.0-RC1
+1.0.0_RC1 = 1.0.0-RC1
+1.0.0-beta2 < 1.0.0-beta10
+999999999999999999999999999991 < 999999999999999999999999999999
