@@ -35,7 +35,8 @@ export type ChangeKind =
   | 'epss_band'
   | 'fix_released'
   | 'cvss_change'
-  | 'breach_notice';
+  | 'breach_notice'
+  | 'new_advisory';
 
 export interface Change {
   kind: ChangeKind;

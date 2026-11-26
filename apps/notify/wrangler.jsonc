@@ -13,6 +13,8 @@
     { "binding": "DB_SIGNALS", "database_name": "ti_signals" },
     { "binding": "DB_USERS", "database_name": "ti_users" },
     { "binding": "DB_VULNS", "database_name": "ti_vulns" },
+    // Bound for package-advisory matching, which lands later. Nothing reads it yet.
+    { "binding": "DB_ADVISORIES", "database_name": "ti_advisories" },
     { "binding": "DB_WORLD", "database_name": "ti_world" }
   ],
   "queues": {
@@ -31,6 +33,7 @@
         { "binding": "DB_SIGNALS", "database_name": "ti_signals_staging" },
         { "binding": "DB_USERS", "database_name": "ti_users_staging" },
         { "binding": "DB_VULNS", "database_name": "ti_vulns_staging" },
+        { "binding": "DB_ADVISORIES", "database_name": "ti_advisories_staging" },
         { "binding": "DB_WORLD", "database_name": "ti_world_staging" }
       ],
       "queues": {

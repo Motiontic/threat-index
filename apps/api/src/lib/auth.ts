@@ -6,8 +6,28 @@ import type { AppEnv } from './env';
 /**
  * Single-user accounts: we only ever read `userId` from Clerk, never `orgId`.
  */
+/**
+ * The signed-in user: the verified MCP identity, else the Clerk session's user. Everything that needs "who is
+ * calling" (`requireUser`, the rate limit, the request log) goes through here.
+ *
+ * Only a Clerk *session* counts. `@hono/clerk-auth` authenticates with `acceptsToken: 'any'` and has no
+ * option to change that, so an OAuth access token (or API key) sent straight to the API would otherwise
+ * yield a `userId`; it is refused here by its `tokenType`.
+ */
+export function currentUserId(c: Context<AppEnv>): string | undefined {
+  const mcp = c.get('mcp');
+  if (mcp) return mcp.sub;
+  try {
+    const auth = getAuth(c) as { userId?: string | null; tokenType?: string } | null;
+    if (auth?.tokenType !== undefined && auth.tokenType !== 'session_token') return undefined;
+    return auth?.userId ?? undefined;
+  } catch {
+    return undefined; // the Clerk middleware did not run (health, webhooks, MCP calls)
+  }
+}
+
 export const requireUser: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const userId = getAuth(c)?.userId;
+  const userId = currentUserId(c);
   if (!userId) return c.json({ error: 'sign_in_required' }, 401);
   c.set('userId', userId);
   await next();

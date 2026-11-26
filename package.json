@@ -4,13 +4,13 @@
   "version": "0.0.0",
   "description": "One record of every public vulnerability, exploit, breach and AI incident, refreshed every 3 hours on Cloudflare.",
   "license": "Apache-2.0",
-  "packageManager": "pnpm@10.10.0",
+  "packageManager": "pnpm@10.34.9",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
-    "lint": "biome check .",
+    "lint": "biome check . && node scripts/check-no-fetch.mjs",
     "format": "biome format --write .",
     "typecheck": "pnpm -r --parallel --filter \"!@ti/web\" exec tsc --noEmit && pnpm --filter @ti/web typecheck",
     "test": "vitest run",

@@ -75,6 +75,14 @@ function parseTables(
     }
     out.set(name, { cols, pk, checks });
   }
+  // A rebuilt table (CREATE TABLE x_new ... ALTER TABLE x_new RENAME TO x) replaces the old definition.
+  for (const m of clean.matchAll(/ALTER TABLE (\w+) RENAME TO (\w+)\s*;/g)) {
+    const [, from, to] = m as unknown as [string, string, string];
+    const t = out.get(from);
+    if (!t) throw new Error(`RENAME of unknown table ${from}`);
+    out.set(to, t);
+    out.delete(from);
+  }
   // Later migrations add columns with ALTER TABLE ... ADD COLUMN, in file order.
   for (const m of clean.matchAll(/ALTER TABLE (\w+) ADD COLUMN (\w+)([^;]*);/g)) {
     const [, name, col, rest] = m as unknown as [string, string, string, string];

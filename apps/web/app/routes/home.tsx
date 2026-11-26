@@ -56,6 +56,7 @@ const CHANGE_LABELS: Record<string, string> = {
   fix_released: 'Fix released',
   cvss_change: 'Score changed',
   breach_notice: 'New breach notice',
+  new_advisory: 'New advisory',
 };
 
 function itemTo(i: HomeItem): string {

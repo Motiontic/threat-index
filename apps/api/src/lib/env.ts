@@ -1,4 +1,5 @@
 import type { LoadMessage } from '@ti/core/inbox';
+import type { McpIdentity } from '@ti/core/mcp-user';
 
 /** Cloudflare's rate limiting binding. */
 export type RateLimiter = { limit(options: { key: string }): Promise<{ success: boolean }> };
@@ -30,6 +31,11 @@ export type Bindings = {
   RESEND_WEBHOOK_SECRET: string;
   UNSUBSCRIBE_SECRET: string;
   JOB_HMAC_SECRET: string;
+  /** Verifies the signed identity ti-mcp sends (current and next, for rotation). Unset: MCP calls are refused. */
+  MCP_HMAC_SECRET?: string;
+  MCP_HMAC_SECRET_NEXT?: string;
+  /** The public site URL (a var). */
+  SITE_ORIGIN?: string;
   // Vars (wrangler.jsonc) and secrets for the E2B bridge. Optional: a missing value turns the feature off.
   API_BASE: string | undefined;
   E2B_TEMPLATE: string | undefined;
@@ -41,5 +47,11 @@ export type Bindings = {
   R2_ACCESS_KEY_ID: string | undefined;
   R2_SECRET_ACCESS_KEY: string | undefined;
 };
-export type Variables = { userId: string; requestId: string; limited?: boolean };
+export type Variables = {
+  userId: string;
+  requestId: string;
+  limited?: boolean;
+  /** Set by `mcpIdentity` when the call carries a verified MCP assertion. */
+  mcp?: McpIdentity;
+};
 export type AppEnv = { Bindings: Bindings; Variables: Variables };

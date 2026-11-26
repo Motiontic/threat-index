@@ -1,6 +1,6 @@
-import { getAuth } from '@hono/clerk-auth';
 import { logEvent } from '@ti/core/log';
 import type { Context } from 'hono';
+import { currentUserId } from './auth';
 import type { AppEnv, Bindings } from './env';
 
 /**
@@ -13,7 +13,7 @@ export function publicCacheKey(env: Pick<Bindings, 'TI_ENV'>, pathAndQuery: stri
   return new Request(`https://cache.internal/${ns}${pathAndQuery}`, { method: 'GET' });
 }
 
-export const isSignedIn = (c: Context<AppEnv>): boolean => Boolean(getAuth(c)?.userId);
+export const isSignedIn = (c: Context<AppEnv>): boolean => Boolean(currentUserId(c));
 
 /**
  * Cache API wrapper for public GET routes. Auth is decided first: a signed-in request never reads or

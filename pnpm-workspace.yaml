@@ -7,3 +7,6 @@ packages:
 onlyBuiltDependencies:
   - esbuild
   - workerd
+
+# A dependency published less than 7 days ago can't be installed (minutes), so a hijacked release has time to be caught.
+minimumReleaseAge: 10080

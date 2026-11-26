@@ -2,7 +2,7 @@ import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlit
 
 /**
  * ti_users: single-user accounts (Clerk user ID is the key; no organisations)
- * Mirrors migrations/users/0001_init.sql and 0002_account_settings.sql. The SQL is the source of truth; every table there is
+ * Mirrors migrations/users/0001_init.sql, 0002_account_settings.sql, 0003_notify.sql and 0004_mcp.sql. The SQL is the source of truth; every table there is
  * WITHOUT ROWID, and CHECK constraints are not modelled. A Workers test compares these columns to
  * PRAGMA table_info.
  */
@@ -97,3 +97,42 @@ export const emailSends = sqliteTable('email_sends', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+export const watchPackages = sqliteTable(
+  'watch_packages',
+  {
+    userId: text('user_id').notNull(),
+    ecosystem: text('ecosystem').notNull(),
+    name: text('name').notNull(),
+    createdAt: text('created_at').notNull(),
+    alertsOn: integer('alerts_on').notNull().default(1),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.ecosystem, t.name] }),
+    index('watch_packages_by_package').on(t.ecosystem, t.name),
+  ],
+);
+
+export const packageUsage = sqliteTable(
+  'package_usage',
+  {
+    userId: text('user_id').notNull(),
+    day: text('day').notNull(),
+    packages: integer('packages').notNull().default(0),
+    calls: integer('calls').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.day] })],
+);
+
+/** Users and OAuth clients refused on every MCP request, even with an unexpired token. */
+export const mcpBlocks = sqliteTable(
+  'mcp_blocks',
+  {
+    kind: text('kind').notNull(),
+    id: text('id').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at'),
+  },
+  (t) => [primaryKey({ columns: [t.kind, t.id] })],
+);

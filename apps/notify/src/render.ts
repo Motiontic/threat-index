@@ -60,6 +60,8 @@ export function describeChange(c: Change): string {
       return `CVSS changed from ${clean(c.old ?? 'unknown')} to ${clean(c.new ?? 'unknown')}`;
     case 'breach_notice':
       return 'New breach notice';
+    case 'new_advisory':
+      return 'New advisory';
     default:
       return 'Updated';
   }
@@ -79,6 +81,8 @@ function shortChange(c: Change): string {
       return 'CVSS changed';
     case 'breach_notice':
       return 'new breach notice';
+    case 'new_advisory':
+      return 'new advisory';
     default:
       return 'updated';
   }

@@ -15,7 +15,7 @@ We aim to acknowledge reports within 3 working days and to share a fix plan with
 
 ## Scope
 
-In scope: the code in this repository, including the API's access rules (for example, a visitor receiving full-record fields), webhook verification, internal job callbacks, and handling of secrets.
+In scope: the code in this repository, including the API's access rules (for example, a visitor receiving full-record fields), webhook verification, internal job callbacks, handling of secrets, and the MCP server at `/mcp` (its OAuth checks, the signed identity it sends to the API, tool inputs and outputs, and the route allow-list).
 
 Out of scope:
 

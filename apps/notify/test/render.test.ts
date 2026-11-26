@@ -35,6 +35,7 @@ describe('describeChange', () => {
       'CVSS changed from 7.5 to 9.8',
     );
     expect(describeChange(ch('breach_notice'))).toBe('New breach notice');
+    expect(describeChange(ch('new_advisory'))).toBe('New advisory');
   });
 });
 

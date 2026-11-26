@@ -116,6 +116,7 @@ export const CHANGE_KINDS: readonly ChangeKind[] = [
   'fix_released',
   'cvss_change',
   'breach_notice',
+  'new_advisory',
 ];
 export const SIGNAL_KINDS: readonly SignalKind[] = [
   'exploited_wild',

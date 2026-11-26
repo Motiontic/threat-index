@@ -3,6 +3,8 @@ export interface Env {
   DB_SIGNALS: D1Database;
   DB_USERS: D1Database;
   DB_VULNS: D1Database;
+  /** Bound for package-advisory matching, which lands later. Nothing reads it yet. */
+  DB_ADVISORIES: D1Database;
   DB_WORLD: D1Database;
   EMAIL_FROM: string;
   APP_BASE: string;

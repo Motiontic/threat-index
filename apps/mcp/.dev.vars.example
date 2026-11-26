@@ -1,0 +1,5 @@
+# Copy to .dev.vars (gitignored) for local runs in a loop sandbox. Never put real values in this file.
+# Must match ti-api's values: ti-mcp signs the user's identity with them, ti-api checks it.
+MCP_HMAC_SECRET=
+# Optional: the next secret, set while rotating.
+MCP_HMAC_SECRET_NEXT=

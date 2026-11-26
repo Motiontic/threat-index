@@ -1,7 +1,7 @@
-import { getAuth } from '@hono/clerk-auth';
 import { logEvent, REQUEST_ID_HEADER, requestIdFrom } from '@ti/core/log';
 import type { MiddlewareHandler } from 'hono';
 import { routePath } from 'hono/route';
+import { currentUserId } from './auth';
 import type { AppEnv } from './env';
 import { mutableHeaders } from './headers';
 
@@ -15,12 +15,7 @@ export const requestContext: MiddlewareHandler<AppEnv> = async (c, next) => {
   const started = Date.now();
   await next();
   mutableHeaders(c).set(REQUEST_ID_HEADER, requestId);
-  let userId: string | undefined;
-  try {
-    userId = getAuth(c)?.userId ?? undefined;
-  } catch {
-    userId = undefined; // Clerk middleware did not run (health, webhooks)
-  }
+  const userId = currentUserId(c);
   let route = 'unknown';
   try {
     route = routePath(c, -1);

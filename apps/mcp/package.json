@@ -1,0 +1,17 @@
+{
+  "name": "@ti/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@clerk/backend": "3.31.4",
+    "@modelcontextprotocol/core": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@ti/core": "workspace:*",
+    "zod": "^4.6.0"
+  }
+}

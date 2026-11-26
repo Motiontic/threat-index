@@ -14,11 +14,15 @@ const STATUS: Record<string, number> = {
   '/v1/me': 401,
   '/v1/admin/ops': 403,
   '/ops': 404,
+  '/mcp': 405,
+  '/mcp/server-card': 404,
   '/no-such-page-smoke': 404,
   '/v1/no-such-route-smoke': 404,
 };
 
-function fake(opts: { drop?: { host: string; path: string; header: string }; hits?: unknown[] } = {}) {
+function fake(
+  opts: { drop?: { host: string; path: string; header: string }; hits?: unknown[]; cookieOn?: string } = {},
+) {
   const seen: string[] = [];
   const fetchImpl = async (url: string) => {
     seen.push(url);
@@ -28,6 +32,7 @@ function fake(opts: { drop?: { host: string; path: string; header: string }; hit
     headers['content-type'] = isApi ? 'application/json' : 'text/html';
     if (opts.drop && opts.drop.host === u.hostname && opts.drop.path === u.pathname)
       delete headers[opts.drop.header];
+    if (opts.cookieOn === u.pathname) headers['set-cookie'] = '__session=x';
     const body =
       u.pathname === '/v1/search' ? JSON.stringify({ hits: opts.hits ?? [{ key: 'CVE-2025-1' }] }) : '{}';
     return new Response(body, { status: STATUS[u.pathname] ?? 200, headers });
@@ -45,6 +50,31 @@ describe('runSmoke', () => {
     expect(seen.some((u) => u.endsWith('/v1/search?q=apache'))).toBe(true);
     expect(seen.some((u) => u.endsWith('/e/CVE-2025-1'))).toBe(true);
     expect(seen.some((u) => u.endsWith('/v1/entries/CVE-2025-1'))).toBe(true);
+  });
+
+  it('checks /mcp (405) and /mcp/server-card (404) on the web host, with the security headers', async () => {
+    const { fetchImpl, seen } = fake();
+    const rows = await runSmoke(fetchImpl, cfg);
+    for (const [check, status] of [
+      ['web /mcp', 405],
+      ['web /mcp/server-card', 404],
+    ] as const)
+      expect(rows.find((r: { check: string }) => r.check === check)).toMatchObject({ status, result: 'ok' });
+    expect(seen).toContain('https://web.test/mcp');
+    const noHsts = await runSmoke(
+      fake({ drop: { host: 'web.test', path: '/mcp', header: 'strict-transport-security' } }).fetchImpl,
+      cfg,
+    );
+    expect(noHsts.find((r: { check: string }) => r.check === 'web /mcp').result).toContain('no HSTS');
+  });
+
+  it('fails an /mcp row that sets a cookie', async () => {
+    for (const path of ['/mcp', '/mcp/server-card']) {
+      const rows = await runSmoke(fake({ cookieOn: path }).fetchImpl, cfg);
+      const bad = rows.filter((r: { result: string }) => r.result.startsWith('fail'));
+      expect(bad).toHaveLength(1);
+      expect(bad[0].result).toContain('sets a cookie');
+    }
   });
 
   it('skips the record checks when search finds nothing', async () => {
