@@ -36,7 +36,8 @@ export const API_OWNED_NAMES: readonly string[] = ['request.json'];
 /** Prefixes a sandbox may write, by kind, on top of its own `jobs/<id>/` and `inbox/<id>/`. */
 export function allowedPrefixes(kind: ApiJobKind, jobId: string, sourceId: string | null = null): string[] {
   const out = [jobPrefix(jobId), `inbox/${jobId}/`];
-  if (kind === 'first-load' && sourceId) out.push(`lake/records/${sourceId}/`);
+  if ((kind === 'first-load' || kind === 'big-file') && sourceId) out.push(`lake/records/${sourceId}/`);
+  else if (kind === 'affected-backfill') out.push('lake/state/affected-backfill/');
   else if (kind === 'epss-diff') out.push('lake/epss/epss/');
   else if (kind === 'nightly-fold') out.push('lake/raw/');
   else if (kind === 'search-index')

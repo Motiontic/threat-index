@@ -29,8 +29,11 @@ export const E2B_REQUEST_TIMEOUT_MS = 30_000;
 
 /** Kinds that work on one source (`JobRequest['kind']`). */
 export const SOURCE_JOB_KINDS = ['first-load', 'epss-diff', 'big-file'] as const;
-/** Kinds that work on the whole data set: the collector starts them on its daily crons (apps/collector/src/daily-jobs.ts). */
-export const GLOBAL_JOB_KINDS = ['nightly-fold', 'search-index'] as const;
+/**
+ * Kinds that work on the whole data set. Only `nightly-fold` and `search-index` run on the collector's daily
+ * crons (apps/collector/src/daily-jobs.ts); `affected-backfill` is started by an operator.
+ */
+export const GLOBAL_JOB_KINDS = ['nightly-fold', 'search-index', 'affected-backfill'] as const;
 export type GlobalJobKind = (typeof GLOBAL_JOB_KINDS)[number];
 // `echo` exists only in the API and the sandbox
 export type ApiJobKind = JobRequest['kind'] | GlobalJobKind | 'echo' | 'deep-query';
@@ -42,6 +45,7 @@ export const ENABLED_JOB_KINDS: readonly ApiJobKind[] = [
   'big-file',
   'nightly-fold',
   'search-index',
+  'affected-backfill',
   'deep-query',
 ];
 
@@ -106,7 +110,9 @@ export function launcherFromEnv(env: Bindings): JobLauncher | null {
   const apiKey = env.E2B_API_KEY;
   const template = env.E2B_TEMPLATE;
   if (!apiKey || !template || !TEMPLATE_RE.test(template)) return null;
-  if (parseApiBase(env.API_BASE) === null) return null;
+  const apiBase = parseApiBase(env.API_BASE);
+  if (apiBase === null) return null;
+  const apiHost = new URL(apiBase).host;
   const wrap = (err: unknown): Error => new Error(describeE2bError(err, [apiKey]));
   const siteOrigin = siteOriginFromEnv(env);
   return {
@@ -120,6 +126,10 @@ export function launcherFromEnv(env: Bindings): JobLauncher | null {
           timeoutMs,
           metadata,
           requestTimeoutMs: E2B_REQUEST_TIMEOUT_MS,
+          // The backfill reads and writes through the MTI API only; the job checks that nothing else answers.
+          ...(metadata.kind === 'affected-backfill'
+            ? { network: { allowOut: [apiHost], denyOut: ({ allTraffic }) => [allTraffic] } }
+            : {}),
         });
       } catch (err) {
         throw wrap(err);
