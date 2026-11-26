@@ -255,8 +255,9 @@ describe('typed fields with hostile text', () => {
         if (/(^|\.)(url|sourceUrl)$/.test(path))
           expect(v, path).toMatch(/^https:\/\/[a-z0-9.-]+\/[A-Za-z0-9._~%/:@+-]*$/);
         else expect(v, path).not.toMatch(/https?:\/\//i);
-      } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`, inUntrusted));
-      else if (v && typeof v === 'object')
+      } else if (Array.isArray(v)) {
+        for (const [i, x] of v.entries()) walk(x, `${path}[${i}]`, inUntrusted);
+      } else if (v && typeof v === 'object')
         for (const [k, x] of Object.entries(v))
           walk(x, path ? `${path}.${k}` : k, inUntrusted || k === 'untrusted');
     };
