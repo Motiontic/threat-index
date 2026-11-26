@@ -48,3 +48,22 @@ it('the other section is left alone', () => {
   expect(stg.env.staging.send_email).toBeUndefined();
   expect(stg.env.staging.vars).toEqual({ URL: 'u' });
 });
+
+it("ti-mcp's config fills a placeholder inside a longer string (the staging resource URL)", async () => {
+  const { readFileSync } = await import('node:fs');
+  const ts = (await import('typescript')).default;
+  const file = new URL('../apps/mcp/wrangler.jsonc', import.meta.url);
+  const parsed = ts.parseConfigFileTextToJson('wrangler.jsonc', readFileSync(file, 'utf8'));
+  const vars = {
+    TI_SETTINGS_KV_ID_STAGING: 'kv-staging',
+    TI_APP_URL_STAGING: 'https://staging.example.test',
+    TI_CLERK_ISSUER_STAGING: 'https://clerk.example.test',
+  };
+  const staging = fillConfig(parsed.config, 'staging', vars, quiet).env.staging;
+  expect(staging.vars.MCP_RESOURCE_URL).toBe('https://staging.example.test/mcp');
+  expect(staging.vars.CLERK_ISSUER).toBe('https://clerk.example.test');
+  const prod = fillConfig(parsed.config, 'production', { TI_SETTINGS_KV_ID: 'kv', TI_CLERK_ISSUER: 'https://c.test' }, quiet);
+  expect(prod.vars.MCP_RESOURCE_URL).toBe('https://mti.motiontic.com/mcp');
+  expect(prod.workers_dev).toBe(false);
+  expect(prod.routes).toBeUndefined();
+});

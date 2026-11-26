@@ -1,6 +1,7 @@
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import apiText from '../../api/wrangler.jsonc?raw';
+import mcpText from '../../mcp/wrangler.jsonc?raw';
 import webText from '../wrangler.jsonc?raw';
 
 interface Service {
@@ -16,7 +17,11 @@ interface WranglerConfig {
   vars: unknown;
   services: Service[];
   routes?: unknown;
-  env: { staging: { name: string; vars: unknown; services: Service[]; routes?: unknown } };
+  workers_dev?: boolean;
+  preview_urls?: boolean;
+  env: {
+    staging: { name: string; vars: unknown; services: Service[]; routes?: unknown };
+  };
 }
 
 // `ts` is what scripts/wrangler-config.mjs uses to read these files too.
@@ -27,6 +32,7 @@ function parse(text: string): WranglerConfig {
 }
 const web = parse(webText);
 const api = parse(apiText);
+const mcp = parse(mcpText);
 
 describe('apps/web/wrangler.jsonc', () => {
   it('is the production worker at the top level', () => {
@@ -34,8 +40,11 @@ describe('apps/web/wrangler.jsonc', () => {
     expect(web.main).toBe('./workers/app.ts');
     expect(web.compatibility_flags).toContain('nodejs_compat');
     expect(web.observability).toEqual({ enabled: true });
-    expect(web.vars).toEqual({ TI_ENV: 'production', DATA_SOURCE: 'api' });
-    expect(web.services).toEqual([{ binding: 'API', service: 'ti-api' }]);
+    expect(web.vars).toEqual({ TI_ENV: 'production', DATA_SOURCE: 'api', MCP_ENABLED: '0' });
+    expect(web.services).toEqual([
+      { binding: 'API', service: 'ti-api' },
+      { binding: 'MCP', service: 'ti-mcp' },
+    ]);
   });
 
   it('serves production on mti.motiontic.com, and staging on workers.dev only', () => {
@@ -45,13 +54,28 @@ describe('apps/web/wrangler.jsonc', () => {
 
   it('is the staging worker under env.staging', () => {
     expect(web.env.staging.name).toBe('ti-web-staging');
-    expect(web.env.staging.vars).toEqual({ TI_ENV: 'staging', DATA_SOURCE: 'api' });
-    expect(web.env.staging.services).toEqual([{ binding: 'API', service: 'ti-api-staging' }]);
+    expect(web.env.staging.vars).toEqual({ TI_ENV: 'staging', DATA_SOURCE: 'api', MCP_ENABLED: '1' });
+    expect(web.env.staging.services).toEqual([
+      { binding: 'API', service: 'ti-api-staging' },
+      { binding: 'MCP', service: 'ti-mcp-staging' },
+    ]);
   });
 
   it('targets the same API workers that apps/api deploys', () => {
     expect(web.services[0]?.service).toBe(api.name);
     expect(web.env.staging.services[0]?.service).toBe(`${api.name}-staging`);
+  });
+
+  it('MCP is off in production and on in staging, and targets the worker apps/mcp deploys', () => {
+    expect((web.vars as { MCP_ENABLED: string }).MCP_ENABLED).toBe('0');
+    expect((web.env.staging.vars as { MCP_ENABLED: string }).MCP_ENABLED).toBe('1');
+    expect(web.services[1]?.service).toBe(mcp.name);
+    expect(web.env.staging.services[1]?.service).toBe(`${mcp.name}-staging`);
+    // ti-mcp has no public address of its own: only ti-web reaches it.
+    expect(mcp.workers_dev).toBe(false);
+    expect(mcp.preview_urls).toBe(false);
+    expect(mcp.routes).toBeUndefined();
+    expect(mcp.env.staging.routes).toBeUndefined();
   });
 
   it('uses the same compatibility date as the api', () => {

@@ -2,6 +2,10 @@
 declare namespace Cloudflare {
   interface Env {
     API: Fetcher;
+    /** ti-mcp, reached only for /mcp and the OAuth metadata path (workers/app.ts). */
+    MCP: Fetcher;
+    /** "1" forwards /mcp to ti-mcp; anything else answers 404 there. A var. */
+    MCP_ENABLED?: string;
     /** Per-IP page limit; a missing binding fails open. */
     RL_PAGES?: { limit(options: { key: string }): Promise<{ success: boolean }> };
     /** Worker secret shared with ti-api: signs the client IP forwarded to it. */

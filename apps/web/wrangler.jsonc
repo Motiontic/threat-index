@@ -17,7 +17,8 @@
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  "vars": { "TI_ENV": "production", "DATA_SOURCE": "api" },
+  // MCP_ENABLED: "1" forwards /mcp to ti-mcp; anything else answers 404 there. Off in production until MCP is switched on.
+  "vars": { "TI_ENV": "production", "DATA_SOURCE": "api", "MCP_ENABLED": "0" },
   // Production is served at https://mti.motiontic.com (Cloudflare creates the DNS record and certificate; the
   // zone must be on this account). Staging keeps its workers.dev address. The site URL itself (SITE_ORIGIN) is
   // a var set at deploy by scripts/deploy-web.mjs (`--var`, from TI_APP_URL / TI_APP_URL_STAGING).
@@ -28,7 +29,11 @@
   // Without both, Clerk is off: every page renders signed out and sign-in says it is unavailable.
   // Never add an AUTH_MODE var here: fake sign-in is for local fixtures runs only (deploy refuses it).
   // Loaders call ti-api through this binding (app/data/api.server.ts).
-  "services": [{ "binding": "API", "service": "ti-api" }],
+  // MCP is ti-mcp, reached only through this Worker (/mcp and the OAuth metadata path, workers/app.ts).
+  "services": [
+    { "binding": "API", "service": "ti-api" },
+    { "binding": "MCP", "service": "ti-mcp" }
+  ],
   // Page rate limit (per Cloudflare location, approximate). Not inherited by env.staging.
   "ratelimits": [{ "name": "RL_PAGES", "namespace_id": "7104", "simple": { "limit": 120, "period": 60 } }],
   // More secrets and vars:
@@ -38,10 +43,13 @@
   "env": {
     "staging": {
       "name": "ti-web-staging",
-      "vars": { "TI_ENV": "staging", "DATA_SOURCE": "api" },
+      "vars": { "TI_ENV": "staging", "DATA_SOURCE": "api", "MCP_ENABLED": "1" },
       // Staging keeps workers.dev only: no custom domain (explicit, so it can never inherit production's).
       "routes": [],
-      "services": [{ "binding": "API", "service": "ti-api-staging" }],
+      "services": [
+        { "binding": "API", "service": "ti-api-staging" },
+        { "binding": "MCP", "service": "ti-mcp-staging" }
+      ],
       "ratelimits": [{ "name": "RL_PAGES", "namespace_id": "7204", "simple": { "limit": 120, "period": 60 } }]
     }
   }
