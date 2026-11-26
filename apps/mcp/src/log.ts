@@ -15,8 +15,6 @@ export interface RequestLog {
   nOut?: number;
   ecosystems?: string;
   ms: number;
-  sub?: string;
-  clientId?: string;
   traceparent?: string;
   toolsHash?: string;
 }

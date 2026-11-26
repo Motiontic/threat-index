@@ -216,8 +216,6 @@ describe('logs', () => {
         route: 'mcp',
         tool: name,
         status: 200,
-        sub: 'user_2abcdefghijk',
-        clientId: 'client-abc',
         traceparent: TP,
         method: 'tools/call',
         era: 'modern',
@@ -232,6 +230,8 @@ describe('logs', () => {
     expect(all).not.toContain('203.0.113.9');
     expect(all).not.toContain(token);
     expect(all).not.toContain('evil.test');
+    expect(all).not.toContain('user_2abcdefghijk');
+    expect(all).not.toContain('client-abc');
     const pk = lines
       .map((l) => (l.includes('mti_check_packages') && l.includes('mcp_request') ? JSON.parse(l) : null))
       .find(Boolean);

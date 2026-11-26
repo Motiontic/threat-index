@@ -154,8 +154,6 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
       authReason: reason,
     });
   }
-  log.sub = identity.sub;
-  log.clientId = identity.clientId;
   if (!identity.scopes.includes('mti:read'))
     return send(challenge({ kind: 'scope' }, env.MCP_RESOURCE_URL, requestId), 'auth', {
       authReason: 'insufficient_scope',
