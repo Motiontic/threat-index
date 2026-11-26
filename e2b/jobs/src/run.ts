@@ -18,6 +18,7 @@ const JOBS: Record<JobKind, () => Promise<{ run: RunJob }>> = {
   'big-file': () => import('./jobs/big-file.ts'),
   'nightly-fold': () => import('./jobs/nightly-fold.ts'),
   'search-index': () => import('./jobs/search-index.ts'),
+  'affected-backfill': () => import('./jobs/affected-backfill.ts'),
   compaction: () => import('./jobs/compaction.ts'),
   'deep-query': () => import('./jobs/deep-query.ts'),
   echo: () => import('./jobs/echo.ts'),

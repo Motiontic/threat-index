@@ -326,6 +326,36 @@ describe('POST /internal/jobs (start)', () => {
     >;
     expect('from' in stored2).toBe(false);
   });
+  it('affected-backfill starts as a global job; one active run at a time; its chunks load at steady', async () => {
+    enabled = ['echo', 'affected-backfill'];
+    const call = app();
+    ids.push(ULID(90));
+    const res = await ops(call, 'POST', '/internal/jobs', {
+      requestId: ULID(90),
+      kind: 'affected-backfill',
+      reason: 'fill package data',
+    });
+    expect(res.status).toBe(201);
+    expect(fake.created.at(-1)?.metadata).toMatchObject({ kind: 'affected-backfill' });
+    expect(await row(ULID(90))).toMatchObject({ kind: 'affected-backfill', status: 'running' });
+    // A second start while one runs returns the running job.
+    const again = await ops(call, 'POST', '/internal/jobs', {
+      requestId: ULID(91),
+      kind: 'affected-backfill',
+      reason: 'again',
+    });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ jobId: ULID(90), status: 'running', existing: true });
+    // Complete: every chunk is queued at steady, whatever the manifest says.
+    await putManifest(
+      ULID(90),
+      chunks(ULID(90), 2).map((c) => ({ ...c, priority: 'first-load' })),
+    );
+    await asJob(call, ULID(90), 'complete', { ok: true });
+    const msgs = load.batches.flat().filter((m) => m.jobId === ULID(90));
+    expect(msgs).toHaveLength(2);
+    expect(msgs.every((m) => m.priority === 'steady')).toBe(true);
+  });
   it('400 for a bad body; 501 for a kind that is not enabled', async () => {
     enabled = ['echo', 'first-load'];
     const call = app();

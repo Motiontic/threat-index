@@ -1,4 +1,6 @@
 import type { RunStatus } from '@ti/core/control';
+import type { InboxRow } from '@ti/core/inbox';
+import { MAX_ROWS_PER_CHUNK } from '@ti/core/inbox';
 import { canIngest, displayMode } from '@ti/core/licence';
 import { readSourceSettings, unknownFieldsKey } from '@ti/core/settings';
 import type { CredentialName, Cursor, ParsedRecord, ParseResult } from '@ti/core/types';
@@ -266,16 +268,12 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
     const linked = await deps.link(records, linkDeps(env, deps));
     deps.log('linked', { sourceId: source.id, runId: msg.runId, step: msg.step, docs: linked.docs.length });
     if (linked.rows.length > 0) {
-      const res = await deps.writeRows(
-        databasesFromEnv(env as unknown as Record<string, unknown>),
-        linked.rows,
-        {
-          priority: 'steady',
-          now: deps.now(),
-        },
-      );
-      if (res.deferred) throw new Error('write deferred');
-      written = res.written;
+      const databases = databasesFromEnv(env as unknown as Record<string, unknown>);
+      for (const part of splitRows(linked.rows)) {
+        const res = await deps.writeRows(databases, part, { priority: 'steady', now: deps.now() });
+        if (res.deferred) throw new Error('write deferred');
+        written += res.written;
+      }
     }
   }
 
@@ -445,4 +443,25 @@ async function commitCursor(
   }
   const [cursorRes] = await db.batch([cursorStmt, runStmt]);
   return (cursorRes?.meta.changes ?? 0) > 0;
+}
+
+/**
+ * Calls of at most MAX_ROWS_PER_CHUNK rows (`planWrites` throws above that). A record's package rows sit
+ * together and end with its `package_advisories` row, so a cut avoids falling right after an `affected` row
+ * where it can. Every row is idempotent, so a cut inside a record is still safe.
+ */
+export function splitRows(rows: InboxRow[]): InboxRow[][] {
+  const parts: InboxRow[][] = [];
+  let start = 0;
+  while (start < rows.length) {
+    let end = Math.min(start + MAX_ROWS_PER_CHUNK, rows.length);
+    if (end < rows.length) {
+      let cut = end;
+      while (cut > start && rows[cut - 1]?.table === 'affected') cut--;
+      if (cut > start) end = cut;
+    }
+    parts.push(rows.slice(start, end));
+    start = end;
+  }
+  return parts;
 }

@@ -6,28 +6,43 @@ import { mapLimited } from './pool.ts';
 const UPLOADS_IN_FLIGHT = 4;
 
 /**
- * Writes `rows` as gzipped NDJSON chunks, then the manifest last (ti-api reads the manifest on `complete`).
- * With no rows it still writes an empty manifest.
+ * Writes chunks that are already packed (1 to 500 rows each) as gzipped NDJSON, then the manifest last (ti-api
+ * reads the manifest on `complete`). With no chunks it still writes an empty manifest.
  */
-export async function writeInbox(
+export async function writeInboxChunks(
   api: JobApi,
   jobId: string,
-  rows: InboxRow[],
+  chunks: InboxRow[][],
   now: () => Date = () => new Date(),
 ): Promise<{ chunks: number }> {
-  const slices: { key: string; rows: InboxRow[] }[] = [];
-  for (let i = 0; i < rows.length; i += MAX_ROWS_PER_CHUNK)
-    slices.push({ key: inboxChunkKey(jobId, slices.length), rows: rows.slice(i, i + MAX_ROWS_PER_CHUNK) });
+  const slices = chunks.map((rows, n) => {
+    if (rows.length === 0 || rows.length > MAX_ROWS_PER_CHUNK)
+      throw new Error(`chunk ${n} has ${rows.length} rows`);
+    return { key: inboxChunkKey(jobId, n), rows };
+  });
   // Chunks upload a few at a time; the manifest waits until every one has succeeded.
   await mapLimited(slices, UPLOADS_IN_FLIGHT, async (s) => {
     const body = gzipSync(`${s.rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
     await api.putObject(s.key, body, 'application/gzip');
   });
-  const chunks = slices.map((s) => ({ key: s.key, rows: s.rows.length }));
+  const manifest = slices.map((s) => ({ key: s.key, rows: s.rows.length }));
   await api.putObject(
     inboxManifestKey(jobId),
-    JSON.stringify({ jobId, createdAt: now().toISOString(), chunks }),
+    JSON.stringify({ jobId, createdAt: now().toISOString(), chunks: manifest }),
     'application/json',
   );
-  return { chunks: chunks.length };
+  return { chunks: manifest.length };
+}
+
+/** Writes `rows` as chunks of at most 500 rows, then the manifest last. With no rows: an empty manifest. */
+export function writeInbox(
+  api: JobApi,
+  jobId: string,
+  rows: InboxRow[],
+  now: () => Date = () => new Date(),
+): Promise<{ chunks: number }> {
+  const chunks: InboxRow[][] = [];
+  for (let i = 0; i < rows.length; i += MAX_ROWS_PER_CHUNK)
+    chunks.push(rows.slice(i, i + MAX_ROWS_PER_CHUNK));
+  return writeInboxChunks(api, jobId, chunks, now);
 }

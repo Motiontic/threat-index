@@ -24,7 +24,10 @@ describe('osv-ghsa', () => {
       published: '2026-11-23T21:07:02.000Z',
       modified: '2026-11-23T21:07:02.000Z',
       url: 'https://github.com/advisories/GHSA-9x82-4j54-863h',
-      affected: [{ ecosystem: 'npm', name: 'isomorphic-git', fixed: '1.38.6' }],
+      affected: [{ ecosystem: 'npm', name: 'isomorphic-git', fixed: '1.38.6', rangeType: 'ECOSYSTEM' }],
+      summary: expect.stringContaining('isomorphic-git'),
+      severity: 'MODERATE',
+      reviewed: true,
     });
   });
 
@@ -65,8 +68,15 @@ describe('osv-debian', () => {
       url: 'https://security-tracker.debian.org/tracker/CVE-2026-97845',
     });
     expect(a.affected?.length).toBe(6);
-    expect(a.affected?.[0]).toMatchObject({ ecosystem: 'Debian:12', name: 'qt6-5compat' });
-    expect(a.affected?.[0]?.range).toContain('(+8 more)');
+    expect(a.affected?.slice(0, 3)).toEqual(
+      ['Debian:12', 'Debian:13', 'Debian:14'].map((ecosystem) => ({
+        ecosystem,
+        name: 'qt6-5compat',
+        rangeType: 'ECOSYSTEM',
+      })),
+    );
+    expect(a.reviewed).toBe(true);
+    expect(a.severity).toBeUndefined();
   });
 
   it('skips DSA notices', async () => {
@@ -89,6 +99,10 @@ describe('osv-ubuntu', () => {
       url: 'https://osv.dev/vulnerability/UBUNTU-CVE-2026-99315',
     });
     expect(a.affected?.map((x) => x.name)).toEqual(['linux', 'linux-aws', 'linux-azure']);
+    expect(a.affected?.[0]?.ecosystem).toBe('Ubuntu:Pro:14.04:LTS');
+    expect(a.affected?.length).toBeLessThanOrEqual(200);
+    expect(a.severity).toBe('MEDIUM');
+    expect(a.reviewed).toBe(true);
   });
 
   it('skips USN notices', async () => {
@@ -135,5 +149,22 @@ describe('the four sources', () => {
     });
     expect(await check(h.ctx)).toBe('unchanged');
     expect(h.requests[0]?.headers['if-none-match']).toBe('"v1"');
+  });
+});
+
+describe('other parsers give no package entries', () => {
+  it('NVD, CSAF and CERT/CC fixtures have no rangeType', async () => {
+    const cases: [string, string, string][] = [
+      ['nvd', 'nvd', 'CVE-2024-3400.json'],
+      ['csaf', 'red-hat', 'cve-2023-38545.json'],
+      ['cert-cc', 'cert-cc', 'note-604762.json'],
+    ];
+    for (const [parser, dir, file] of cases) {
+      const out = await run(parser, fixture(dir, file));
+      for (const r of out.records) {
+        if ('sourceId' in r)
+          for (const a of r.affected ?? []) expect(a.rangeType, `${parser} ${a.name}`).toBeUndefined();
+      }
+    }
   });
 });

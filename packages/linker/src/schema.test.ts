@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { AFFECTED_COLUMNS, AFFECTED_KEY, PACKAGE_ADVISORY_COLUMNS } from './affected';
 import {
   ADVISORY_STATUSES,
   CHANGE_KINDS,
@@ -117,4 +118,10 @@ it('change and signal kinds equal the CHECK lists', () => {
     [...(tables.get('advisories')?.checks.get('status') ?? [])].sort(),
   );
   expect([...INCIDENT_KINDS].sort()).toEqual([...(tables.get('incidents')?.checks.get('kind') ?? [])].sort());
+});
+
+it('the package-table columns and keys equal the CREATE TABLEs in migration 0002', () => {
+  expect([...AFFECTED_COLUMNS]).toEqual(tables.get('affected')?.cols.map((c) => c.name));
+  expect([...AFFECTED_KEY]).toEqual(tables.get('affected')?.pk);
+  expect([...PACKAGE_ADVISORY_COLUMNS]).toEqual(tables.get('package_advisories')?.cols.map((c) => c.name));
 });

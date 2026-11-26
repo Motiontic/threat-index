@@ -431,3 +431,115 @@ describe('speed', () => {
     expect(chunks.length).toBeGreaterThan(1);
   });
 });
+
+describe('package rows in sandbox loads', () => {
+  const PACKAGE_TABLES = ['affected', 'package_advisories'];
+  const packageRows = (api: ReturnType<typeof fakeApi>) => {
+    const chunk = api.store.get(inboxChunkKey(JOB_ID, 0));
+    return chunk ? lines(chunk).filter((r) => PACKAGE_TABLES.includes(r.table)) : [];
+  };
+  const SHA = 'c'.repeat(40);
+  const GH_ARCHIVE = `https://github.com/github/advisory-database/archive/${SHA}.tar.gz`;
+  const ghsa = fixture('github-advisory-db', 'GHSA-9x82-4j54-863h.json');
+  const ghsaTar = () =>
+    gzipSync(
+      makeTar([
+        {
+          path: `a-${SHA}/advisories/github-reviewed/GHSA-9x82-4j54-863h.json`,
+          data: ghsa,
+        },
+      ]),
+    );
+  const archiveFetch = (() => async (input: RequestInfo | URL) => {
+    if (String(input) !== GH_ARCHIVE) throw new Error('unexpected fetch');
+    return new Response(ghsaTar() as BodyInit, { headers: { 'content-type': 'application/x-gzip' } });
+  })() as typeof fetch;
+
+  const OSV_LIST = 'https://osv-vulnerabilities.storage.googleapis.com/modified_id.csv';
+  const OSV_ITEM = 'https://osv-vulnerabilities.storage.googleapis.com/';
+  const goDoc = fixture('osv', 'GO-2026-5006.json');
+  const osvFetch =
+    (list: string, doc: (ref: string) => string): typeof fetch =>
+    async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === OSV_LIST) return new Response(list, { headers: { 'content-type': 'text/csv' } });
+      if (url.startsWith(OSV_ITEM))
+        return new Response(doc(url.slice(OSV_ITEM.length)), {
+          headers: { 'content-type': 'application/json' },
+        });
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+  const osvWindow = (api: ReturnType<typeof fakeApi>) =>
+    request(api, {
+      cursor: pair('2026-11-23T22:00:00Z', 'Go/GO-2026-0001'),
+      from: pair('2026-11-01T00:00:00Z', 'Go/GO-2026-0000'),
+    });
+
+  it('first-load drops package rows and logs the count', async () => {
+    const api = fakeApi();
+    const { ctx, logs } = fakeCtx(api);
+    await firstLoad(job({ sourceId: 'github-advisory-db', url: GH_ARCHIVE }), ctx, {
+      ...base,
+      fetch: archiveFetch,
+    });
+    expect(packageRows(api)).toEqual([]);
+    expect(logs.find((l) => l.msg === 'package rows left to the backfill')?.extra).toEqual({
+      rows: 2,
+      reason: 'first-load',
+    });
+  });
+
+  it('an archive update drops them', async () => {
+    const api = fakeApi();
+    const { ctx, logs } = fakeCtx(api);
+    await bigFile(job({ kind: 'big-file', sourceId: 'github-advisory-db', url: GH_ARCHIVE }), ctx, {
+      ...base,
+      fetch: archiveFetch,
+    });
+    expect(packageRows(api)).toEqual([]);
+    expect(logs.find((l) => l.msg === 'package rows left to the backfill')?.extra).toEqual({
+      rows: 2,
+      reason: 'archive',
+    });
+  });
+
+  it('a change-list update keeps them', async () => {
+    const api = fakeApi();
+    const { ctx, logs } = fakeCtx(api);
+    await osvWindow(api);
+    await bigFile(job({ kind: 'big-file', sourceId: 'osv', url: OSV_LIST }), ctx, {
+      ...base,
+      fetch: osvFetch('2026-11-23T21:00:00Z,Go/GO-2026-5006\n', () => goDoc),
+    });
+    expect(packageRows(api).map((r) => r.table)).toEqual(['affected', 'package_advisories']);
+    expect(logs.some((l) => l.msg === 'package rows left to the backfill')).toBe(false);
+  });
+
+  it('an update over 200,000 units drops them', async () => {
+    const api = fakeApi();
+    const { ctx, logs } = fakeCtx(api);
+    await osvWindow(api);
+    const refs = Array.from({ length: 400 }, (_, i) => `Go/GO-2026-${String(i).padStart(4, '0')}`);
+    const list = `${refs.map((r, i) => `2026-11-23T21:${String(i % 60).padStart(2, '0')}:00Z,${r}`).join('\n')}\n`;
+    const doc = (ref: string) => {
+      const id = ref.slice(3, -5);
+      return JSON.stringify({
+        id,
+        modified: '2026-11-23T20:00:00Z',
+        aliases: [`CVE-2026-${id.slice(-4)}`],
+        affected: Array.from({ length: 200 }, (_, i) => ({
+          package: { ecosystem: 'Go', name: `example.com/${id}/p${i}` },
+          ranges: [{ type: 'SEMVER', events: [{ introduced: '0' }, { fixed: '1.0.0' }] }],
+        })),
+      });
+    };
+    await bigFile(job({ kind: 'big-file', sourceId: 'osv', url: OSV_LIST }), ctx, {
+      ...base,
+      fetch: osvFetch(list, doc),
+    });
+    expect(packageRows(api)).toEqual([]);
+    const dropped = logs.find((l) => l.msg === 'package rows left to the backfill')?.extra;
+    expect(dropped?.reason).toBe('over cap');
+    expect(dropped?.rows).toBeGreaterThan(66_000);
+  }, 60_000);
+});

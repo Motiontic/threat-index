@@ -1,5 +1,12 @@
 import { isCve, normaliseId } from '@ti/core/ids';
-import type { AdvisoryRecord, Affected, ParsedRecord, ParseResult, VulnRecord } from '@ti/core/types';
+import type {
+  AdvisoryRecord,
+  Affected,
+  ParsedRecord,
+  ParseResult,
+  RangeType,
+  VulnRecord,
+} from '@ti/core/types';
 
 /**
  * OSV parser (https://ossf.github.io/osv-schema/). One parser serves OSV.dev, the GitHub Advisory
@@ -42,6 +49,7 @@ export const LANGUAGE_ECOSYSTEMS: ReadonlySet<string> = new Set([
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
 const CWE = /^CWE-\d+$/;
 const MAX_VERSIONS = 20;
+const MAX_EXACT_VERSIONS = 1000;
 
 const KNOWN_TOP = new Set([
   'schema_version',
@@ -133,9 +141,10 @@ function versionsEntry(ecosystem: string, name: string, versions: string[]): Aff
   return { ecosystem, name, range: more > 0 ? `${shown} (+${more} more)` : shown };
 }
 
-function pairsOf(range: Obj, ecosystem: string, name: string): Affected[] {
+function pairsOf(range: Obj, type: RangeType, ecosystem: string, name: string): Affected[] {
   const out: Affected[] = [];
   let open: Affected | null = null;
+  const start = (): Affected => ({ ecosystem, name, rangeType: type });
   const close = () => {
     if (open) out.push(open);
     open = null;
@@ -147,16 +156,17 @@ function pairsOf(range: Obj, ecosystem: string, name: string): Affected[] {
     const last = str(ev.last_affected);
     if (introduced !== undefined) {
       close();
-      open = { ecosystem, name };
+      open = start();
       if (introduced !== '0') open.introduced = introduced;
     } else if (fixed !== undefined) {
-      const pair: Affected = open ?? { ecosystem, name };
+      const pair: Affected = open ?? start();
       pair.fixed = fixed;
       out.push(pair);
       open = null;
     } else if (last !== undefined) {
-      const pair: Affected = open ?? { ecosystem, name };
+      const pair: Affected = open ?? start();
       pair.range = `<= ${last}`;
+      pair.lastAffected = last;
       out.push(pair);
       open = null;
     }
@@ -171,7 +181,16 @@ function affectedOf(osv: Obj): Affected[] {
   const seen = new Set<string>();
   const add = (a: Affected) => {
     if (out.length >= MAX_AFFECTED) return;
-    const key = JSON.stringify([a.ecosystem, a.name, a.introduced, a.fixed, a.range]);
+    const key = JSON.stringify([
+      a.ecosystem,
+      a.name,
+      a.introduced,
+      a.fixed,
+      a.range,
+      a.rangeType,
+      a.lastAffected,
+      a.versions,
+    ]);
     if (seen.has(key)) return;
     seen.add(key);
     out.push(a);
@@ -185,16 +204,21 @@ function affectedOf(osv: Obj): Affected[] {
     const pairs: Affected[] = [];
     for (const r of Array.isArray(entry.ranges) ? entry.ranges : []) {
       if (isObj(r) && (r.type === 'SEMVER' || r.type === 'ECOSYSTEM'))
-        pairs.push(...pairsOf(r, ecosystem, name));
+        pairs.push(...pairsOf(r, r.type, ecosystem, name));
     }
-    // A bare pair (`introduced: "0"` and nothing else) says "all versions"; an explicit version list says more.
-    const useful = pairs.filter(
-      (p) => p.introduced !== undefined || p.fixed !== undefined || p.range !== undefined,
-    );
+    if (pairs.length > 0) {
+      // A bare `introduced: "0"` pair is kept: it means every version. A list next to a range adds nothing.
+      for (const p of pairs) add(p);
+      continue;
+    }
     const versions = strings(entry.versions);
-    if (useful.length > 0) for (const p of useful) add(p);
-    else if (versions.length > 0) add(versionsEntry(ecosystem, name, versions));
-    else if (pairs.length > 0) add({ ecosystem, name });
+    if (versions.length === 0) continue;
+    const display = versionsEntry(ecosystem, name, versions);
+    if (versions.length <= MAX_EXACT_VERSIONS) {
+      display.rangeType = 'EXACT';
+      display.versions = versions;
+    }
+    add(display);
   }
   return out;
 }
@@ -253,6 +277,50 @@ function cweOf(osv: Obj): string[] {
   return [...new Set(raw.filter((c) => CWE.test(c)))];
 }
 
+/** The record's summary text: `summary`, else the first 2,000 characters of `details`; collapsed, cut to 300. */
+function summaryOf(osv: Obj): string {
+  const summary = str(osv.summary)?.trim();
+  const details = str(osv.details);
+  const body = (summary ?? details?.slice(0, 2000) ?? '').replace(/\s+/g, ' ').trim();
+  return cut(body, 300, true);
+}
+
+/** One-word `database_specific.severity` (GHSA), else an Ubuntu `severity[]` score; upper-cased, at most 16. */
+function severityOf(osv: Obj, db: Obj): string | undefined {
+  let label: string | undefined;
+  const dbSev = str(db.severity);
+  if (dbSev && /^\S+$/.test(dbSev.trim())) label = dbSev.trim();
+  if (!label && Array.isArray(osv.severity)) {
+    for (const s of osv.severity) {
+      if (isObj(s) && s.type === 'Ubuntu') {
+        const score = str(s.score)?.trim();
+        if (score && /^\S+$/.test(score)) {
+          label = score;
+          break;
+        }
+      }
+    }
+  }
+  if (!label) return undefined;
+  return label.toUpperCase().slice(0, 16);
+}
+
+/** True only when fix versions come from the ecosystem's own vulnerability database or a reviewed advisory. */
+export function reviewedFix(source: string, id: string, databaseSpecific: Record<string, unknown>): boolean {
+  switch (source) {
+    case 'github-advisory-db':
+      return databaseSpecific.github_reviewed === true;
+    case 'osv':
+      if (id.startsWith('PYSEC-') || id.startsWith('RUSTSEC-')) return true;
+      return id.startsWith('GO-') && databaseSpecific.review_status === 'REVIEWED';
+    case 'debian':
+    case 'ubuntu':
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function parseOsv(input: unknown, profile: OsvProfile): ParseResult<VulnRecord | AdvisoryRecord> {
   const empty = { records: [], unknownFields: [] };
   const un = unwrap(input);
@@ -273,6 +341,8 @@ export function parseOsv(input: unknown, profile: OsvProfile): ParseResult<VulnR
   const vulnKey = cve ? normaliseId(cve) : null;
   const withdrawn = osv.withdrawn !== undefined && osv.withdrawn !== null && osv.withdrawn !== '';
 
+  const summaryText = summaryOf(osv);
+  const dbSpecific = isObj(osv.database_specific) ? osv.database_specific : {};
   const advisory: AdvisoryRecord = {
     source: profile.source,
     sourceId: id,
@@ -281,8 +351,12 @@ export function parseOsv(input: unknown, profile: OsvProfile): ParseResult<VulnR
     modified,
     url: urlOf(id, osv),
     affected: affectedOf(osv),
+    reviewed: reviewedFix(profile.source, id, dbSpecific),
   };
   if (published) advisory.published = published;
+  if (summaryText) advisory.summary = summaryText;
+  const severity = severityOf(osv, dbSpecific);
+  if (severity) advisory.severity = severity;
 
   const records: (VulnRecord | AdvisoryRecord)[] = [];
   if (vulnKey === null && !withdrawn) {
@@ -292,12 +366,11 @@ export function parseOsv(input: unknown, profile: OsvProfile): ParseResult<VulnR
       ?.split(/\r?\n/)
       .map((l) => l.trim())
       .find((l) => l.length > 0);
-    const body = (summary ?? details?.slice(0, 2000) ?? '').replace(/\s+/g, ' ').trim();
     const vuln: VulnRecord = {
       key: id,
       kind: id.startsWith('MAL-') ? 'mal' : id.startsWith('GHSA-') ? 'ghsa' : 'osv',
       title: cut(summary || firstLine || id, 200, false),
-      summary: cut(body, 300, true),
+      summary: summaryText,
       modified,
       cwe: cweOf(osv),
       aliases: [...new Set(aliases)].filter((a) => a !== id),
