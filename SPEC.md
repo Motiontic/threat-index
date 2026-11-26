@@ -1162,3 +1162,67 @@ reach ti-api with their own `sub`, and each gets their own answer.
   current lockfile still holds one that young, so any re-resolution fails until 28 Nov 2026. Tokens are
   verified with WebCrypto against the issuer's JWKS, so ti-mcp holds no Clerk secret and never imports
   `@clerk/backend`. Leave it listed in `apps/mcp/package.json`; a later change removes it. Add no dependency.
+
+## Changes from the first build (round 2)
+
+A fresh-context security review of the first build found no way past token verification. Fix the following in
+this round, with tests. The first item matters most.
+
+1. **Source links, `src/links.ts` `sourceLink`:** today only the host is checked, so a link can carry an
+   attacker-shaped path or query, for example `https://www.cisa.gov/x)![a](https://evil.test/p.png)`.
+   - Keep only scheme, host and path. Drop the query and fragment.
+   - Reject a path containing any of `()[]<>!'"`, a backslash, whitespace, `//` or a `..` segment.
+   - Cap the whole URL at 300 characters.
+   - Where a source's URL shape is known, add a per-host path pattern. Otherwise give no link and fall back to
+     the MTI entry page.
+   - Apply this to every link field: `sourceUrl`, `advisories[].url`, `credits[].url` and any other.
+2. **Cleaner, `src/clean.ts`:**
+   - Decode entities, NFKC-normalise and strip in a loop until the text stops changing (at most 3 passes), so
+     `&#xFF1C;script&#xFF1E;` and `https&#xFF1A;&#xFF0F;&#xFF0F;evil.test` can't get through.
+   - Remove more URL shapes:
+     - `https:evil.test` and `https:/evil.test`;
+     - backslash forms;
+     - any `<letters>://`;
+     - bare IPv4 addresses with a path;
+     - `mailto:`, `data:` and `javascript:`.
+   - Run the reference-link rule before newlines are flattened, and remove only the URL token, so
+     `[CVE-2026-1]: overflow in foo` keeps its text.
+   - Strip every `\p{Default_Ignorable_Code_Point}` character, not only `\p{Cf}`.
+3. **Typed fields:**
+   - Dates must match a full ISO-8601 pattern anchored at both ends (`src/tools/common.ts`, `shared.ts`).
+   - In `mti_check_packages`, the package name and version in `results` and `noRecord` are the caller's own
+     input, matched by index, never text echoed back from ti-api.
+   - In `mti_get_entry`, the package-name pattern must not accept URLs.
+   - The `/e/` link path part must not accept `..`.
+4. **Failure handling:**
+   - Wrap the whole router. Any unexpected error becomes a 500 JSON-RPC error with security headers and the
+     request ID, never a bare Cloudflare error page.
+   - Treat every JWKS refresh error as unavailable (503).
+   - Run the shared JWKS refresh under `ctx.waitUntil`, so a cancelled request can't break other requests
+     waiting on it.
+   - When a refresh fails, keep serving the last good keys for up to 60 minutes past their normal expiry, and
+     log `jwks_stale`. After that, 503.
+5. **Limits:**
+   - Key the per-IP limit for IPv6 by /64 (use `ipKey` from `@ti/core/edge`).
+   - Keep the body cap at 1 MiB for every tool until `mti_check_sbom` ships.
+   - For legacy-era requests, refuse a call whose `params.name` differs from the `Mcp-Name` header when the
+     header is present.
+   - Add `fitToBudget` to `mti_get_entry`.
+6. **Smaller items:**
+   - Tie cursors to the caller's `sub`.
+   - `handleMetadata` runs `checkConfig` first and answers 503 when the issuer is missing.
+   - `scripts/check-no-fetch.mjs` also flags `.fetch(` property calls and aliasing of `fetch`, outside the allowed
+     files.
+7. **Tests:**
+   - Extend the token matrix:
+     - `application/at+jwt`, an `aud` array holding the URL, and expiry 4 s ago (all accepted);
+     - scopes only in `scp` (no scopes, so 403);
+     - a missing or 129-character `kid`;
+     - a missing `exp` or `iat`;
+     - a payload failure makes zero JWKS fetches;
+     - a stale cache inside and past the 60-minute window;
+     - an unknown-kid refresh that fails.
+   - Make the output walker independent of `sourceLink`. No field outside `untrusted` may contain `](`, `![`, `<`,
+     `>`, control or bidi characters, or a URL that fails the strict pattern.
+   - Put hostile text in dates, package names and link paths, as well as titles and summaries.
+   - Assert that the JWKS fetch passes a timeout signal, and refuses a body over 64 KiB.
