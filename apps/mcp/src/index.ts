@@ -1,52 +1,45 @@
-import { logEvent, REQUEST_ID_HEADER } from '@ti/core/log';
-import { API_SECURITY_HEADERS } from '@ti/core/security-headers';
+import { requestIdFrom } from '@ti/core/log';
+import { handleMetadata } from './auth/metadata';
+import { handleCard } from './card';
 import type { Env } from './env';
+import { APP_CODES, rpcError } from './http/errors';
+import { finish, json } from './http/respond';
+import { logRequest } from './log';
+import { handleMcp } from './mcp';
 
 export { McpTask } from './tasks/mcp-task';
 
-/** `not_ready`: an application error code, outside the reserved JSON-RPC range (-32768 to -32000). */
-const NOT_READY = { jsonrpc: '2.0', id: null, error: { code: -31001, message: 'not_ready' } };
-
-function respond(body: unknown, status: number, requestId: string, extra: Record<string, string> = {}) {
-  const headers = new Headers({
-    ...API_SECURITY_HEADERS,
-    'Cache-Control': 'no-store',
-    [REQUEST_ID_HEADER]: requestId,
-    ...extra,
-  });
-  if (body === null) return new Response(null, { status, headers });
-  headers.set('Content-Type', 'application/json');
-  return new Response(JSON.stringify(body), { status, headers });
-}
-
-/**
- * ti-mcp. For now `POST /mcp` answers "not ready": the protocol, OAuth checks and tools come in their own
- * changes. Only the shape is fixed here: which paths exist and what every response carries.
- */
+/** ti-mcp: routes by exact path. Every response leaves through `finish`. */
 export default {
-  async fetch(request, _env, _ctx) {
-    const requestId = crypto.randomUUID();
-    const started = Date.now();
-    const { pathname } = new URL(request.url);
-    let route = 'unknown';
-    let res: Response;
-    if (pathname === '/mcp') {
-      route = '/mcp';
-      res =
-        request.method === 'POST'
-          ? respond(NOT_READY, 503, requestId)
-          : respond({ error: 'method_not_allowed' }, 405, requestId, { Allow: 'POST' });
-    } else {
-      // /.well-known/oauth-protected-resource/mcp and /mcp/server-card land later; 404 until then.
-      res = respond({ error: 'not_found' }, 404, requestId);
+  async fetch(request, env, ctx) {
+    try {
+      return await route(request, env, ctx);
+    } catch {
+      // Whatever went wrong, the caller gets a JSON-RPC error with the usual headers, not a bare error page.
+      const requestId = requestIdFrom(request.headers.get('x-request-id'));
+      try {
+        logRequest({ requestId, route: 'mcp', status: 500, outcome: 'rpc_error', code: -32603, ms: 0 });
+      } catch {
+        // logging must not hide the answer
+      }
+      return finish(rpcError(500, -32603, requestId), { requestId });
     }
-    logEvent('info', 'request', {
-      requestId,
-      method: request.method,
-      route,
-      status: res.status,
-      ms: Date.now() - started,
-    });
-    return res;
   },
 } satisfies ExportedHandler<Env>;
+
+async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const { pathname } = new URL(request.url);
+  switch (pathname) {
+    case '/mcp':
+      return handleMcp(request, env, ctx);
+    case '/mcp/server-card':
+      return handleCard(request, env, ctx);
+    case '/.well-known/oauth-protected-resource/mcp':
+      return handleMetadata(request, env, ctx);
+    default: {
+      const requestId = requestIdFrom(request.headers.get('x-request-id'));
+      logRequest({ requestId, route: 'mcp', status: 404, outcome: 'rejected', code: 'not_found', ms: 0 });
+      return finish(json({ error: 'not_found', requestId }, 404), { requestId });
+    }
+  }
+}

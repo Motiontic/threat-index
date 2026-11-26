@@ -9,6 +9,7 @@ import { NotImplementedError } from '../src/errors';
 import worker from '../src/index';
 import type { McpTask } from '../src/tasks/mcp-task';
 import { TOOL_ORDER } from '../src/tools';
+import { BASE_ENV } from './support/mcp';
 
 const E = env as unknown as Env;
 
@@ -16,7 +17,7 @@ async function call(method: string, path: string, headers: Record<string, string
   const ctx = createExecutionContext();
   const res = await worker.fetch(
     new Request(`https://mti.test${path}`, { method, headers }) as never,
-    E,
+    BASE_ENV,
     ctx,
   );
   await waitOnExecutionContext(ctx);
@@ -32,17 +33,9 @@ function expectCommonHeaders(res: Response) {
 }
 
 describe('ti-mcp fetch handler', () => {
-  it('POST /mcp answers 503 not_ready with a JSON-RPC error outside the reserved range', async () => {
+  it('POST /mcp with no token answers 401 (the not_ready stub is gone)', async () => {
     const res = await call('POST', '/mcp');
-    expect(res.status).toBe(503);
-    expect(res.headers.get('content-type')).toContain('application/json');
-    const body = (await res.json()) as {
-      jsonrpc: string;
-      id: null;
-      error: { code: number; message: string };
-    };
-    expect(body).toEqual({ jsonrpc: '2.0', id: null, error: { code: -31001, message: 'not_ready' } });
-    expect(body.error.code < -32768 || body.error.code > -32000).toBe(true);
+    expect(res.status).toBe(401);
     expectCommonHeaders(res);
   });
   it.each(['GET', 'DELETE', 'PUT', 'PATCH'])('%s /mcp answers 405 with Allow: POST', async (method) => {
@@ -51,7 +44,7 @@ describe('ti-mcp fetch handler', () => {
     expect(res.headers.get('Allow')).toBe('POST');
     expectCommonHeaders(res);
   });
-  it.each(['/.well-known/oauth-protected-resource/mcp', '/mcp/server-card', '/', '/mcp/', '/mcpx', '/v1/me'])(
+  it.each(['/', '/mcp/', '/mcpx', '/v1/me', '/.well-known/oauth-protected-resource'])(
     '%s answers 404',
     async (path) => {
       const res = await call('GET', path);
@@ -59,11 +52,16 @@ describe('ti-mcp fetch handler', () => {
       expectCommonHeaders(res);
     },
   );
-  it("gives every request a fresh request id and ignores the caller's", async () => {
-    const a = await call('POST', '/mcp', { 'x-request-id': 'attacker-chosen-id' });
-    const b = await call('POST', '/mcp');
-    expect(a.headers.get('x-request-id')).not.toBe('attacker-chosen-id');
-    expect(a.headers.get('x-request-id')).not.toBe(b.headers.get('x-request-id'));
+  it.each(['/.well-known/oauth-protected-resource/mcp', '/mcp/server-card'])('%s is served', async (path) => {
+    const res = await call('GET', path);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+  it('keeps a well-formed incoming request id and replaces a malformed one', async () => {
+    const kept = await call('GET', '/mcp', { 'x-request-id': 'caller-chosen-id-1' });
+    expect(kept.headers.get('x-request-id')).toBe('caller-chosen-id-1');
+    const replaced = await call('GET', '/mcp', { 'x-request-id': 'bad id with spaces' });
+    expect(replaced.headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
 
@@ -163,10 +161,22 @@ describe('skeleton', () => {
       'mti_deep_query',
     ]);
   });
-  it('has a stub file per tool, all disabled', async () => {
+  it('keeps a stub for each tool that is not built here, and enables the eight that are', async () => {
+    const built = [
+      'mti_check_packages',
+      'mti_get_entry',
+      'mti_search',
+      'mti_latest_threats',
+      'mti_search_breaches',
+      'mti_search_incidents',
+      'mti_get_technique',
+      'mti_list_sources',
+    ];
     for (const name of TOOL_ORDER) {
       const mod = (await import(`../src/tools/${name}.ts`)) as { tool: { name: string; enabled: boolean } };
-      expect(mod.tool).toEqual({ name, enabled: false });
+      expect(mod.tool.name).toBe(name);
+      expect(mod.tool.enabled).toBe(built.includes(name));
+      if (!built.includes(name)) expect(mod.tool).toEqual({ name, enabled: false });
     }
   });
   it('has no-op extension points', async () => {

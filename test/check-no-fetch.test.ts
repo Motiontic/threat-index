@@ -64,9 +64,28 @@ describe('check-no-fetch', () => {
     expect(findViolations(root)).toEqual([]);
   });
 
+  it('flags .fetch( property calls and aliasing of fetch, but not handler.fetch(', () => {
+    const root = repoWith({
+      'apps/mcp/src/a.ts': 'const f = fetch;',
+      'apps/mcp/src/b.ts': 'const f = globalThis.fetch;',
+      'apps/mcp/src/c.ts': 'const { fetch: f } = globalThis;',
+      'apps/mcp/src/d.ts': 'const f = fetch.bind(globalThis);',
+      'apps/mcp/src/e.ts': "globalThis['fetch'](u);",
+      'apps/mcp/src/f.ts': 'const f = svc.fetch;',
+      'apps/mcp/src/g.ts': 'run(fetch);',
+      'apps/mcp/src/h.ts': 'await other.fetch(req);',
+      'apps/mcp/src/ok.ts': 'const res = await handler.fetch(req, opts);',
+    });
+    expect(
+      findViolations(root)
+        .map((v: { file: string }) => v.file.replace('apps/mcp/src/', ''))
+        .sort(),
+    ).toEqual(['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts', 'g.ts', 'h.ts']);
+  });
+
   it('lists the allowed files in the script', () => {
     expect(RULES).toEqual([
-      { dir: 'apps/mcp/src', allowed: ['api.ts'] },
+      { dir: 'apps/mcp/src', allowed: ['api.ts', 'auth/jwks.ts'] },
       { dir: 'apps/api/src', allowed: ['lib/clerk-api.ts'] },
     ]);
   });

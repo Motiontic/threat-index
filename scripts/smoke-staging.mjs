@@ -6,27 +6,43 @@
 // Prints a `check | status | result` table and exits 1 when any row fails.
 import { fileURLToPath } from 'node:url';
 
-const MAX_REQUESTS = 40;
+const MAX_REQUESTS = 43;
 const trim = (u) => u.replace(/\/+$/, '');
 
 /** One row per check. `fetchImpl` is `fetch`-shaped, so tests can pass a fake. */
 export async function runSmoke(fetchImpl, { web, api }) {
   const rows = [];
   let requests = 0;
-  const get = async (base, path) => {
+  const get = async (base, path, { method = 'GET', headers = {}, body } = {}) => {
     if (++requests > MAX_REQUESTS) throw new Error(`more than ${MAX_REQUESTS} requests`);
-    return fetchImpl(`${trim(base)}${path}`, { redirect: 'manual', headers: { Accept: '*/*' } });
+    return fetchImpl(`${trim(base)}${path}`, {
+      method,
+      redirect: 'manual',
+      headers: { Accept: '*/*', ...headers },
+      ...(body !== undefined ? { body } : {}),
+    });
   };
 
   async function check(
     label,
     base,
     path,
-    { status, json = false, web: isWeb = false, hits = false, noCookie = false },
+    {
+      status,
+      json = false,
+      web: isWeb = false,
+      hits = false,
+      noCookie = false,
+      contentType,
+      expect,
+      method,
+      headers,
+      body,
+    },
   ) {
     let res;
     try {
-      res = await get(base, path);
+      res = await get(base, path, { method, headers, body });
     } catch (err) {
       rows.push({ check: label, status: '-', result: `fail: ${err.message}` });
       return null;
@@ -45,6 +61,16 @@ export async function runSmoke(fetchImpl, { web, api }) {
     if (isWeb && !h('permissions-policy')) problems.push('no Permissions-Policy');
     if (noCookie && h('set-cookie')) problems.push('sets a cookie');
     if (json && !(h('content-type') ?? '').includes('application/json')) problems.push('not JSON');
+    if (contentType && (h('content-type') ?? '').split(';')[0].trim().toLowerCase() !== contentType)
+      problems.push(`content-type is not ${contentType}`);
+    if (expect) {
+      try {
+        const why = await expect(res.clone());
+        if (why) problems.push(why);
+      } catch (err) {
+        problems.push(`check threw: ${err.message}`);
+      }
+    }
     if (hits && res.status === status) {
       try {
         const n = (await res.clone().json()).hits?.length ?? 0;
@@ -91,8 +117,65 @@ export async function runSmoke(fetchImpl, { web, api }) {
   // MCP, forwarded by ti-web to ti-mcp (switched on in staging). Not pages, so no Permissions-Policy requirement
   // beyond what ti-mcp sets; the headers are checked and no cookie may be set.
   await check('web /mcp', web, '/mcp', { status: 405, noCookie: true });
-  // 404 until the server card ships.
-  await check('web /mcp/server-card', web, '/mcp/server-card', { status: 404, noCookie: true });
+  const wellKnown = '/.well-known/oauth-protected-resource/mcp';
+  await check(`web ${wellKnown}`, web, wellKnown, {
+    status: 200,
+    json: true,
+    noCookie: true,
+    expect: async (res) => {
+      const d = await res.json();
+      if (d.resource !== `${trim(web)}/mcp`) return 'resource is not <web>/mcp';
+      if (!Array.isArray(d.authorization_servers) || d.authorization_servers.length !== 1)
+        return 'authorization_servers is not one entry';
+      if (JSON.stringify(d.bearer_methods_supported) !== '["header"]')
+        return 'bearer_methods_supported is not ["header"]';
+      if (JSON.stringify(d).includes('offline_access')) return 'offline_access is listed';
+      return null;
+    },
+  });
+  const card = await check('web /mcp/server-card', web, '/mcp/server-card', {
+    status: 200,
+    contentType: 'application/mcp-server-card+json',
+    noCookie: true,
+    expect: async (res) => {
+      if (res.headers.get('access-control-allow-origin') !== '*') return 'no Access-Control-Allow-Origin: *';
+      return res.headers.get('etag') ? null : 'no ETag';
+    },
+  });
+  const etag = card?.headers.get('etag');
+  if (etag)
+    await check('web /mcp/server-card (If-None-Match)', web, '/mcp/server-card', {
+      status: 304,
+      noCookie: true,
+      headers: { 'If-None-Match': etag },
+    });
+  else skip('web /mcp/server-card (If-None-Match)');
+  // No token: 401 with a challenge that names the metadata document and scope, and no `error`.
+  await check('web POST /mcp (no token)', web, '/mcp', {
+    status: 401,
+    json: true,
+    noCookie: true,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      'MCP-Protocol-Version': '2026-07-28',
+      'Mcp-Method': 'tools/list',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' } },
+    }),
+    expect: async (res) => {
+      const c = res.headers.get('www-authenticate') ?? '';
+      if (!c.includes(`resource_metadata="${trim(web)}${wellKnown}"`))
+        return 'challenge has no resource_metadata';
+      if (!c.includes('scope="mti:read"')) return 'challenge has no scope';
+      return /error=/.test(c) ? 'challenge has an error=' : null;
+    },
+  });
 
   await check('api /v1/health', api, '/v1/health', { status: 200, json: true });
   if (key)
