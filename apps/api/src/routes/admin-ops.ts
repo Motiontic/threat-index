@@ -10,7 +10,9 @@ const route = new Hono<AppEnv>();
 // Anonymous and non-admin callers get the same 403, so the route does not reveal who is an admin.
 route.get('/v1/admin/ops', async (c) => {
   c.header('Cache-Control', 'private, no-store');
-  const userId = getAuth(c)?.userId ?? undefined;
+  // An MCP identity never carries admin rights, even for a user in ADMIN_USER_IDS. This reads the Clerk
+  // session directly (not currentUserId), and refuses an MCP call outright as a second guard.
+  const userId = c.get('mcp') ? undefined : (getAuth(c)?.userId ?? undefined);
   if (!isAdmin(parseAdminIds(c.env.ADMIN_USER_IDS), userId)) return c.json({ error: 'forbidden' }, 403);
   logEvent('info', 'admin_ops_viewed', { requestId: c.get('requestId'), userId });
   try {

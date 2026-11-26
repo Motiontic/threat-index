@@ -27,6 +27,7 @@ import {
   parseApiBase,
 } from '../lib/e2b';
 import type { AppEnv, Bindings } from '../lib/env';
+import { notImplemented } from '../lib/not-implemented';
 import { allow, limited } from '../lib/rate-limit';
 import { searchCredits } from '../lib/search-credits';
 import { JOB_ID } from './internal-jobs';
@@ -289,6 +290,9 @@ export function createDeepQueryRoute(deps: DeepQueryDeps = {}) {
       credits: searchCredits([result.sources.filter((s): s is string => typeof s === 'string')]),
     });
   });
+
+  // Stub: cancelling a deep query lands in its own change.
+  route.delete('/v1/deep-query/:id', requireUser, notImplemented);
 
   return route;
 }

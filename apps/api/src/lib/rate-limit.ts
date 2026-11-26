@@ -1,7 +1,7 @@
-import { getAuth } from '@hono/clerk-auth';
 import { ipKey, verifiedClientIp } from '@ti/core/edge';
 import { logEvent } from '@ti/core/log';
 import type { Context, MiddlewareHandler } from 'hono';
+import { currentUserId } from './auth';
 import type { AppEnv, RateLimiter } from './env';
 
 export const RETRY_AFTER_SECONDS = 60;
@@ -39,17 +39,9 @@ export function limited(c: Context<AppEnv>): Response {
   );
 }
 
-function signedInUser(c: Context<AppEnv>): string | undefined {
-  try {
-    return getAuth(c)?.userId ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Per-user limit when signed in, else per-IP. Runs before any cache, so cache hits count. */
+/** Per-user limit when signed in (a session or a verified MCP identity), else per-IP. Runs before any cache, so cache hits count. */
 export const rateLimit: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const userId = signedInUser(c);
+  const userId = currentUserId(c);
   if (userId) {
     if (!(await allow(c.env.RL_USER, `u:${userId}`))) return limited(c);
     return next();
