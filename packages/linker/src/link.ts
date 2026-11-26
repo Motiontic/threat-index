@@ -10,6 +10,7 @@ import type {
   TechniqueRecord,
   VulnRecord,
 } from '@ti/core/types';
+import { affectedRows, type PackagePlan, packageWrites } from './affected';
 import { linkNotices, noticeOut } from './breach';
 import { noticeChange, vulnChanges } from './changes';
 import { differs, isoDate, text } from './clean';
@@ -42,7 +43,8 @@ export interface LinkDeps {
    * real column names; all keys in one call share the same columns. The linker calls this at most once
    * per table per link(), except `breach_notices`: at most three times (by primary key, by `name_key`,
    * by `company_key`). The implementation splits the keys into as many queries as D1's bound-parameter
-   * limit needs.
+   * limit needs. `package_advisories` is read by `source, source_id`, and `affected` by its record index
+   * (`source, source_id`); each at most once per link().
    */
   read(table: string, keys: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
   /**
@@ -55,7 +57,10 @@ export interface LinkDeps {
 }
 
 export interface LinkResult {
-  /** Every D1 write, including `changes` rows. Only hot-set entities. */
+  /**
+   * Every D1 write, including `changes` rows. Hot-set entities only, except package rows
+   * (`affected`, `package_advisories`), which are included for every advisory record, hot or cold.
+   */
   rows: InboxRow[];
   /** Vulnerability keys whose docs/vuln/<key>.json must be rebuilt. */
   docs: string[];
@@ -276,7 +281,13 @@ export async function link(records: ParsedRecord[], deps: LinkDeps): Promise<Lin
         const pk = pkOf('advisories', { source: a.source, source_id: it.ids[0] });
         const prior = advStored.get(pk);
         advOut.set(pk, advisoryRow(hub, a, prior));
-        if (!prior && d.fixSource === null && a.affected?.some((x) => text(x?.fixed))) d.fixSource = a.source;
+        if (
+          !prior &&
+          d.fixSource === null &&
+          a.source !== 'cve-list' &&
+          a.affected?.some((x) => text(x?.fixed))
+        )
+          d.fixSource = a.source;
         attach(d, a.source);
       }
     for (const it of items)
@@ -381,10 +392,62 @@ export async function link(records: ParsedRecord[], deps: LinkDeps): Promise<Lin
     if (row) upsert('techniques', idx, row);
   }
 
+  const packageRows = await packageRowsOf(hubItems, deps);
+
   const rows: InboxRow[] = [];
   for (const table of ROW_ORDER) {
+    if (table === 'changes') rows.push(...packageRows);
     if (table === 'vulns') rows.push(...vulnDeletes);
     rows.push(...buckets[table].sort((a, b) => a.idx - b.idx).map((b) => b.row)); // stable
   }
   return { rows, docs: [...docHubs].sort(), skipped };
+}
+
+/** Package rows for the newest copy of each advisory record in this call, hot or cold. */
+async function packageRowsOf(hubItems: HubItem[], deps: LinkDeps): Promise<InboxRow[]> {
+  const latest = new Map<string, HubItem>();
+  for (const it of hubItems) {
+    if (it.kind !== 'advisory') continue;
+    const a = it.r as AdvisoryRecord;
+    const k = JSON.stringify([a.source, it.ids[0]]);
+    const have = latest.get(k);
+    if (!have || String(a.modified ?? '') >= String((have.r as AdvisoryRecord).modified ?? ''))
+      latest.set(k, it);
+  }
+  const planned: { it: HubItem; plan: PackagePlan }[] = [];
+  for (const it of latest.values()) {
+    const a = it.r as AdvisoryRecord;
+    const plan = affectedRows(a);
+    if (typeof plan.advisory.source_id !== 'string') continue;
+    if (plan.names > 0 || a.status !== 'active') planned.push({ it, plan });
+  }
+  if (planned.length === 0) return [];
+  planned.sort((x, y) => x.it.idx - y.it.idx);
+  const keys = planned.map(({ plan }) => ({
+    source: plan.advisory.source,
+    source_id: plan.advisory.source_id,
+  }));
+  const [advRows, rangeRows] = await Promise.all([
+    deps.read('package_advisories', keys),
+    deps.read('affected', keys),
+  ]);
+  const advBy = new Map(advRows.map((row) => [JSON.stringify([row.source, row.source_id]), row]));
+  const rangesBy = new Map<string, Row[]>();
+  for (const row of rangeRows) {
+    const k = JSON.stringify([row.source, row.source_id]);
+    const list = rangesBy.get(k);
+    if (list) list.push(row);
+    else rangesBy.set(k, [row]);
+  }
+  const out: InboxRow[] = [];
+  for (const { it, plan } of planned) {
+    const k = JSON.stringify([plan.advisory.source, plan.advisory.source_id]);
+    out.push(
+      ...packageWrites(it.r as AdvisoryRecord, plan, {
+        advisory: advBy.get(k),
+        ranges: rangesBy.get(k) ?? [],
+      }),
+    );
+  }
+  return out;
 }

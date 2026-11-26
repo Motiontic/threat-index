@@ -1,5 +1,6 @@
 import type { InboxRow } from '@ti/core/inbox';
 import type { SignalRecord } from '@ti/core/types';
+import { AFFECTED_COLUMNS, AFFECTED_KEY, PACKAGE_ADVISORY_COLUMNS } from '../affected';
 import type { LinkDeps } from '../link';
 import { COLUMNS, type LinkTable, PRIMARY_KEYS, pkOf, type Row } from '../tables';
 
@@ -18,7 +19,21 @@ const REQUIRED: Record<LinkTable, readonly string[]> = {
 
 export const NOW = new Date('2026-03-01T12:00:00.000Z');
 
+export type PackageTable = 'package_advisories' | 'affected';
+const PKG_KEYS: Record<PackageTable, readonly string[]> = {
+  package_advisories: ['source', 'source_id'],
+  affected: AFFECTED_KEY,
+};
+const PKG_COLUMNS: Record<PackageTable, readonly string[]> = {
+  package_advisories: PACKAGE_ADVISORY_COLUMNS,
+  affected: AFFECTED_COLUMNS,
+};
+const isPkg = (t: string): t is PackageTable => t === 'package_advisories' || t === 'affected';
+const pkKey = (t: PackageTable, row: Row) => JSON.stringify(PKG_KEYS[t].map((c) => row[c]));
+
 export interface Fake {
+  /** Stored package rows. */
+  pkg: Record<PackageTable, Map<string, Row>>;
   deps: LinkDeps;
   tables: Record<LinkTable, Map<string, Row>>;
   reads: { table: string; keys: Row[] }[];
@@ -33,12 +48,14 @@ export function makeFake(): Fake {
   const tables = Object.fromEntries(
     (Object.keys(COLUMNS) as LinkTable[]).map((t) => [t, new Map<string, Row>()]),
   ) as Fake['tables'];
+  const pkg: Fake['pkg'] = { package_advisories: new Map(), affected: new Map() };
   const reads: Fake['reads'] = [];
   const coldCalls: string[] = [];
   const cold = new Map<string, Row>();
   let n = 0;
 
   const fake: Fake = {
+    pkg,
     tables,
     reads,
     coldCalls,
@@ -49,6 +66,18 @@ export function makeFake(): Fake {
     all: (table) => [...tables[table].values()],
     apply(rows) {
       for (const { table, op, row } of rows) {
+        if (isPkg(table)) {
+          if (op === 'delete') {
+            if (JSON.stringify(Object.keys(row)) !== JSON.stringify(PKG_KEYS[table]))
+              throw new Error(`delete on ${table} must carry exactly its key`);
+            pkg[table].delete(pkKey(table, row));
+          } else {
+            if (JSON.stringify(Object.keys(row)) !== JSON.stringify(PKG_COLUMNS[table]))
+              throw new Error(`upsert on ${table} must carry exactly its columns`);
+            pkg[table].set(pkKey(table, row), row);
+          }
+          continue;
+        }
         const t = table as LinkTable;
         if (!COLUMNS[t]) throw new Error(`unknown table ${table}`);
         if (op === 'delete') {
@@ -67,6 +96,10 @@ export function makeFake(): Fake {
       async read(table, keys) {
         if (keys.length === 0) throw new Error(`read(${table}) with no keys`);
         reads.push({ table, keys });
+        if (isPkg(table))
+          return [...pkg[table].values()].filter((row) =>
+            keys.some((k) => Object.entries(k).every(([c, v]) => row[c] === v)),
+          );
         const t = table as LinkTable;
         return [...tables[t].values()].filter((row) =>
           keys.some((k) => Object.entries(k).every(([c, v]) => row[c] === v)),

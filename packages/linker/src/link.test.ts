@@ -476,3 +476,99 @@ it('rows follow ROW_ORDER with changes last', async () => {
     'changes',
   ]);
 });
+
+const pkgRec = (over: Partial<AdvisoryRecord> = {}): AdvisoryRecord =>
+  advisory('GHSA-pppp-qqqq-rrrr', {
+    vulnKey: null,
+    affected: [{ ecosystem: 'npm', name: 'left-pad', rangeType: 'ECOSYSTEM', fixed: '1.3.0' }],
+    reviewed: true,
+    ...over,
+  });
+
+it('(pkg) a cold record gets package rows, and linking it again gives none', async () => {
+  const f = makeFake();
+  const out = await link([pkgRec({ modified: '2019-01-01T00:00:00Z' })], f.deps);
+  expect(tables(out.rows)).toEqual(['affected', 'package_advisories']);
+  expect(out.skipped).toBe(1);
+  f.apply(out.rows);
+  const again = await link([pkgRec({ modified: '2019-01-01T00:00:00Z' })], f.deps);
+  expect(again.rows).toEqual([]);
+});
+
+it('(pkg) package rows sit before changes, and each new table is read once', async () => {
+  const f = makeFake();
+  f.put('vulns', vulnRow(CVE));
+  const out = await link(
+    [
+      advisory(GHSA, {
+        vulnKey: CVE,
+        affected: [{ ecosystem: 'npm', name: 'a', rangeType: 'ECOSYSTEM', fixed: '1' }],
+      }),
+      pkgRec(),
+      pkgRec({ sourceId: 'GHSA-xxxx-yyyy-zzzz' }),
+    ],
+    f.deps,
+  );
+  const t = tables(out.rows);
+  const firstPkg = t.indexOf('affected');
+  expect(firstPkg).toBeGreaterThan(-1);
+  if (t.includes('changes')) expect(t.lastIndexOf('package_advisories')).toBeLessThan(t.indexOf('changes'));
+  expect(f.reads.filter((x) => x.table === 'package_advisories')).toHaveLength(1);
+  expect(f.reads.filter((x) => x.table === 'affected')).toHaveLength(1);
+  expect(out.rows.filter((x) => x.table === 'package_advisories')).toHaveLength(3);
+});
+
+it('(pkg) a cve-list advisory with a fix on a stored hot vuln raises no fix_released', async () => {
+  const f = makeFake();
+  f.put('vulns', vulnRow(CVE));
+  const out = await link(
+    [
+      advisory(CVE, {
+        source: 'cve-list',
+        vulnKey: CVE,
+        affected: [
+          { ecosystem: 'PyPI', name: 'langflow', rangeType: 'ECOSYSTEM', introduced: '0', fixed: '1.3.0' },
+        ],
+      }),
+    ],
+    f.deps,
+  );
+  expect(changes(out.rows).filter((c) => c.kind === 'fix_released')).toEqual([]);
+  expect(tables(out.rows)).toContain('advisories');
+  expect(tables(out.rows)).toContain('package_advisories');
+});
+
+it('(pkg) when read returns nothing, rows are upserts only', async () => {
+  const f = makeFake();
+  const out = await link([pkgRec()], f.deps);
+  expect(
+    out.rows
+      .filter((x) => x.table === 'affected' || x.table === 'package_advisories')
+      .every((x) => x.op === 'upsert'),
+  ).toBe(true);
+});
+
+it('(pkg) a record that drops a package deletes its rows in the same output', async () => {
+  const f = makeFake();
+  const two = pkgRec({
+    affected: [
+      { ecosystem: 'npm', name: 'a', rangeType: 'ECOSYSTEM', fixed: '1' },
+      { ecosystem: 'npm', name: 'b', rangeType: 'ECOSYSTEM', fixed: '1' },
+    ],
+  });
+  f.apply((await link([two], f.deps)).rows);
+  const out = await link(
+    [
+      pkgRec({
+        modified: '2026-01-01T00:00:00Z',
+        affected: [{ ecosystem: 'npm', name: 'a', rangeType: 'ECOSYSTEM', fixed: '1' }],
+      }),
+    ],
+    f.deps,
+  );
+  expect(out.rows.filter((x) => x.table === 'affected' && x.op === 'delete').map((x) => x.row.name)).toEqual([
+    'b',
+  ]);
+  f.apply(out.rows);
+  expect([...f.pkg.affected.values()].map((r) => r.name)).toEqual(['a']);
+});
