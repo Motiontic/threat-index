@@ -1,3 +1,4 @@
+import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normaliseId } from '@ti/core/ids';
@@ -156,6 +157,9 @@ export const HARD_MAX_BYTES = 20 * 1024 ** 3;
 const PROGRESS_EVERY = 10_000;
 
 /** The archive caps for a source: its own values, kept within the hard ceilings. */
+/** The most a git archive may take on disk. */
+const ARCHIVE_DOWNLOAD_BYTES = 4 * 1024 ** 3;
+
 export function archiveLimits(git: { maxFiles?: number; maxBytes?: number }) {
   const pick = (v: number | undefined, dflt: number, hard: number) =>
     v !== undefined && Number.isFinite(v) && v > 0 ? Math.min(Math.floor(v), hard) : dflt;
@@ -374,28 +378,34 @@ export async function runLoad(
         const git = source.pull?.git;
         if (!git) throw new Error(`source ${source.id} has no git config`);
         const include = git.include.map(globToRegExp);
-        const res = (await fetchDocument(url, net)) as Response;
-        const limits = archiveLimits(git);
-        const started = Date.now();
         let kept = 0;
         let filtered = 0;
-        const tar = await readTarGz(
-          res.body as ReadableStream<Uint8Array>,
-          async (entry) => {
-            const rel = entry.path.split('/').slice(1).join('/');
-            const ext = /\.([A-Za-z0-9]+)$/.exec(rel)?.[1]?.toLowerCase();
-            if (!rel || !ext || !DATA_EXTENSIONS.has(ext) || !include.some((re) => re.test(rel))) {
-              filtered++;
-              return;
-            }
-            if (++kept > limits.maxFiles) throw new Error('archive has too many files');
-            docs.feed({ path: rel, status: 'added', text: await entry.text() });
-            while (docs.pending() >= BATCH) await processBatch(docs.drain());
-            if (kept % PROGRESS_EVERY === 0)
-              ctx.log('archive progress', { files: kept, elapsedMs: Date.now() - started });
-          },
-          { maxTotalBytes: limits.maxBytes },
-        );
+        const limits = archiveLimits(git);
+        // Download first: a slow batch must not leave the connection idle until the host closes it.
+        const tar = await withScratch(job.id, async (dir) => {
+          const file = join(dir, 'archive.tar.gz');
+          const t0 = Date.now();
+          const got = await download(url, file, { ...net, gunzip: false, maxBytes: ARCHIVE_DOWNLOAD_BYTES });
+          ctx.log('archive downloaded', { bytes: got.bytes, durationMs: Date.now() - t0 });
+          const started = Date.now();
+          return readTarGz(
+            createReadStream(file),
+            async (entry) => {
+              const rel = entry.path.split('/').slice(1).join('/');
+              const ext = /\.([A-Za-z0-9]+)$/.exec(rel)?.[1]?.toLowerCase();
+              if (!rel || !ext || !DATA_EXTENSIONS.has(ext) || !include.some((re) => re.test(rel))) {
+                filtered++;
+                return;
+              }
+              if (++kept > limits.maxFiles) throw new Error('archive has too many files');
+              docs.feed({ path: rel, status: 'added', text: await entry.text() });
+              while (docs.pending() >= BATCH) await processBatch(docs.drain());
+              if (kept % PROGRESS_EVERY === 0)
+                ctx.log('archive progress', { files: kept, elapsedMs: Date.now() - started });
+            },
+            { maxTotalBytes: limits.maxBytes },
+          );
+        });
         oversize = 0;
         ctx.log('archive read', { entries: tar.files, kept, filtered, skipped: tar.skipped });
       } else {

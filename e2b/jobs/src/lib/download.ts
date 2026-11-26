@@ -13,6 +13,8 @@ export interface DownloadDeps {
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   maxBytes?: number;
+  /** Overrides the default of gunzipping when the URL path ends `.gz`; `false` keeps the bytes as served. */
+  gunzip?: boolean;
 }
 export interface Downloaded {
   bytes: number; // written to `dest`, after gunzip
@@ -51,7 +53,8 @@ export async function download(url: string, dest: string, deps: DownloadDeps = {
   const doFetch = deps.fetch ?? fetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const max = deps.maxBytes ?? MAX_DOWNLOAD_BYTES;
-  const gunzip = assertHttps(url).pathname.endsWith('.gz');
+  const gunzip = deps.gunzip ?? assertHttps(url).pathname.endsWith('.gz');
+  assertHttps(url);
 
   let lastError = '';
   for (let attempt = 0; attempt <= RETRIES; attempt++) {

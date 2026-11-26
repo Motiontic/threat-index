@@ -67,6 +67,32 @@ describe('download', () => {
     expect(calls[1]?.url).toBe('https://example.com/real/file.csv.gz');
     expect(((calls[0]?.init?.headers ?? {}) as Record<string, string>)['user-agent']).toBe(USER_AGENT);
   });
+  it('keeps the bytes as served with gunzip: false, even on a .gz path', async () => {
+    const zipped = gz('a,b\n1,2\n');
+    const { fn } = fetchSeq(() => new Response(zipped));
+    const got = await download('https://example.com/a.tar.gz', join(dir, 'raw'), {
+      fetch: fn,
+      gunzip: false,
+    });
+    expect(new Uint8Array(await readFile(join(dir, 'raw')))).toEqual(zipped);
+    expect(got.bytes).toBe(zipped.length);
+  });
+  it('enforces maxBytes on a raw download, and allows more with a larger cap', async () => {
+    const zipped = gz('x'.repeat(1000));
+    await expect(
+      download('https://example.com/a.tar.gz', join(dir, 'r1'), {
+        fetch: fetchSeq(() => new Response(zipped)).fn,
+        gunzip: false,
+        maxBytes: zipped.length - 1,
+      }),
+    ).rejects.toThrow('over the size limit');
+    const ok = await download('https://example.com/a.tar.gz', join(dir, 'r2'), {
+      fetch: fetchSeq(() => new Response(zipped)).fn,
+      gunzip: false,
+      maxBytes: zipped.length,
+    });
+    expect(ok.bytes).toBe(zipped.length);
+  });
   it('refuses a redirect to http and more than five redirects', async () => {
     const toHttp = fetchSeq(
       () => new Response(null, { status: 301, headers: { location: 'http://evil.test/x' } }),

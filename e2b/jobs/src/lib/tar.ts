@@ -134,7 +134,7 @@ const unsafe = (path: string): boolean =>
  * unpacked fails the call.
  */
 export async function readTarGz(
-  body: ReadableStream<Uint8Array>,
+  body: ReadableStream<Uint8Array> | Readable,
   onEntry: (e: TarEntry) => Promise<void>,
   limits: TarLimits = {},
 ): Promise<{ files: number; skipped: number }> {
@@ -143,7 +143,11 @@ export async function readTarGz(
   const gunzip = createGunzip();
   const source = gunzip;
   // pipeline() forwards a source error (reset, abort) to gunzip, so the iterator throws instead of hanging.
-  pipeline(Readable.fromWeb(body as unknown as WebReadableStream), gunzip, () => {});
+  pipeline(
+    body instanceof Readable ? body : Readable.fromWeb(body as unknown as WebReadableStream),
+    gunzip,
+    () => {},
+  );
   const r = new ByteReader(source as AsyncIterable<Buffer>, maxTotal);
   let files = 0;
   let skipped = 0;
