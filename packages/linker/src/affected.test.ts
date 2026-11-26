@@ -1,4 +1,4 @@
-import type { AdvisoryRecord, Affected } from '@ti/core/types';
+import type { AdvisoryRecord, Affected, ParsedRecord, ParseResult } from '@ti/core/types';
 import { describe, expect, it } from 'vitest';
 import { fixture } from '../../../test/fixtures';
 import { loadParser } from '../../parsers/src/load';
@@ -21,7 +21,7 @@ const e = (ecosystem: string, name: string, over: Partial<Affected> = {}): Affec
   ...over,
 });
 const parsed = async (parser: string, dir: string, file: string) => {
-  const out = (await loadParser(parser)).parse(fixture(dir, file));
+  const out = (await loadParser(parser)).parse(fixture(dir, file)) as ParseResult<ParsedRecord>;
   return out.records.find((r) => 'sourceId' in r) as AdvisoryRecord;
 };
 

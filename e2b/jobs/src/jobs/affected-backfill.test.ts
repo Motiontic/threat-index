@@ -268,7 +268,10 @@ describe('affected-backfill', () => {
     const api = seeded();
     await dryRun(api);
     let t = day('2026-11-24');
-    const ticking = () => new Date((t += 1000));
+    const ticking = () => {
+      t += 1000;
+      return new Date(t);
+    };
     const { ctx } = fakeCtx(api);
     await backfill(
       job({ id: J(1), kind: 'affected-backfill' }),

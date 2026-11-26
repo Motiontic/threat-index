@@ -1,4 +1,3 @@
-import { gzipSync } from 'node:zlib';
 import type { InboxRow } from '@ti/core/inbox';
 import { planWrites } from '@ti/db/plan';
 import { expect, it } from 'vitest';
@@ -48,7 +47,10 @@ it('the loader allows both package tables', () => {
 });
 
 it('a package chunk passes readChunk and planWrites, at 3 and 2 units per row', async () => {
-  const body = gzipSync(rows.map((r) => JSON.stringify(r)).join('\n'));
+  const stream = new Blob([rows.map((r) => JSON.stringify(r)).join('\n')])
+    .stream()
+    .pipeThrough(new CompressionStream('gzip'));
+  const body = new Uint8Array(await new Response(stream).arrayBuffer());
   const read = await readChunk(
     { size: body.length, body: new Response(body).body as ReadableStream<Uint8Array> },
     rows.length,

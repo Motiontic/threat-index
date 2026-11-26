@@ -398,7 +398,8 @@ export async function backfill(
         for (const r of rows) {
           if (r.table !== 'affected') continue;
           const base = String(r.row.ecosystem).split(':')[0] as string;
-          const e = (c.byEcosystem[base] ??= { rows: 0, writes: 0 });
+          const e = c.byEcosystem[base] ?? { rows: 0, writes: 0 };
+          c.byEcosystem[base] = e;
           e.rows++;
           e.writes += packageCost([r]);
           c.byRangeType[r.row.range_type as RangeType]++;
