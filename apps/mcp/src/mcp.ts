@@ -175,7 +175,9 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
   });
   const headers = new Headers(request.headers);
   for (const h of ['mcp-session-id', 'last-event-id', 'authorization', 'cookie']) headers.delete(h);
-  const forward = new Request(request.url, { method: 'POST', headers, signal });
+  // The SDK gets the client's own signal: a disconnect closes its exchange. The run-time limit reaches the
+  // tools through `deps.signal` instead, so a timeout comes back as the `timeout` tool error, not an empty 499.
+  const forward = new Request(request.url, { method: 'POST', headers, signal: request.signal });
   const authInfo = {
     token: 'verified',
     clientId: identity.clientId,
@@ -195,7 +197,12 @@ export async function handleMcp(request: Request, env: Env, _ctx: ExecutionConte
     return send(rpcError(500, -32603, requestId), 'rpc_error', { code: -32603 });
   }
 
-  // 12. Answer.
+  // 12. Answer. Every /mcp answer is no-store, whatever the SDK set.
+  {
+    const h = new Headers(res.headers);
+    h.delete('cache-control');
+    res = new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+  }
   const statsLog = (): Partial<RequestLog> => ({
     ...(stats.tool ? { tool: stats.tool } : {}),
     ...(stats.nIn !== undefined ? { nIn: stats.nIn } : {}),
