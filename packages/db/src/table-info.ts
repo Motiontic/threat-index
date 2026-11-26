@@ -36,6 +36,7 @@ const OTHER_RULES: Record<string, WriteRule> = {
   companies: 'upsert',
   signals: 'keep-first-seen',
   changes: 'insert-ignore',
+  affected: 'upsert',
   budget: 'none',
 };
 
@@ -110,6 +111,8 @@ export const WRITE_ORDER: readonly string[] = [
   'changes',
   'vulns',
   'advisories',
+  'package_advisories',
+  'affected',
 ];
 
 /** The order a call's databases are written in. */

@@ -18,10 +18,15 @@ describe('TABLES', () => {
     const dir = path.split('/')[2];
     for (const m of sql.matchAll(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)/gi))
       fromSql.push([m[1] as string, `ti_${dir}`]);
+    // A rebuilt table is created under a temporary name and renamed; only the final name is a table.
+    for (const m of sql.matchAll(/ALTER TABLE\s+(\w+)\s+RENAME TO/gi)) {
+      const i = fromSql.findIndex(([t]) => t === m[1]);
+      if (i > -1) fromSql.splice(i, 1);
+    }
   }
 
   it('has every migration table exactly once, in its own folder database, and nothing else', () => {
-    expect(fromSql.length).toBe(24);
+    expect(fromSql.length).toBe(29);
     expect(new Set(fromSql.map(([t]) => t)).size).toBe(fromSql.length);
     expect([...TABLES.values()].map((t) => [t.name, t.db]).sort()).toEqual([...fromSql].sort());
   });
@@ -68,7 +73,7 @@ describe('TABLES', () => {
   it('WRITE_ORDER lists exactly the writable tables', () => {
     const writable = [...TABLES.values()].filter((t) => t.rule !== 'none').map((t) => t.name);
     expect([...WRITE_ORDER].sort()).toEqual(writable.sort());
-    expect(WRITE_ORDER.length).toBe(14);
+    expect(WRITE_ORDER.length).toBe(16);
   });
   it('DB_WRITE_ORDER covers every database a writable table uses', () => {
     expect(DB_WRITE_ORDER).toEqual(['ti_control', 'ti_world', 'ti_signals', 'ti_vulns', 'ti_advisories']);
