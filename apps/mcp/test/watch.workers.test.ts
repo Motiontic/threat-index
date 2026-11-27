@@ -152,6 +152,12 @@ describe('mti_watch_add', () => {
         'You are watching the most packages allowed (200). Remove one first.',
       ],
       [404, { error: 'not_found' }, 'not_found', 'MTI has no entry with that ID.'],
+      [
+        404,
+        { error: 'unknown_package' },
+        'unknown_package',
+        "MTI has no records for that package yet, so it can't be watched.",
+      ],
       [429, { error: 'x' }, 'rate_limited', 'Too many requests.'],
     ];
     for (const [code, body, tool, msg] of cases) {

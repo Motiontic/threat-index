@@ -81,6 +81,9 @@ beforeEach(async () => {
   limitKeys = [];
   clerkRan = 0;
   await E.DB_USERS.exec('DELETE FROM mcp_blocks');
+  await (env as any).DB_ADVISORIES.exec(
+    "INSERT OR IGNORE INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES ('npm', 'lodash', 'osv', 'T-1', 0, 'T-1', 'SEMVER')",
+  );
 });
 
 describe('a signed MCP call', () => {

@@ -64,6 +64,13 @@ route.put('/v1/me/watch/packages/:ecosystem/:name', requireUser, async (c) => {
     if (mcp && body.alertsOn === false) throw new HttpError(403, 'not_allowed_for_mcp');
     const db = c.env.DB_USERS;
     const label = `pkg:${ecosystem}/${name}`;
+    // Only a package MTI has records for can be watched. An OS ecosystem (`Debian`) also matches `Debian:12`.
+    const known = await c.env.DB_ADVISORIES.prepare(
+      `SELECT 1 AS x FROM affected WHERE name = ?2 AND (ecosystem = ?1 OR (ecosystem >= ?1 || ':' AND ecosystem < ?1 || ';')) LIMIT 1`,
+    )
+      .bind(ecosystem, name)
+      .first();
+    if (!known) throw new HttpError(404, 'unknown_package');
 
     const stmts = [
       db

@@ -20,6 +20,7 @@ export type ToolErrorCode =
   | 'limit_reached'
   | 'removal_limit'
   | 'not_found'
+  | 'unknown_package'
   | 'blocked'
   | 'tool_off'
   | 'upstream_unavailable'
@@ -95,6 +96,8 @@ function failText(a: Extract<ToolAnswer, { ok: false }>): string {
       return 'Too many watches were removed through MCP today. Try again later, or use the website.';
     case 'not_found':
       return 'MTI has no entry with that ID.';
+    case 'unknown_package':
+      return "MTI has no records for that package yet, so it can't be watched.";
     case 'blocked':
       return 'This account or app cannot use MTI right now.';
     case 'tool_off':
@@ -162,7 +165,12 @@ export async function apiJson<T>(
       return {
         ok: false,
         status,
-        code: errBody?.error === 'not_found' ? 'not_found' : 'upstream_unavailable',
+        code:
+          errBody?.error === 'not_found'
+            ? 'not_found'
+            : errBody?.error === 'unknown_package'
+              ? 'unknown_package'
+              : 'upstream_unavailable',
       };
     if (status === 409)
       return {

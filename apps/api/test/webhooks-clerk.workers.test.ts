@@ -123,6 +123,31 @@ describe('POST /webhooks/clerk', () => {
     expect(await email('wh_v3')).toBe('');
   });
 
+  it('user.created for an existing row keeps its email; user.updated with no verified address clears it and warns', async () => {
+    await post(created('wh_k', 'keep@example.test'));
+    await post(created('wh_k', 'other@example.test'));
+    const email = async () =>
+      (await E.DB_USERS.prepare("SELECT email FROM users WHERE id = 'wh_k'").first<{ email: string }>())
+        ?.email;
+    expect(await email()).toBe('keep@example.test');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await post({
+      type: 'user.updated',
+      data: {
+        id: 'wh_k',
+        email_addresses: [{ id: 'e1', email_address: 'x@example.test', verification: null }],
+        primary_email_address_id: 'e1',
+        first_name: 'A',
+        last_name: 'B',
+      },
+    });
+    expect(await email()).toBe('');
+    const logged = warn.mock.calls.map((c) => String(c[0]));
+    expect(logged.some((l) => l.includes('email_cleared'))).toBe(true);
+    expect(logged.some((l) => l.includes('keep@example.test'))).toBe(false);
+    warn.mockRestore();
+  });
+
   it('a replayed svix-id is a no-op', async () => {
     const first = await post(created('wh_2', 'a@example.test'));
     await E.DB_USERS.prepare("UPDATE users SET email = 'changed@example.test' WHERE id = 'wh_2'").run();

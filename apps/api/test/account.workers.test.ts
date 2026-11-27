@@ -51,8 +51,8 @@ beforeEach(async () => {
       body: {
         id: 'user_new',
         email_addresses: [
-          { id: 'e1', email_address: 'other@example.test' },
-          { id: 'e2', email_address: 'me@example.test' },
+          { id: 'e1', email_address: 'other@example.test', verification: { status: 'unverified' } },
+          { id: 'e2', email_address: 'me@example.test', verification: { status: 'verified' } },
         ],
         primary_email_address_id: 'e2',
         first_name: 'Ada',

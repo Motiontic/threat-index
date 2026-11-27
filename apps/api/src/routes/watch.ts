@@ -102,14 +102,28 @@ route.delete('/v1/me/watch/:id', requireUser, async (c) => {
   const userId = c.get('userId');
   const mcp = mcpOf(c);
   const db = c.env.DB_USERS;
-  const marks = keys.map((_, i) => `?${i + 3}`).join(',');
-  const del = db.prepare(
-    `DELETE FROM watch WHERE user_id = ?1 AND entry_key IN (${marks})${mcp ? ` AND ${removalCapSql('?2')}` : ' AND ?2 IS NOT NULL'}`,
-  );
+  // Which of the candidate keys the user actually watches: one delete, and one `remove` event, per such key.
+  const held = (
+    await db
+      .prepare(
+        `SELECT entry_key FROM watch WHERE user_id = ?1 AND entry_key IN (${keys.map((_, i) => `?${i + 2}`).join(',')})`,
+      )
+      .bind(userId, ...keys)
+      .all<{ entry_key: string }>()
+  ).results.map((r) => r.entry_key);
   // ?2 is the 24-hour cut, used by the MCP removal cap.
-  const stmts = [del.bind(userId, removalCut(), ...keys)];
-  if (mcp) stmts.push(eventAfterChange(db, mcp, 'remove', `entry:${resolved ?? id}`));
-  const removed = ((await db.batch(stmts))[0]?.meta.changes ?? 0) > 0;
+  const del = db.prepare(
+    `DELETE FROM watch WHERE user_id = ?1 AND entry_key = ?3${mcp ? ` AND ${removalCapSql('?2')}` : ' AND ?2 IS NOT NULL'}`,
+  );
+  const stmts: D1PreparedStatement[] = [];
+  const delAt: number[] = [];
+  for (const k of held) {
+    delAt.push(stmts.length);
+    stmts.push(del.bind(userId, removalCut(), k));
+    if (mcp) stmts.push(eventAfterChange(db, mcp, 'remove', `entry:${k}`));
+  }
+  const results = stmts.length > 0 ? await db.batch(stmts) : [];
+  const removed = delAt.some((i) => (results[i]?.meta.changes ?? 0) > 0);
   if (!removed && mcp) {
     const exists = await db
       .prepare(

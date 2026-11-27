@@ -518,6 +518,7 @@ describe('package rows in sandbox loads', () => {
       fetch: osvFetch('2026-11-23T21:00:00Z,Go/GO-2026-5006\n', () => goDoc),
     });
     expect(packageRows(api).map((r) => r.table)).toEqual(['affected', 'package_advisories']);
+    expect(newAdvisories(api)).toEqual([]); // a first-load never announces, in any mode
     expect(logs.some((l) => l.msg === 'package rows left to the backfill')).toBe(false);
   });
 

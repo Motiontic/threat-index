@@ -8,7 +8,7 @@ const SECRET = 'mcp-test-secret';
 const A = 'user_2aaaaaaaaaaa';
 const B = 'user_2bbbbbbbbbbb';
 const CLIENT = 'https://agent.example.test/client.json';
-const E = env as unknown as { DB_USERS: D1Database };
+const E = env as unknown as { DB_USERS: D1Database; DB_ADVISORIES: D1Database };
 
 const stubClerk = async (c: any, next: () => Promise<void>) => {
   const user = c.req.header('x-test-user');
@@ -86,7 +86,33 @@ async function seedPackages(user: string, n: number) {
   await E.DB_USERS.batch(stmts);
 }
 
+/** Packages MTI has records for: only these can be watched. `Debian:12` stands for an OS release row. */
+const KNOWN: [string, string][] = [
+  ['PyPI', 'langchain'],
+  ['npm', 'left-pad'],
+  ['npm', 'lodash'],
+  ['npm', 'x'],
+  ['npm', 'mine'],
+  ['npm', 'site'],
+  ['npm', 'b-pkg'],
+  ['npm', 'race-1'],
+  ['npm', 'race-2'],
+  ['npm', 'one-more'],
+  ['npm', '@types/node'],
+  ['Maven', 'org.apache.logging.log4j:log4j-core'],
+  ['Debian:12', 'openssl'],
+  ...Array.from({ length: 200 }, (_, i): [string, string] => ['npm', `seed-${i}`]),
+];
+
 beforeEach(async () => {
+  await E.DB_ADVISORIES.exec('DELETE FROM affected');
+  await E.DB_ADVISORIES.batch(
+    KNOWN.map(([eco, name], i) =>
+      E.DB_ADVISORIES.prepare(
+        "INSERT INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES (?1, ?2, 'osv', ?3, 0, ?3, 'SEMVER')",
+      ).bind(eco, name, `T-${i}`),
+    ),
+  );
   for (const t of ['watch_packages', 'watch_events', 'watch', 'users'])
     await E.DB_USERS.exec(`DELETE FROM ${t}`);
   await E.DB_USERS.exec('DELETE FROM mcp_blocks');
@@ -115,6 +141,14 @@ describe('package watches', () => {
     r = await web('DELETE', `${P}/PyPI/langchain`, A);
     expect(await json(r)).toEqual({ removed: true });
     expect(await json(await web('DELETE', `${P}/PyPI/langchain`, A))).toEqual({ removed: false });
+  });
+
+  it('only a package MTI has records for can be watched (404 unknown_package); an OS name matches its releases', async () => {
+    const r = await web('PUT', `${P}/npm/not-in-mti`, A);
+    expect([r.status, (await json(r)).error]).toEqual([404, 'unknown_package']);
+    expect((await json(await web('GET', P, A))).items).toEqual([]);
+    expect((await web('PUT', `${P}/Debian/openssl`, A)).status).toBe(200);
+    expect((await web('PUT', `${P}/Debian/curl`, A)).status).toBe(404);
   });
 
   it('refuses a bad ecosystem or name with 400 invalid_argument', async () => {

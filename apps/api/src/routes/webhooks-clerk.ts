@@ -43,13 +43,32 @@ async function handle(db: D1Database, evt: Awaited<ReturnType<typeof verifySvix>
     const verified = d.email_addresses.filter((e) => e.verification?.status === 'verified');
     const primary = verified.find((e) => e.id === d.primary_email_address_id) ?? verified[0];
     const name = [d.first_name, d.last_name].filter(Boolean).join(' ') || null;
-    await db
-      .prepare(
-        `INSERT INTO users (id, email, name, created_at, digest_weekday) VALUES (?1, ?2, ?3, ?4, ?5)
+    const email = primary?.email_address ?? '';
+    if (evt.type === 'user.created') {
+      // A row that already exists keeps its email: a created event never overwrites it.
+      await db
+        .prepare(
+          `INSERT INTO users (id, email, name, created_at, digest_weekday) VALUES (?1, ?2, ?3, ?4, ?5)
+       ON CONFLICT(id) DO NOTHING`,
+        )
+        .bind(d.id, email, name, now, new Date().getUTCDay())
+        .run();
+    } else {
+      if (email === '') {
+        const stored = await db
+          .prepare('SELECT email FROM users WHERE id = ?1')
+          .bind(d.id)
+          .first<{ email: string }>();
+        if (stored && stored.email !== '') console.warn(JSON.stringify({ event: 'email_cleared', userId: d.id }));
+      }
+      await db
+        .prepare(
+          `INSERT INTO users (id, email, name, created_at, digest_weekday) VALUES (?1, ?2, ?3, ?4, ?5)
        ON CONFLICT(id) DO UPDATE SET email = excluded.email, name = excluded.name`,
-      )
-      .bind(d.id, primary?.email_address ?? '', name, now, new Date().getUTCDay())
-      .run();
+        )
+        .bind(d.id, email, name, now, new Date().getUTCDay())
+        .run();
+    }
   }
   if (evt.type === 'user.deleted' && evt.data.id) await deleteUserData(db, evt.data.id);
 }

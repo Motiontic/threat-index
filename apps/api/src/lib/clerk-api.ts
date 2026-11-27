@@ -24,7 +24,15 @@ export interface ClerkUserBasics {
 
 const ClerkUser = z.object({
   id: z.string(),
-  email_addresses: z.array(z.object({ id: z.string(), email_address: z.string() })).nullish(),
+  email_addresses: z
+    .array(
+      z.object({
+        id: z.string(),
+        email_address: z.string(),
+        verification: z.object({ status: z.string().nullish() }).nullish(),
+      }),
+    )
+    .nullish(),
   primary_email_address_id: z.string().nullish(),
   first_name: z.string().nullish(),
   last_name: z.string().nullish(),
@@ -55,7 +63,8 @@ export async function getClerkUser(secretKey: string, userId: string): Promise<C
   const parsed = ClerkUser.safeParse(await res.json().catch(() => null));
   if (!parsed.success) throw new ClerkApiError(502, 'clerk returned an unexpected body');
   const d = parsed.data;
-  const emails = d.email_addresses ?? [];
+  // Only a verified address is used (the primary one first), else ''. Same rule as the Clerk webhook.
+  const emails = (d.email_addresses ?? []).filter((e) => e.verification?.status === 'verified');
   const primary = emails.find((e) => e.id === d.primary_email_address_id) ?? emails[0];
   const name = [d.first_name, d.last_name].filter(Boolean).join(' ') || null;
   return { id: d.id, email: primary?.email_address ?? '', name };
