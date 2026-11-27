@@ -284,3 +284,86 @@ These sharpen the sections above. Where they differ, this section wins.
       run as one task. Otherwise split longer lists."
     - `mti_deep_query`: "a long history query (CVE history, package advisories, EPSS history, company breaches,
       KEV additions); runs only as a task."
+
+## Changes from the first build (round 2)
+
+An independent review of the first build found the items below. Fix all of them on the same branch. Bump the
+skills release to 0.2.0 in `CHANGELOG.md` and regenerate the bundle.
+
+1. **Ecosystem names must match the tool's enum exactly** (blocker). The tool accepts only: `npm`, `PyPI`,
+   `Go`, `Maven`, `crates.io`, `RubyGems`, `NuGet`, `Packagist`, `Hex`, `Pub`, `SwiftURL`, `GitHub Actions`,
+   `Debian`, `Ubuntu`, `Alpine`, `Red Hat`. `SwiftPM` is wrong: use `SwiftURL`.
+   - Add an explicit purl-type table to `references/lockfiles.md`:
+
+     | Purl type | Ecosystem |
+     | --- | --- |
+     | `npm` | npm |
+     | `pypi` | PyPI |
+     | `golang` | Go |
+     | `maven` | Maven |
+     | `cargo` | crates.io |
+     | `gem` | RubyGems |
+     | `nuget` | NuGet |
+     | `composer` | Packagist |
+     | `hex` | Hex |
+     | `pub` | Pub |
+     | `swift` | SwiftURL |
+     | `github` | GitHub Actions |
+
+     Any other type → "not checked".
+   - For purls: percent-decode, join namespace and name with `/` (npm `@scope/name`, Go and Swift paths,
+     Packagist `vendor/name`), except Maven, which is `group:artifact`.
+   - In SKILL.md: if a call is refused as invalid, split that batch by ecosystem and retry each part, so one bad
+     entry can't hide the rest. List what still fails as "not checked".
+2. **Paging.** In are-we-affected:
+   - If `truncated` is true, call again with the identical `packages` and `cursor: nextCursor` until it is
+     false.
+   - List `rejected` entries as "not checked", with their reason.
+3. **Wait for the user's yes before sending.** Step 5 becomes:
+   - tell the user how many packages, which ecosystems, and that only names and versions are sent;
+   - say plainly that internal or private package names, and any host names inside Go or Swift module paths,
+     are included;
+   - offer to leave out entries whose lockfile source is not the public registry;
+   - then wait for the user to agree. Send nothing before that.
+
+   safe-install already sends one package the user named; it keeps its "tell the user" step.
+4. **Bundler path rules.**
+   - Every path segment matches `^[a-z0-9][a-z0-9._-]*$` (upper-case `SKILL.md` and `CHANGELOG.md`,
+     `PLUGIN_README.md` excepted by exact name).
+   - `SKILL.md` is allowed only exactly one level deep (`<skill>/SKILL.md`).
+   - The frontmatter `description` must be a plain one-line scalar: reject values starting with `[`, `{`, `|`,
+     `>`, `!`, `&`, `*`, `-`, `?`, `%` or `@`, and the words `true`, `false`, `null`, `yes`, `no`, `on`, `off`.
+   - The Node test also runs `SkillsExtension.load(memorySkillFiles(SKILL_FILES), { prefix: 'mti', strict:
+     true })`. It asserts exactly two skills, each with frontmatter deep-equal to `{ name, description }`.
+5. **URL rule.**
+   - After removing every `https://mti.motiontic.com/` occurrence, reject any remaining `://`, `//`, `\\`,
+     `www.`, `mailto:`, `javascript:` or `data:`.
+   - Reject any markdown link target (`](` or `]:`) that is not an MTI URL or a relative path inside the skill.
+6. **Shell check.**
+   - Strip leading list and quote markers repeatedly (`- `, `* `, `+ `, `> `, `N. `, `N) `).
+   - Match case-insensitively.
+   - Also check inline code spans.
+   - Use one shared list of command words for the bundler and the test, including `npx`, `git`, `bash`, `sh`,
+     `node`, `python`, `docker`, `brew`, `apt`, `make`.
+7. **lockfiles.md fixes.**
+   - npm: for aliased entries (`node_modules/<alias>` with a `name` field), the real package is the `name`
+     field. Always use `name` when present, never the key.
+   - requirements files: also read pip-compile output. A line `name==version \` followed by `--hash` lines
+     counts. Strip extras (`name[extra]` → `name`) and environment markers (everything from `;`).
+   - composer: send the version as written (MTI handles a leading `v`). Delete the "only if MTI data uses none"
+     wording.
+8. **Skill text.**
+   - are-we-affected: never suggest a package with a different name as a replacement.
+   - safe-install: if no checked version is free of fix_now and fix_soon findings, say no safe version is known
+     from MTI, rather than naming a version.
+9. **`ext/skills.ts`.**
+   - Cache a failed load for 60 seconds (store the failure time), so a broken bundle doesn't rebuild and log on
+     every request.
+   - Log the error's class name, never its message.
+   - Wrap `attach` in try/catch: on failure, log `mcp_skills_attach_failed` and serve the tools without skills.
+10. **Changelog.**
+    - The first `## ` header in `CHANGELOG.md` must be a well-formed entry, and it is the newest.
+    - Versions must strictly increase from bottom to top. A reused or lower version fails the bundler, so the
+      plugin version always bumps when the skills change.
+11. **Deploy order** (no code change). The `mti_check_packages` instruction line mentions tasks. Staging is
+    deployed after the Tasks change merges too, so the line is never wrong on a live server.
