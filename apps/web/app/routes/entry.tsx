@@ -178,6 +178,7 @@ export default function Entry({ loaderData }: Route.ComponentProps) {
                 <span className="cvss">
                   <span className="cvss-number">{entry.cvss.toFixed(1)}</span>
                   <CvssMeter score={entry.cvss} />
+                  {entry.cvssSource ? <span className="muted"> scored by {entry.cvssSource}</span> : null}
                 </span>
               )}
             </dd>
