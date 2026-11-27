@@ -265,3 +265,54 @@ describe('nightly-fold', () => {
     expect(foldReceipt('s', 'weird.ndjson.gz', '{}')).toEqual({ rows: [], bad: 1 });
   });
 });
+
+describe('quiet change rows', () => {
+  const entry = kev.vulnerabilities[0] as Record<string, unknown>;
+  const catalogOf = (n: number, dateAdded: string) => ({
+    ...kev,
+    vulnerabilities: Array.from({ length: n }, (_, i) => ({
+      ...entry,
+      cveID: `CVE-2025-${String(1000 + i)}`,
+      dateAdded,
+    })),
+  });
+  async function load(mode: typeof firstLoad, catalog: unknown) {
+    const api = fakeApi();
+    const { ctx, logs } = fakeCtx(api);
+    const fetchFn = fakeFetch({ [KEV_URL]: () => new Response(JSON.stringify(catalog)) });
+    await mode(job({ sourceId: 'cisa-kev', url: KEV_URL }), ctx, { ...noDuckdb, fetch: fetchFn });
+    const rows = api.puts
+      .filter((k) => k.startsWith('inbox/') && k.endsWith('.ndjson.gz'))
+      .flatMap((k) => lines(api.store.get(k)));
+    return { logs, changes: rows.filter((r) => r.table === 'changes').map((r) => r.row) };
+  }
+
+  it('first-load: every change row is first_load (old stays old)', async () => {
+    const fresh = await load(firstLoad, catalogOf(5, '2026-11-20'));
+    expect(fresh.changes).toHaveLength(5);
+    expect(fresh.changes.every((c) => c.quiet === 'first_load' && c.event_at === '2026-11-20')).toBe(true);
+    expect(fresh.logs.some((l) => l.extra?.event === 'changes.quiet' && l.extra?.firstLoad === 5)).toBe(true);
+    const old = await load(firstLoad, catalogOf(3, '2020-01-01'));
+    expect(old.changes.every((c) => c.quiet === 'old')).toBe(true);
+    expect(JSON.stringify(fresh.logs)).not.toContain('CVE-2025-');
+  });
+
+  it('first-load never writes new_advisory rows', async () => {
+    const { changes } = await load(firstLoad, catalogOf(5, '2026-11-20'));
+    expect(changes.some((c) => c.kind === 'new_advisory')).toBe(false);
+  });
+
+  it('update (big-file): recent rows alert, old rows are old, and rows past 2,000 are held', async () => {
+    const { run: bigFile } = await import('./jobs/big-file.ts');
+    const small = await load(bigFile, catalogOf(5, '2026-11-20'));
+    expect(small.changes.every((c) => c.quiet === null)).toBe(true);
+    const old = await load(bigFile, catalogOf(2, '2020-01-01'));
+    expect(old.changes.every((c) => c.quiet === 'old')).toBe(true);
+    const big = await load(bigFile, catalogOf(2100, '2026-11-20'));
+    expect(big.changes.filter((c) => c.quiet === null)).toHaveLength(2000);
+    expect(big.changes.filter((c) => c.quiet === 'held')).toHaveLength(100);
+    expect(
+      big.logs.some((l) => l.extra?.event === 'changes.held' && l.extra?.held === 100 && l.extra?.jobId),
+    ).toBe(true);
+  });
+});
