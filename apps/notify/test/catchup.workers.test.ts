@@ -275,7 +275,10 @@ describe('quiet rows', () => {
     await seedCursor(T('06:00'), '');
     // 1,100 quiet rows fill more than a page ahead of the one alertable row.
     await seedChanges(1100, T('07:00'));
-    await quietise(Array.from({ length: 1100 }, (_, i) => `c${String(i).padStart(5, '0')}`), 'old');
+    await quietise(
+      Array.from({ length: 1100 }, (_, i) => `c${String(i).padStart(5, '0')}`),
+      'old',
+    );
     await seedChanges(1, T('07:30'), ['CVE-A'], 5000);
     await runNotify(withKey(), MON_9, quiet);
     expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['c05000']);
