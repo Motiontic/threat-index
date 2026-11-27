@@ -14,7 +14,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 // @ts-expect-error plain .mjs script
 import * as bundler from './bundle-skills.mjs';
 
-const { build, collect, checkChangelog, BundleError } = bundler as {
+const { build, collect, checkChangelog, BundleError, shellProblemInLine, SHELL_WORDS } = bundler as {
+  shellProblemInLine: (l: string) => string | null;
+  SHELL_WORDS: string[];
   build: (dir: string) => Record<string, string>;
   collect: (dir: string) => {
     files: Record<string, string>;
@@ -120,6 +122,66 @@ describe('bundler rules', () => {
       rejects(fixture({ 'demo/SKILL.md': GOOD.replace('A plain demo skill.', d) }), /plain line/);
     rejects(fixture({ 'demo/SKILL.md': '# no frontmatter\n' }), /frontmatter/);
   });
+  it('rejects bad path segments and a nested SKILL.md', () => {
+    rejects(fixture({ 'demo/SKILL.md': GOOD, 'demo/References/a.md': 'x\n' }), /path segment "References"/);
+    rejects(fixture({ 'demo/SKILL.md': GOOD, 'demo/_a.md': 'x\n' }), /path segment "_a\.md"/);
+    rejects(fixture({ 'demo/SKILL.md': GOOD, 'demo/sub/SKILL.md': GOOD }), /SKILL\.md is only allowed/);
+  });
+  it.each([
+    '[a]',
+    '{a}',
+    '| a',
+    '> a',
+    '! a',
+    '& a',
+    '* a',
+    '- a',
+    '? a',
+    '% a',
+    '@a',
+    'true',
+    'No',
+    'null',
+    'OFF',
+  ])('rejects description %s', (d) => {
+    rejects(fixture({ 'demo/SKILL.md': GOOD.replace('A plain demo skill.', d) }), /description must/);
+  });
+  it('rejects // \\ mailto javascript data and bad link targets', () => {
+    for (const s of ['a // b', 'a \\ b', 'mailto:x', 'javascript:x', 'data:x'])
+      rejects(skill(`${s}\n`), /links must go to/);
+    rejects(skill('[x](../other.md)\n'), /link target/);
+    rejects(skill('[x](/etc/passwd)\n'), /link target/);
+    rejects(skill('[x]: ../other\n'), /link target/);
+    expect(() => collect(skill('[x](references/a.md) [y](https://mti.motiontic.com/docs)\n'))).not.toThrow();
+  });
+  it('rejects shell commands case-insensitively, repeated markers and inline code spans', () => {
+    for (const l of [
+      'NPM i x',
+      '- 1. > npx x',
+      '+ git push',
+      '2) Bash x',
+      'Run `npm i x` now',
+      'a `  docker run` b',
+      '* `sh x`',
+      'python x',
+      'node x',
+      'make x',
+    ])
+      rejects(skill(`${l}\n`), /shell command/);
+  });
+  it('rejects a missing skill release version rules', () => {
+    const dir = fixture();
+    const { bundleDigest } = collect(dir);
+    const d2 = `sha256:${'1'.repeat(64)}`;
+    writeFileSync(join(dir, 'CHANGELOG.md'), `## 1.0.0 - ${bundleDigest}\n\n## 1.0.0 - ${d2}\n`);
+    expect(() => checkChangelog(dir, bundleDigest)).toThrow(/strictly increase/);
+    writeFileSync(join(dir, 'CHANGELOG.md'), `## 0.9.0 - ${bundleDigest}\n\n## 1.0.0 - ${d2}\n`);
+    expect(() => checkChangelog(dir, bundleDigest)).toThrow(/strictly increase/);
+    writeFileSync(join(dir, 'CHANGELOG.md'), `## 2.0.0 - ${bundleDigest}\n\n## 1.0.0 - ${d2}\n`);
+    expect(checkChangelog(dir, bundleDigest)).toBe('2.0.0');
+    writeFileSync(join(dir, 'CHANGELOG.md'), `## draft\n\n## 1.0.0 - ${bundleDigest}\n`);
+    expect(() => checkChangelog(dir, bundleDigest)).toThrow(/entry is not/);
+  });
   it('rejects a skill with no SKILL.md', () => {
     rejects(fixture({ 'demo/SKILL.md': GOOD, 'other/x.md': 'x\n' }), /other: skill folder has no SKILL\.md/);
   });
@@ -166,12 +228,12 @@ describe('fresh bundle', () => {
 
 describe('real skills', () => {
   const { files } = collect(SKILLS);
-  const SHELL =
-    /^(\$ |npm |pnpm |yarn |pip |uv |poetry |go |cargo |curl |wget |sudo |brew |apt |apt-get |git |npx |bash |sh )/;
-  it('no line starts a shell command, inside or outside code fences', () => {
+  it('no line or inline code span starts a shell command, inside or outside code fences', () => {
+    expect(SHELL_WORDS).toEqual(
+      expect.arrayContaining(['npx', 'git', 'bash', 'sh', 'node', 'python', 'docker', 'brew', 'apt', 'make']),
+    );
     for (const [p, text] of Object.entries(files))
-      for (const line of text.split('\n'))
-        expect(line.replace(/^\s*(?:[-*>] |\d+\. )/, ''), p).not.toMatch(SHELL);
+      for (const line of text.split('\n')) expect(shellProblemInLine(line), `${p}: ${line}`).toBeNull();
   });
   it('has no fences, HTML or links outside MTI', () => {
     for (const [p, text] of Object.entries(files)) {
@@ -195,7 +257,7 @@ describe('real skills', () => {
     for (const f of ['.npmrc', '.pypirc', '.netrc', 'pip.conf', '.yarnrc', '.env']) expect(t).toContain(f);
     expect(t).toMatch(/Never open/);
     expect(t).toMatch(/Never send purls/);
-    expect(t).toMatch(/only names and versions leave the machine/);
+    expect(t).toMatch(/only names and versions are sent/);
     expect(t).toMatch(/at most 1,000 packages per call/i);
   });
   it('safe-install re-checks upgradeTo and reads no files', () => {
@@ -203,6 +265,48 @@ describe('real skills', () => {
     expect(t).toMatch(/call `mti_check_packages` again for that `upgradeTo`/);
     expect(t).toMatch(/Read no files/);
     expect(t).toMatch(/Never guess a version/);
+  });
+  it('names ecosystems exactly as the tool enum does', () => {
+    const t = files['are-we-affected/references/lockfiles.md'] ?? '';
+    expect(t).not.toMatch(/SwiftPM/);
+    for (const e of [
+      'npm',
+      'PyPI',
+      'Go',
+      'Maven',
+      'crates.io',
+      'RubyGems',
+      'NuGet',
+      'Packagist',
+      'Hex',
+      'Pub',
+      'SwiftURL',
+      'GitHub Actions',
+    ])
+      expect(t).toContain(e);
+    for (const row of [
+      '`golang` | Go',
+      '`cargo` | crates.io',
+      '`swift` | SwiftURL',
+      '`github` | GitHub Actions',
+      '`composer` | Packagist',
+    ])
+      expect(t).toContain(row);
+    expect(t).toMatch(/always use `name` when present/);
+    expect(t).toMatch(/pip-compile/);
+    expect(t).toMatch(/as written/);
+  });
+  it('are-we-affected waits for consent, pages, and handles rejects', () => {
+    const t = files['are-we-affected/SKILL.md'] ?? '';
+    expect(t).toMatch(/wait for the user to agree\. Send nothing before that/);
+    expect(t).toMatch(/internal or private package names/);
+    expect(t).toMatch(/`truncated` is true.*`nextCursor`/);
+    expect(t).toMatch(/`rejected`/);
+    expect(t).toMatch(/split that batch by ecosystem/);
+    expect(t).toMatch(/different name as a replacement/);
+  });
+  it('safe-install says when no safe version is known', () => {
+    expect(files['safe-install/SKILL.md']).toMatch(/no safe version is known from MTI/);
   });
   it('lockfiles.md covers every format in the spec', () => {
     const t = files['are-we-affected/references/lockfiles.md'] ?? '';

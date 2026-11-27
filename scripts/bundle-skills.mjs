@@ -24,7 +24,69 @@ export class BundleError extends Error {
   }
 }
 
-const SHELL_START = /^(\$ |npm |pnpm |yarn |pip |uv |poetry |go |cargo |curl |wget |sudo )/;
+/** Command words that may not start a line or an inline code span. Shared with the tests. */
+export const SHELL_WORDS = [
+  'npm',
+  'pnpm',
+  'yarn',
+  'npx',
+  'pip',
+  'pip3',
+  'pipx',
+  'uv',
+  'poetry',
+  'go',
+  'cargo',
+  'curl',
+  'wget',
+  'sudo',
+  'git',
+  'bash',
+  'sh',
+  'zsh',
+  'node',
+  'python',
+  'python3',
+  'docker',
+  'brew',
+  'apt',
+  'apt-get',
+  'make',
+  'gem',
+  'bundle',
+  'composer',
+  'dotnet',
+  'mvn',
+  'gradle',
+  'mix',
+  'dart',
+  'flutter',
+  'swift',
+  'rm',
+  'cat',
+];
+const LEAD = /^\s*(?:[-*+>] |\d+[.)] )/;
+
+/** Strips list and quote markers repeatedly, then returns the command word the line starts like, or null. */
+export function shellStart(line) {
+  let s = line;
+  while (LEAD.test(s)) s = s.replace(LEAD, '');
+  s = s.trim();
+  if (s.startsWith('$ ')) return '$';
+  const w = /^([A-Za-z0-9_-]+) /.exec(s);
+  return w && SHELL_WORDS.includes(w[1].toLowerCase()) ? w[1] : null;
+}
+
+/** First shell-looking start on a line or inside an inline code span of it, or null. */
+export function shellProblemInLine(line) {
+  const hit = shellStart(line);
+  if (hit) return hit;
+  for (const m of line.matchAll(/`([^`]*)`/g)) {
+    const h = shellStart(m[1]);
+    if (h) return h;
+  }
+  return null;
+}
 
 /** Rules on the text of one file. Returns the first rule broken, or null. Pure: no disk. */
 export function textProblem(text) {
@@ -35,12 +97,20 @@ export function textProblem(text) {
   }
   if (text.includes('<')) return 'contains "<" (no HTML, including comments)';
   const rest = text.split(MTI_ORIGIN).join('');
-  if (/:\/\/|www\./i.test(rest)) return `links must go to ${MTI_ORIGIN} only`;
+  if (/:\/\/|\/\/|\\|www\.|mailto:|javascript:|data:/i.test(rest))
+    return `links must go to ${MTI_ORIGIN} only`;
+  for (const m of text.matchAll(/\]\(([^)]*)\)|\]:[ \t]*(\S*)/g)) {
+    const target = (m[1] ?? m[2] ?? '').trim();
+    const mti = target.startsWith(MTI_ORIGIN);
+    const rel = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*(#[a-z0-9-]+)?$/.test(target);
+    if (!mti && !rel)
+      return `link target is not an MTI URL or a relative path in the skill: ${target.slice(0, 30)}`;
+  }
   for (const line of text.split('\n')) {
     if (/^\s*(```|~~~)/.test(line)) return 'code fences are not allowed';
     if (/^( {4}|\t)/.test(line)) return 'lines indented by 4 spaces or a tab are not allowed';
-    const bare = line.replace(/^\s*(?:[-*>] |\d+\. )/, '');
-    if (SHELL_START.test(bare)) return `line starts like a shell command: ${bare.slice(0, 20)}`;
+    const hit = shellProblemInLine(line);
+    if (hit) return `line or code span starts like a shell command: ${hit}`;
   }
   // The word "install" is only allowed as part of the skill name.
   if (/install/i.test(text.replace(/safe-install/g, '')))
@@ -69,6 +139,21 @@ export function frontmatterProblem(text, skill) {
   if (d.length === 0 || d.length > 1024) return 'description must be 1 to 1024 characters';
   if (/[#'"`]|: /.test(d) || d !== d.trim())
     return 'description must be one plain line: no #, ": " or quotes';
+  if (/^[[{|>!&*\-?%@]/.test(d))
+    return 'description must be a plain scalar: it cannot start with [ { | > ! & * - ? % or @';
+  if (/^(true|false|null|yes|no|on|off)$/i.test(d)) return 'description must not be a YAML keyword';
+  return null;
+}
+
+/** Path segment rules. `path` is `<skill>/<rest>`. Returns the first rule broken, or null. */
+export function pathProblem(path) {
+  const segs = path.split('/');
+  for (const [i, s] of segs.entries()) {
+    if (i === segs.length - 1 && s === 'SKILL.md') continue;
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(s)) return `path segment "${s}" must match ^[a-z0-9][a-z0-9._-]*$`;
+  }
+  const skillMds = segs.filter((s) => s === 'SKILL.md');
+  if (skillMds.length && segs.length !== 2) return 'SKILL.md is only allowed directly inside a skill folder';
   return null;
 }
 
@@ -89,6 +174,8 @@ function walk(dir, rel, out, skill) {
 }
 
 function checkFile(path, bytes, kind) {
+  const pp = kind === 'skill' ? pathProblem(path) : null;
+  if (pp) throw new BundleError(path, pp);
   if (!path.endsWith('.md')) throw new BundleError(path, 'only markdown (.md) files are allowed');
   if (bytes.length > MAX_FILE_BYTES) throw new BundleError(path, `file is over ${MAX_FILE_BYTES} bytes`);
   const text = bytes.toString('latin1');
@@ -147,7 +234,9 @@ export function collect(skillsDir) {
   return { files, digests, bundleDigest: sha(Buffer.from(lines, 'utf8')), pluginReadme };
 }
 
-/** The newest changelog entry must name the bundle digest. Returns its semver. */
+const ENTRY = /^## (\d+)\.(\d+)\.(\d+) - (sha256:[0-9a-f]{64})$/;
+
+/** The first "## " header is the newest entry and must name the bundle digest. Versions rise bottom to top. */
 export function checkChangelog(skillsDir, bundleDigest) {
   let text;
   try {
@@ -155,14 +244,33 @@ export function checkChangelog(skillsDir, bundleDigest) {
   } catch {
     throw new BundleError('CHANGELOG.md', `missing. Add an entry "## <semver> - ${bundleDigest}"`);
   }
-  const m = /^## (\d+\.\d+\.\d+) - (sha256:[0-9a-f]{64})\s*$/m.exec(text);
-  if (!m) throw new BundleError('CHANGELOG.md', `no entry like "## <semver> - ${bundleDigest}"`);
-  if (m[2] !== bundleDigest)
+  const heads = text.split('\n').filter((l) => l.startsWith('## '));
+  if (heads.length === 0)
+    throw new BundleError('CHANGELOG.md', `no entry like "## <semver> - ${bundleDigest}"`);
+  const parsed = heads.map((h) => ENTRY.exec(h.trimEnd()));
+  const bad = parsed.findIndex((m) => !m);
+  if (bad >= 0)
     throw new BundleError(
       'CHANGELOG.md',
-      `newest entry names ${m[2]} but the bundle digest is ${bundleDigest}. Add a new entry for it`,
+      `entry is not "## <semver> - sha256:<hex>": ${heads[bad].slice(0, 40)}`,
     );
-  return m[1];
+  const vers = parsed.map((m) => [Number(m[1]), Number(m[2]), Number(m[3])]);
+  for (let i = 0; i + 1 < vers.length; i++) {
+    const [x, y] = [vers[i], vers[i + 1]];
+    const up = x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+    if (up <= 0)
+      throw new BundleError(
+        'CHANGELOG.md',
+        `versions must strictly increase from bottom to top (${heads[i + 1].slice(3, 9)} then ${heads[i].slice(3, 9)})`,
+      );
+  }
+  const m = parsed[0];
+  if (m[4] !== bundleDigest)
+    throw new BundleError(
+      'CHANGELOG.md',
+      `newest entry names ${m[4]} but the bundle digest is ${bundleDigest}. Add a new entry for it`,
+    );
+  return `${m[1]}.${m[2]}.${m[3]}`;
 }
 
 function generatedTs({ files, digests, bundleDigest }) {
