@@ -81,7 +81,7 @@ describe('definitions', () => {
   });
   it('input is one of three shapes, one item: a list is not accepted', async () => {
     const t = enabledTools().find((x) => x.name === 'mti_watch_add');
-    expect((t?.inputSchema as any).oneOf).toHaveLength(3);
+    expect(((t?.inputSchema ?? {}) as any).oneOf).toHaveLength(3);
     expect(JSON.stringify(t?.inputSchema)).not.toContain('"array"');
     for (const bad of [
       { packages: [{ ecosystem: 'npm', name: 'a' }] },
