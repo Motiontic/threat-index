@@ -1,4 +1,9 @@
-import { fromJsonSchema, type McpServer, requireScopes } from '@modelcontextprotocol/server';
+import {
+  fromJsonSchema,
+  type InputRequiredResult,
+  type McpServer,
+  requireScopes,
+} from '@modelcontextprotocol/server';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/server/validators/cf-worker';
 import { logEvent } from '@ti/core/log';
 import { callApi } from '../api';
@@ -12,6 +17,9 @@ export type ToolErrorCode =
   | 'invalid_argument'
   | 'not_available_yet'
   | 'rate_limited'
+  | 'limit_reached'
+  | 'removal_limit'
+  | 'not_found'
   | 'blocked'
   | 'tool_off'
   | 'upstream_unavailable'
@@ -28,8 +36,19 @@ export const HINTS = {
 export const MAX_STRUCTURED_CHARS = 32_000;
 const MAX_UPSTREAM_BYTES = 4 * 1024 * 1024;
 
+/** What `run` can see of the MCP request beyond its arguments (multi-round-trip input). */
+export interface RunContext {
+  /** The raw `requestState` the client echoed back, if any. */
+  requestState?: string;
+  /** The client's answers to the elicitation this tool asked, if any. */
+  inputResponses?: Record<string, unknown>;
+  /** True when this request is a 2026-07-28 request whose client declared form elicitation. */
+  elicitation: boolean;
+}
+
 export type ToolAnswer =
   | { ok: true; data: Record<string, unknown>; nIn?: number; nOut: number }
+  | { ok: true; inputRequired: InputRequiredResult }
   | {
       ok: false;
       code: ToolErrorCode;
@@ -51,7 +70,7 @@ export interface ToolDef<A> {
   scope?: 'mti:read' | 'mti:watch';
   /** Annotation hints merged over `HINTS`. */
   hints?: Partial<Record<keyof typeof HINTS, boolean>>;
-  run(args: A, deps: CallDeps, signal: AbortSignal): Promise<ToolAnswer>;
+  run(args: A, deps: CallDeps, signal: AbortSignal, request?: RunContext): Promise<ToolAnswer>;
 }
 
 const validator = new CfWorkerJsonSchemaValidator({ draft: '2020-12' });
@@ -70,6 +89,12 @@ function failText(a: Extract<ToolAnswer, { ok: false }>): string {
       return 'This lookup is not available yet.';
     case 'rate_limited':
       return `Too many requests. Try again in ${a.retryAfter ?? 60} seconds.`;
+    case 'limit_reached':
+      return 'You are watching the most packages allowed (200). Remove one first.';
+    case 'removal_limit':
+      return 'Too many watches were removed through MCP today. Try again later, or use the website.';
+    case 'not_found':
+      return 'MTI has no entry with that ID.';
     case 'blocked':
       return 'This account or app cannot use MTI right now.';
     case 'tool_off':
@@ -110,7 +135,7 @@ export function fitToBudget(
 
 export async function apiJson<T>(
   deps: CallDeps,
-  req: { method: 'GET' | 'POST'; path: string; body?: unknown },
+  req: { method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'; path: string; body?: unknown },
   signal: AbortSignal,
 ): Promise<{ ok: true; body: T } | { ok: false; status?: number; code: ToolErrorCode; retryAfter?: number }> {
   let res: Response;
@@ -129,10 +154,22 @@ export async function apiJson<T>(
   const status = res.status;
   if (status !== 200) {
     let errBody: { error?: unknown } | null = null;
-    if (status === 403) errBody = (await res.json().catch(() => null)) as { error?: unknown } | null;
+    if (status === 403 || status === 404 || status === 409 || status === 429)
+      errBody = (await res.json().catch(() => null)) as { error?: unknown } | null;
     else await res.body?.cancel().catch(() => {});
     if (status === 400) return { ok: false, status, code: 'invalid_argument' };
-    if (status === 404) return { ok: false, status, code: 'upstream_unavailable' };
+    if (status === 404)
+      return {
+        ok: false,
+        status,
+        code: errBody?.error === 'not_found' ? 'not_found' : 'upstream_unavailable',
+      };
+    if (status === 409)
+      return {
+        ok: false,
+        status,
+        code: errBody?.error === 'limit_reached' ? 'limit_reached' : 'upstream_unavailable',
+      };
     if (status === 401) {
       logEvent('error', 'mcp_api_assertion_rejected', { requestId: deps.requestId });
       return { ok: false, status, code: 'internal' };
@@ -146,7 +183,7 @@ export async function apiJson<T>(
       return {
         ok: false,
         status,
-        code: 'rate_limited',
+        code: errBody?.error === 'removal_limit' ? 'removal_limit' : 'rate_limited',
         retryAfter: Number.isInteger(n) && n > 0 && n <= 3600 ? n : 60,
       };
     }
@@ -198,6 +235,34 @@ function failure(deps: CallDeps, a: Extract<ToolAnswer, { ok: false }>) {
   return failureResult(deps.requestId, a);
 }
 
+interface McpCtx {
+  mcpReq: {
+    signal: AbortSignal;
+    requestState?: () => unknown;
+    inputResponses?: Record<string, unknown>;
+    envelope?: Record<string, unknown>;
+  };
+}
+
+const MODERN_ERA = '2026-07-28';
+/** "Declared" elicitation: a 2026-07-28 request whose client capabilities have `elicitation.form`, or `{}`. */
+function requestOf(ctx: McpCtx): RunContext {
+  const env = ctx.mcpReq.envelope ?? {};
+  const caps = env['io.modelcontextprotocol/clientCapabilities'] as { elicitation?: unknown } | undefined;
+  const e = caps?.elicitation;
+  const form =
+    env['io.modelcontextprotocol/protocolVersion'] === MODERN_ERA &&
+    !!e &&
+    typeof e === 'object' &&
+    (Object.keys(e).length === 0 || 'form' in e);
+  const state = ctx.mcpReq.requestState?.();
+  return {
+    ...(typeof state === 'string' ? { requestState: state } : {}),
+    ...(ctx.mcpReq.inputResponses ? { inputResponses: ctx.mcpReq.inputResponses } : {}),
+    elicitation: form,
+  };
+}
+
 export function registerTool(server: McpServer, def: ToolDef<never>, deps: CallDeps): void {
   server.registerTool(
     def.name,
@@ -207,9 +272,10 @@ export function registerTool(server: McpServer, def: ToolDef<never>, deps: CallD
       inputSchema: fromJsonSchema(def.inputSchema as never, validator),
       outputSchema: fromJsonSchema(def.outputSchema as never, validator),
       annotations: { title: def.title, ...HINTS, ...def.hints },
-      scopeChallenge: requireScopes(def.scope ?? 'mti:read'),
+      scopeChallenge:
+        def.scope === 'mti:watch' ? requireScopes('mti:read', 'mti:watch') : requireScopes('mti:read'),
     },
-    (async (args: unknown, ctx: { mcpReq: { signal: AbortSignal } }) => {
+    (async (args: unknown, ctx: McpCtx) => {
       deps.stats.tool = def.name;
       try {
         let off: string | null | undefined;
@@ -229,9 +295,14 @@ export function registerTool(server: McpServer, def: ToolDef<never>, deps: CallD
             problem: 'bad_characters',
           });
 
+        // A tool that changes the watchlist checks the token's scopes itself as well as the SDK's challenge.
+        if (def.scope === 'mti:watch' && !deps.identity.scopes.includes('mti:watch'))
+          return failure(deps, { ok: false, code: 'blocked' });
+
         const signal = AbortSignal.any([deps.signal, ctx.mcpReq.signal]);
-        const answer = await def.run(args as never, deps, signal);
+        const answer = await def.run(args as never, deps, signal, requestOf(ctx));
         if (!answer.ok) return failure(deps, answer);
+        if ('inputRequired' in answer) return answer.inputRequired;
         deps.stats.nIn = answer.nIn;
         deps.stats.nOut = answer.nOut;
         const structuredContent = answer.data;

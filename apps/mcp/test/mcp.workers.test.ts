@@ -161,7 +161,7 @@ describe('skeleton', () => {
       'mti_deep_query',
     ]);
   });
-  it('keeps a stub for each tool that is not built here, and enables the nine that are', async () => {
+  it('keeps a stub for each tool that is not built here, and enables the twelve that are', async () => {
     const built = [
       'mti_check_packages',
       'mti_get_entry',
@@ -172,6 +172,9 @@ describe('skeleton', () => {
       'mti_get_technique',
       'mti_list_sources',
       'mti_deep_query',
+      'mti_watch_add',
+      'mti_watch_remove',
+      'mti_watch_list',
     ];
     for (const name of TOOL_ORDER) {
       const mod = (await import(`../src/tools/${name}.ts`)) as { tool: { name: string; enabled: boolean } };

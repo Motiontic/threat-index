@@ -6,7 +6,7 @@ const PART = /^[A-Za-z0-9._:@+-]{1,128}$/;
 /** A link to an MTI page, built from checked parts. Null when a part fails its pattern. */
 export function mtiLink(
   env: Pick<Env, 'MCP_RESOURCE_URL'>,
-  page: 'entry' | 'breach' | 'incident' | 'technique' | 'sources',
+  page: 'entry' | 'breach' | 'incident' | 'technique' | 'sources' | 'account',
   ...parts: string[]
 ): string | null {
   if (parts.some((p) => !PART.test(p) || p.includes('..') || p === '.')) return null;
@@ -23,6 +23,8 @@ export function mtiLink(
       return enc.length === 1 ? `${base}/technique/${enc[0]}` : null;
     case 'sources':
       return enc.length === 0 ? `${base}/sources` : null;
+    case 'account':
+      return enc.length === 0 ? `${base}/account` : null;
   }
 }
 

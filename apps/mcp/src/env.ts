@@ -23,4 +23,7 @@ export interface Env {
   /** Signs the identity sent to ti-api (same values as ti-api's; the next one is for rotation). */
   MCP_HMAC_SECRET?: string;
   MCP_HMAC_SECRET_NEXT?: string;
+  /** Seals the `requestState` of an elicitation (AES-GCM). Not the HMAC secret. Missing: elicitation is off. */
+  MCP_STATE_KEY?: string;
+  MCP_STATE_KEY_NEXT?: string;
 }

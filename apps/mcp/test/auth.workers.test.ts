@@ -55,7 +55,7 @@ describe('token matrix', () => {
     const res = await list(await signJwt(key), {}, withApi(BASE_ENV, api));
     expect(res.status).toBe(200);
     const body = await bodyOf(res);
-    expect(body.result.tools).toHaveLength(9);
+    expect(body.result.tools).toHaveLength(12);
     spy.restore();
   });
 
@@ -188,12 +188,12 @@ describe('token matrix', () => {
 });
 
 describe('scopes', () => {
-  it('mti:watch alone → 403 insufficient_scope naming mti:read', async () => {
+  it('mti:watch alone → 403 insufficient_scope naming mti:read and the scope it holds', async () => {
     const spy = mockJwks([key]);
     const res = await list(await signJwt(key, goodPayload({ scope: 'mti:watch' })));
     expect(res.status).toBe(403);
     expect(WWW(res)).toContain('error="insufficient_scope"');
-    expect(WWW(res)).toContain('scope="mti:read"');
+    expect(WWW(res)).toContain('scope="mti:read mti:watch"');
     spy.restore();
   });
 

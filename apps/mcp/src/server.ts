@@ -39,6 +39,8 @@ export async function buildServer(deps: CallDeps): Promise<McpServer> {
     cacheHints: { 'tools/list': TOOLS_LIST_CACHE },
     jsonSchemaValidator: new CfWorkerJsonSchemaValidator({ draft: '2020-12' }),
     maxToolInputElements: MAX_CHECK_INPUT_ELEMENTS,
+    // Elicitation is for 2026-07-28 requests that declared it. Never fulfilled for a 2025-era connection.
+    inputRequired: { legacyShim: false },
   });
   for (const def of enabledTools()) registerTool(server, def, deps);
   registerSkills(server, catalog);

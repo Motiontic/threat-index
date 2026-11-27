@@ -433,7 +433,7 @@ describe('off switch and tools/list', () => {
     }
   });
 
-  it('the list is the nine tools in TOOL_ORDER order, with hints and cache hints on 2026-07-28', async () => {
+  it('the list is the twelve tools in TOOL_ORDER order, with hints and cache hints on 2026-07-28', async () => {
     jwks = mockJwks([key]);
     const c = modernCall(token, 'tools/list');
     const body = await bodyOf(await send({ headers: c.headers, body: c.body }));
@@ -450,14 +450,18 @@ describe('off switch and tools/list', () => {
           'mti_get_technique',
           'mti_list_sources',
           'mti_deep_query',
+          'mti_watch_add',
+          'mti_watch_remove',
+          'mti_watch_list',
         ].includes(n),
       ),
     );
     for (const t of body.result.tools) {
       expect(t.title).toBeTruthy();
+      const writes = ['mti_watch_add', 'mti_watch_remove'].includes(t.name);
       expect(t.annotations).toMatchObject({
-        readOnlyHint: true,
-        destructiveHint: false,
+        readOnlyHint: !writes,
+        destructiveHint: writes,
         idempotentHint: t.name !== 'mti_deep_query',
         openWorldHint: false,
       });
@@ -469,14 +473,14 @@ describe('off switch and tools/list', () => {
     expect(JSON.stringify(body.result.tools)).toMatchSnapshot();
   });
 
-  it('legacy clients see the same nine tools', async () => {
+  it('legacy clients see the same twelve tools', async () => {
     jwks = mockJwks([key]);
     const res = await send({
       headers: legacyHeaders(token),
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     });
     const body = await bodyOf(res);
-    expect(body.result.tools.map((t: any) => t.name)).toHaveLength(9);
+    expect(body.result.tools.map((t: any) => t.name)).toHaveLength(12);
     expect(body.result.ttlMs).toBeUndefined();
   });
 });
