@@ -23,7 +23,7 @@ function unb64u(s: string): Uint8Array | null {
   }
 }
 
-function canonical(v: unknown): string {
+export function canonical(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
   if (v && typeof v === 'object')
     return `{${Object.keys(v)

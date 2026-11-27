@@ -6,7 +6,7 @@ import {
   TRACEPARENT_META_KEY,
 } from '@modelcontextprotocol/server';
 import { logEvent, requestIdFrom } from '@ti/core/log';
-import type { McpIdentity } from '@ti/core/mcp-user';
+import { MCP_SCOPES, type McpIdentity } from '@ti/core/mcp-user';
 import { type AuthFailure, challenge, metadataUrl } from './auth/challenge';
 import { bearerFrom } from './auth/token';
 import { verifyAccessToken } from './auth/verify';
@@ -174,9 +174,17 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
     });
   }
   if (!identity.scopes.includes('mti:read'))
-    return send(challenge({ kind: 'scope' }, env.MCP_RESOURCE_URL, requestId), 'auth', {
-      authReason: 'insufficient_scope',
-    });
+    return send(
+      challenge(
+        { kind: 'scope', held: identity.scopes.filter((s) => MCP_SCOPES.includes(s as never)) },
+        env.MCP_RESOURCE_URL,
+        requestId,
+      ),
+      'auth',
+      {
+        authReason: 'insufficient_scope',
+      },
+    );
 
   // 5. Per-user limit.
   if (env.RL_MCP) {
@@ -287,7 +295,8 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
     scopes: identity.scopes,
     expiresAt,
     resource: new URL(env.MCP_RESOURCE_URL),
-    resourceMetadataUrl: new URL(metadataUrl(env.MCP_RESOURCE_URL)),
+    // The SDK writes this into a header with string methods: a URL object would make a scope challenge a 500.
+    resourceMetadataUrl: metadataUrl(env.MCP_RESOURCE_URL),
     extra: { sub: identity.sub },
   };
   log.era = (await isLegacyRequest(forward, parsed)) ? 'legacy' : 'modern';

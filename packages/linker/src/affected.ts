@@ -36,8 +36,8 @@ export const PACKAGE_ADVISORY_COLUMNS = [
   'published',
   'modified',
 ] as const;
-/** Meter units per row: 1 + secondary indexes in migration 0002 (the loader test checks this against planWrites). */
-export const ROW_COST = { affected: 3, package_advisories: 2 } as const;
+/** Meter units per row: 1 + secondary indexes in migrations 0002 and 0003 (the loader test checks this against planWrites). */
+export const ROW_COST = { affected: 4, package_advisories: 2 } as const;
 export const MAX_EXACT_VERSIONS = 1000;
 
 export type SkipReason = 'no_range_type' | 'git_range' | 'unknown_ecosystem' | 'bad_name' | 'bad_version';

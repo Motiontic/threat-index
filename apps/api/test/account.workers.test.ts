@@ -51,8 +51,8 @@ beforeEach(async () => {
       body: {
         id: 'user_new',
         email_addresses: [
-          { id: 'e1', email_address: 'other@example.test' },
-          { id: 'e2', email_address: 'me@example.test' },
+          { id: 'e1', email_address: 'other@example.test', verification: { status: 'unverified' } },
+          { id: 'e2', email_address: 'me@example.test', verification: { status: 'verified' } },
         ],
         primary_email_address_id: 'e2',
         first_name: 'Ada',
@@ -274,9 +274,9 @@ describe('watch', () => {
   });
   it('DELETE is idempotent', async () => {
     await call('PUT', '/v1/me/watch/CVE-2099-0001', { user: 'u1' });
-    for (let i = 0; i < 2; i++) {
+    for (const removed of [true, false]) {
       const res = await call('DELETE', '/v1/me/watch/CVE-2099-0001', { user: 'u1' });
-      expect([res.status, await json(res)]).toEqual([200, { ok: true }]);
+      expect([res.status, await json(res)]).toEqual([200, { ok: true, removed }]);
     }
     expect((await call('DELETE', '/v1/me/watch/CVE-2099-7777', { user: 'u1' })).status).toBe(200);
   });

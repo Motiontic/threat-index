@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { Change } from '../src/collect';
-import { describeChange, itemLink, type RenderItem, renderEmail, subjectFor } from '../src/render';
+import {
+  clean,
+  defang,
+  describeChange,
+  itemLink,
+  noticeLine,
+  type RenderItem,
+  renderEmail,
+  shownName,
+  subjectFor,
+} from '../src/render';
 
 const ch = (kind: string, o: Partial<Change> = {}): Change => ({
   id: 'c1',
@@ -46,7 +56,7 @@ describe('subjects', () => {
   });
 
   it('one item, many items, digests', () => {
-    expect(subjectFor('instant', [item()])).toBe('MTI: Acme Gateway RCE exploited in the wild');
+    expect(subjectFor('instant', [item()])).toBe('MTI: CVE-2026-0001 is exploited');
     expect(subjectFor('instant', [item(), item()])).toBe('MTI: 2 updates on your watchlist');
     expect(subjectFor('daily', [item(), item()])).toBe('MTI daily digest: 2 updates');
     expect(subjectFor('weekly', [item()])).toBe('MTI weekly digest: 1 updates');
@@ -115,5 +125,66 @@ describe('renderEmail', () => {
     expect(r.text.match(/Data: (.*)/)?.[1]?.split('; ').length).toBe(2);
     expect(r.html).toContain('width="600"');
     expect(r.html).toContain('#ef7d45');
+  });
+});
+
+describe('text that can look like something else', () => {
+  it('clean strips format characters: bidi controls and zero-width', () => {
+    expect(clean('a\u202eb\u200bc\u2066d\ufeffe')).toBe('abcde');
+  });
+  it('defang writes every dot followed by a letter as [.]; hosts every dot', () => {
+    expect(defang('verify-mti.com')).toBe('verify-mti[.]com');
+    expect(defang('1.2.3')).toBe('1.2.3');
+    expect(defang('1.2.3rc')).toBe('1.2.3rc');
+    expect(defang('left-pad.js')).toBe('left-pad[.]js');
+    expect(defang('localhost', true)).toBe('localhost');
+    expect(defang('agent.example.test', true)).toBe('agent[.]example[.]test');
+    expect(defang('a.b1', true)).toBe('a[.]b1');
+    expect(defang('http://10.0.0.1/x')).toBe('http[:]//10.0.0.1/x');
+    expect(defang('a://b.c', true)).toBe('a[:]//b[.]c');
+    expect(defang('Go/verify-mti.com/reset.v2')).toBe('Go/verify-mti[.]com/reset[.]v2');
+    expect(defang('mti.com.evil.io')).toBe('mti[.]com[.]evil[.]io');
+  });
+  it('shownName shows only the allowed characters, else a fixed phrase', () => {
+    expect(shownName('PyPI/langchain')).toBe('PyPI/langchain');
+    expect(shownName('a\u202eb')).toBe('ab'); // format characters are removed first
+    expect(shownName('npm/verify-mti.com')).toBe('npm/verify-mti[.]com');
+    for (const bad of ['has space', '<b>x</b>', 'x'.repeat(101), '', 'click here: evil'])
+      expect(shownName(bad)).toBe('a package (see your watchlist)');
+  });
+  it('a package alert leaves out a fixed version that is not a version and defangs the name', () => {
+    const pkg = {
+      label: 'npm/verify-mti.com',
+      subjectLabel: null,
+      fixed: ['1.2.3', 'Visit evil.example now', '2.0.0'],
+    };
+    const r = renderEmail({
+      ...base,
+      kind: 'daily',
+      items: [item({ pkg, change: ch('new_advisory', { new: 'osv:X' }) })],
+    });
+    expect(r.text).toContain('Package: npm/verify-mti[.]com. Fixed in 1.2.3, 2.0.0');
+    expect(r.text).not.toContain('evil');
+  });
+  it('a notice shows an odd target or host safely', () => {
+    const l = noticeLine({
+      at: '2026-11-23T08:00:00.000Z',
+      action: 'add',
+      target: 'pkg:npm/<x>',
+      clientHost: 'evil.example.com',
+    });
+    expect(l).toContain('a package (see your watchlist)');
+    expect(l).toContain('app (self-reported): evil[.]example[.]com');
+  });
+  it('"and N more updates on your watchlist" ends the email and counts into the subject', () => {
+    const r = renderEmail({
+      ...base,
+      kind: 'instant',
+      more: 7,
+      items: [item()],
+    });
+    expect(r.subject).toBe('MTI: 8 updates on your watchlist');
+    expect(r.text).toContain('and 7 more updates on your watchlist: https://app.example/account');
+    expect(r.html).toContain('and 7 more updates on your watchlist');
   });
 });

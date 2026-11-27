@@ -2,7 +2,7 @@ import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlit
 
 /**
  * ti_users: single-user accounts (Clerk user ID is the key; no organisations)
- * Mirrors migrations/users/0001_init.sql, 0002_account_settings.sql, 0003_notify.sql and 0004_mcp.sql. The SQL is the source of truth; every table there is
+ * Mirrors migrations/users/0001_init.sql, 0002_account_settings.sql, 0003_notify.sql, 0004_mcp.sql and 0005_watch_events.sql. The SQL is the source of truth; every table there is
  * WITHOUT ROWID, and CHECK constraints are not modelled. A Workers test compares these columns to
  * PRAGMA table_info.
  */
@@ -135,4 +135,34 @@ export const mcpBlocks = sqliteTable(
     expiresAt: text('expires_at'),
   },
   (t) => [primaryKey({ columns: [t.kind, t.id] })],
+);
+
+/** Watchlist changes made through MCP, for the change-notice email. Deleted after 30 days. */
+export const watchEvents = sqliteTable(
+  'watch_events',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    at: text('at').notNull(),
+    action: text('action').notNull(),
+    target: text('target').notNull(),
+    via: text('via').notNull(),
+    clientHost: text('client_host'),
+    notifiedAt: text('notified_at'),
+  },
+  (t) => [
+    index('watch_events_by_user').on(t.userId, t.at),
+    index('watch_events_pending').on(t.notifiedAt, t.userId),
+  ],
+);
+
+/** Instant emails sent to a user on a UTC day: the per-user daily cap. Rows older than 2 days are deleted. */
+export const instantCounts = sqliteTable(
+  'instant_counts',
+  {
+    userId: text('user_id').notNull(),
+    day: text('day').notNull(),
+    n: integer('n').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.day] })],
 );

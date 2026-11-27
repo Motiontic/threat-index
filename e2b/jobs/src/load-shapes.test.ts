@@ -438,6 +438,10 @@ describe('package rows in sandbox loads', () => {
     const chunk = api.store.get(inboxChunkKey(JOB_ID, 0));
     return chunk ? lines(chunk).filter((r) => PACKAGE_TABLES.includes(r.table)) : [];
   };
+  const newAdvisories = (api: ReturnType<typeof fakeApi>) => {
+    const chunk = api.store.get(inboxChunkKey(JOB_ID, 0));
+    return chunk ? lines(chunk).filter((r) => r.table === 'changes' && r.row.kind === 'new_advisory') : [];
+  };
   const SHA = 'c'.repeat(40);
   const GH_ARCHIVE = `https://github.com/github/advisory-database/archive/${SHA}.tar.gz`;
   const ghsa = fixture('github-advisory-db', 'GHSA-9x82-4j54-863h.json');
@@ -483,8 +487,9 @@ describe('package rows in sandbox loads', () => {
       fetch: archiveFetch,
     });
     expect(packageRows(api)).toEqual([]);
+    expect(newAdvisories(api)).toEqual([]); // dropped with the package rows: history never alerts
     expect(logs.find((l) => l.msg === 'package rows left to the backfill')?.extra).toEqual({
-      rows: 2,
+      rows: 3, // affected, package_advisories and the record's new_advisory
       reason: 'first-load',
     });
   });
@@ -497,8 +502,9 @@ describe('package rows in sandbox loads', () => {
       fetch: archiveFetch,
     });
     expect(packageRows(api)).toEqual([]);
+    expect(newAdvisories(api)).toEqual([]); // dropped with the package rows: history never alerts
     expect(logs.find((l) => l.msg === 'package rows left to the backfill')?.extra).toEqual({
-      rows: 2,
+      rows: 3, // affected, package_advisories and the record's new_advisory
       reason: 'archive',
     });
   });
@@ -512,6 +518,7 @@ describe('package rows in sandbox loads', () => {
       fetch: osvFetch('2026-11-23T21:00:00Z,Go/GO-2026-5006\n', () => goDoc),
     });
     expect(packageRows(api).map((r) => r.table)).toEqual(['affected', 'package_advisories']);
+    expect(newAdvisories(api)).toEqual([]); // a first-load never announces, in any mode
     expect(logs.some((l) => l.msg === 'package rows left to the backfill')).toBe(false);
   });
 

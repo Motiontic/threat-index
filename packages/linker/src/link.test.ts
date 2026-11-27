@@ -6,7 +6,7 @@ import type {
   TechniqueRecord,
   VulnRecord,
 } from '@ti/core/types';
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { link } from './link';
 import { KEV_EXPLOITED, KEV_RANSOMWARE, makeFake, NOW, vulnRow } from './testing/fake-deps';
 
@@ -571,4 +571,67 @@ it('(pkg) a record that drops a package deletes its rows in the same output', as
   ]);
   f.apply(out.rows);
   expect([...f.pkg.affected.values()].map((r) => r.name)).toEqual(['a']);
+});
+
+describe('(new_advisory)', () => {
+  const recent = (over: Partial<AdvisoryRecord> = {}) => pkgRec({ published: '2026-02-25', ...over });
+  const newAdv = (rows: { table: string; row: Record<string, unknown> }[]) =>
+    changes(rows).filter((c) => c.kind === 'new_advisory');
+
+  it('a first insert of a recent active advisory with packages writes exactly one change', async () => {
+    const f = makeFake();
+    const out = await link([recent()], f.deps);
+    expect(newAdv(out.rows)).toEqual([
+      {
+        id: 'new_advisory:GHSA-pppp-qqqq-rrrr',
+        entity_key: 'GHSA-pppp-qqqq-rrrr',
+        kind: 'new_advisory',
+        old: null,
+        new: 'github-advisory-db:GHSA-pppp-qqqq-rrrr',
+        at: NOW_ISO,
+        source: 'github-advisory-db',
+      },
+    ]);
+    expect(out.newAdvisories).toBe(1);
+  });
+
+  it('an update of a stored advisory writes none', async () => {
+    const f = makeFake();
+    f.apply((await link([recent()], f.deps)).rows);
+    const out = await link([recent({ modified: '2026-02-27T00:00:00Z' })], f.deps);
+    expect(tables(out.rows)).toContain('package_advisories');
+    expect(newAdv(out.rows)).toEqual([]);
+    expect(out.newAdvisories ?? 0).toBe(0);
+  });
+
+  it('an old record, a record without published, a withdrawn one and one without packages write none', async () => {
+    const f = makeFake();
+    const out = await link(
+      [
+        recent({ sourceId: 'GHSA-old1-old1-old1', published: '2026-02-01' }),
+        pkgRec({ sourceId: 'GHSA-nopu-nopu-nopu' }),
+        recent({ sourceId: 'GHSA-wdrw-wdrw-wdrw', status: 'withdrawn' }),
+        recent({ sourceId: 'GHSA-nopk-nopk-nopk', affected: [] }),
+      ],
+      f.deps,
+    );
+    expect(newAdv(out.rows)).toEqual([]);
+  });
+
+  it('the same vuln from two sources gives one row', async () => {
+    const f = makeFake();
+    const out = await link(
+      [recent({ vulnKey: CVE }), recent({ source: 'osv', sourceId: 'GHSA-pppp-qqqq-rrrr', vulnKey: CVE })],
+      f.deps,
+    );
+    expect(newAdv(out.rows).map((c) => c.id)).toEqual([`new_advisory:${CVE}`]);
+  });
+
+  it('packageWrites alone (the affected backfill) never makes a changes row', async () => {
+    const { affectedRows, packageWrites } = await import('./affected');
+    const r = recent();
+    const rows = packageWrites(r, affectedRows(r), { ranges: [] });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((x) => x.table === 'changes')).toBe(false);
+  });
 });

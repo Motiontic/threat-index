@@ -26,7 +26,7 @@ describe('TABLES', () => {
   }
 
   it('has every migration table exactly once, in its own folder database, and nothing else', () => {
-    expect(fromSql.length).toBe(29);
+    expect(fromSql.length).toBe(31);
     expect(new Set(fromSql.map(([t]) => t)).size).toBe(fromSql.length);
     expect([...TABLES.values()].map((t) => [t.name, t.db]).sort()).toEqual([...fromSql].sort());
   });

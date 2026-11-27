@@ -141,7 +141,7 @@ describe('packageWrites', () => {
       'affected:upsert',
       'package_advisories:upsert',
     ]);
-    expect(packageCost(rows)).toBe(3 + 3 + 2);
+    expect(packageCost(rows)).toBe(4 + 4 + 2);
   });
 
   it('writes nothing when the stored row is the same or newer', () => {
@@ -167,7 +167,7 @@ describe('packageWrites', () => {
       source_id: 'GHSA-aaaa-bbbb-cccc',
       range_no: 0,
     });
-    expect(packageCost(rows)).toBe(3 + 3 + 2);
+    expect(packageCost(rows)).toBe(4 + 4 + 2);
   });
 
   it('a withdrawn version deletes every stored range and writes the status', () => {

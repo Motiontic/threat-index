@@ -59,5 +59,6 @@ export const affected = sqliteTable(
     primaryKey({ columns: [t.ecosystem, t.name, t.source, t.sourceId, t.rangeNo] }),
     index('affected_by_record').on(t.source, t.sourceId),
     index('affected_by_vuln').on(t.vulnKey),
+    index('affected_by_name').on(t.name, t.ecosystem),
   ],
 );

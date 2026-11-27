@@ -66,6 +66,8 @@ export interface LinkResult {
   docs: string[];
   /** Cold records left out of D1 (they reach lake/ through the nightly fold). */
   skipped: number;
+  /** `new_advisory` change rows in `rows` (run stats). */
+  newAdvisories?: number;
 }
 
 export interface Item<T> {
@@ -392,7 +394,8 @@ export async function link(records: ParsedRecord[], deps: LinkDeps): Promise<Lin
     if (row) upsert('techniques', idx, row);
   }
 
-  const packageRows = await packageRowsOf(hubItems, deps);
+  const packageRows = await packageRowsOf(hubItems, deps, at);
+  const newAdvisories = packageRows.filter((r) => r.table === 'changes').length;
 
   const rows: InboxRow[] = [];
   for (const table of ROW_ORDER) {
@@ -400,11 +403,11 @@ export async function link(records: ParsedRecord[], deps: LinkDeps): Promise<Lin
     if (table === 'vulns') rows.push(...vulnDeletes);
     rows.push(...buckets[table].sort((a, b) => a.idx - b.idx).map((b) => b.row)); // stable
   }
-  return { rows, docs: [...docHubs].sort(), skipped };
+  return { rows, docs: [...docHubs].sort(), skipped, ...(newAdvisories > 0 ? { newAdvisories } : {}) };
 }
 
 /** Package rows for the newest copy of each advisory record in this call, hot or cold. */
-async function packageRowsOf(hubItems: HubItem[], deps: LinkDeps): Promise<InboxRow[]> {
+async function packageRowsOf(hubItems: HubItem[], deps: LinkDeps, at: string): Promise<InboxRow[]> {
   const latest = new Map<string, HubItem>();
   for (const it of hubItems) {
     if (it.kind !== 'advisory') continue;
@@ -440,14 +443,42 @@ async function packageRowsOf(hubItems: HubItem[], deps: LinkDeps): Promise<Inbox
     else rangesBy.set(k, [row]);
   }
   const out: InboxRow[] = [];
+  const announced = new Set<string>();
   for (const { it, plan } of planned) {
     const k = JSON.stringify([plan.advisory.source, plan.advisory.source_id]);
+    const stored = advBy.get(k);
     out.push(
       ...packageWrites(it.r as AdvisoryRecord, plan, {
-        advisory: advBy.get(k),
+        advisory: stored,
         ranges: rangesBy.get(k) ?? [],
       }),
     );
+    // Built here, not in `packageWrites`: the affected-backfill calls that with no stored rows and would
+    // otherwise announce all of history. The fixed id keeps one row per vuln (the changes insert is ignore-on-conflict).
+    const change = stored ? null : newAdvisoryChange(plan, at);
+    if (change && !announced.has(change.id as string)) {
+      announced.add(change.id as string);
+      out.push({ table: 'changes', op: 'upsert', row: change });
+    }
   }
   return out;
+}
+
+const NEW_ADVISORY_WINDOW_MS = 14 * 86_400_000;
+
+/** The `new_advisory` change for an advisory row being written for the first time, or null. */
+function newAdvisoryChange(plan: PackagePlan, at: string): Row | null {
+  const a = plan.advisory;
+  if (plan.names === 0 || a.status !== 'active' || typeof a.published !== 'string') return null;
+  const published = Date.parse(a.published);
+  if (Number.isNaN(published) || Math.abs(Date.parse(at) - published) > NEW_ADVISORY_WINDOW_MS) return null;
+  return {
+    id: `new_advisory:${a.vuln_key}`,
+    entity_key: a.vuln_key,
+    kind: 'new_advisory',
+    old: null,
+    new: `${a.source}:${a.source_id}`,
+    at,
+    source: a.source,
+  };
 }

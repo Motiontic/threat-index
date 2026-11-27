@@ -3,3 +3,7 @@
 MCP_HMAC_SECRET=
 # Optional: the next secret, set while rotating.
 MCP_HMAC_SECRET_NEXT=
+# Seals the requestState of an elicitation (AES-GCM). Not the HMAC secret. Any 32 random bytes, base64. Missing: elicitation is off.
+MCP_STATE_KEY=
+# Optional: the next key, set while rotating.
+MCP_STATE_KEY_NEXT=

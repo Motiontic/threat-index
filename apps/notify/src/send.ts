@@ -10,7 +10,10 @@ export interface Outgoing {
   planned: PlannedEmail;
   key: string;
   rendered: Rendered;
-  unsubscribeUrl: string;
+  /** Null for a watchlist change notice: it is a security notice, not an alert, and has no unsubscribe. */
+  unsubscribeUrl: string | null;
+  /** `watch_events` ids a change notice covers; marked notified once the email is sent. */
+  eventIds?: string[];
 }
 
 export type SendStatus = 'sent' | 'dry_run' | 'failed';
@@ -36,12 +39,12 @@ export async function remainingToday(env: Env, runAt: Date): Promise<number> {
 
 const iso = (deps: Deps) => new Date(deps.now()).toISOString();
 
-async function reserveSlot(env: Env, day: string): Promise<boolean> {
+async function reserveSlot(env: Env, day: string, cap: number): Promise<boolean> {
   await env.DB_USERS.prepare('INSERT INTO email_log (day, sent) VALUES (?1, 0) ON CONFLICT (day) DO NOTHING')
     .bind(day)
     .run();
   const res = await env.DB_USERS.prepare('UPDATE email_log SET sent = sent + 1 WHERE day = ?1 AND sent < ?2')
-    .bind(day, EMAIL_DAILY_CAP)
+    .bind(day, cap)
     .run();
   return (res.meta.changes ?? 0) > 0;
 }
@@ -55,22 +58,64 @@ async function finish(
   o: Outgoing,
   status: 'sent' | 'dry_run',
   providerId: string | null,
+  /** False when this replays an email an earlier run already sent: it must not count towards the cap again. */
+  fresh: boolean,
+  day: string,
 ): Promise<void> {
   const now = iso(deps);
-  const { userId, items } = o.planned;
+  const { userId, items, hidden, coversBefore } = o.planned;
+  const covered = [...items, ...hidden];
   await env.DB_USERS.batch([
     env.DB_USERS.prepare(
       'UPDATE email_sends SET status = ?2, provider_id = COALESCE(?3, provider_id), error = NULL, updated_at = ?4 WHERE idem_key = ?1',
     ).bind(o.key, status, providerId, now),
-    ...items.map((i) =>
+    ...covered.map((i) =>
       env.DB_USERS.prepare(
         'INSERT OR IGNORE INTO alerts_sent (user_id, change_id, sent_at) VALUES (?1, ?2, ?3)',
       ).bind(userId, i.changeId, now),
     ),
-    ...items.map((i) =>
+    ...covered.map((i) =>
       env.DB_USERS.prepare('DELETE FROM alert_queue WHERE user_id = ?1 AND change_id = ?2').bind(
         userId,
         i.changeId,
+      ),
+    ),
+    // Queued rows the email counted ("and N more") but did not list: older than the oldest row it read.
+    ...(coversBefore
+      ? (() => {
+          // Rows ranking after the edge: a later class, or the same class and older (class, then newest first).
+          const cls = "CASE WHEN via = 'watch' THEN 0 WHEN via LIKE 'pkg:%' THEN 1 ELSE 2 END";
+          const where = `user_id = ?1 AND (${cls} > ?5 OR (${cls} = ?5 AND (created_at < ?2 OR (created_at = ?2 AND change_id < ?3))))${
+            coversBefore.watchOnly ? " AND (via = 'watch' OR via LIKE 'pkg:%')" : ''
+          }`;
+          return [
+            env.DB_USERS.prepare(
+              `INSERT OR IGNORE INTO alerts_sent (user_id, change_id, sent_at)
+               SELECT user_id, change_id, ?4 FROM alert_queue WHERE ${where}`,
+            ).bind(userId, coversBefore.createdAt, coversBefore.changeId, now, coversBefore.cls),
+            env.DB_USERS.prepare(`DELETE FROM alert_queue WHERE ${where}`).bind(
+              userId,
+              coversBefore.createdAt,
+              coversBefore.changeId,
+              null,
+              coversBefore.cls,
+            ),
+          ];
+        })()
+      : []),
+    ...(fresh && o.planned.kind === 'instant'
+      ? [
+          env.DB_USERS.prepare(
+            `INSERT INTO instant_counts (user_id, day, n) VALUES (?1, ?2, 1)
+             ON CONFLICT (user_id, day) DO UPDATE SET n = n + 1`,
+          ).bind(userId, day),
+        ]
+      : []),
+    ...(o.eventIds ?? []).map((id) =>
+      env.DB_USERS.prepare('UPDATE watch_events SET notified_at = ?2 WHERE id = ?1 AND user_id = ?3').bind(
+        id,
+        now,
+        userId,
       ),
     ),
   ]);
@@ -91,6 +136,8 @@ export async function sendAll(
   runAt: Date,
   emails: Outgoing[],
   gapMs: number,
+  /** Sends allowed today across all kinds, counted in `email_log`. Alerts pass less than the hard cap. */
+  cap: number = EMAIL_DAILY_CAP,
 ): Promise<SendSummary> {
   const summary: SendSummary = { byKind: {}, capReached: false, stopped: false };
   const count = (kind: EmailKind, s: SendStatus) => {
@@ -107,7 +154,7 @@ export async function sendAll(
       `INSERT INTO email_sends (idem_key, kind, change_count, status, created_at, updated_at)
        VALUES (?1, ?2, ?3, 'pending', ?4, ?4) ON CONFLICT (idem_key) DO NOTHING`,
     )
-      .bind(o.key, o.planned.kind, o.planned.items.length, now)
+      .bind(o.key, o.planned.kind, o.eventIds?.length ?? o.planned.items.length, now)
       .run();
     const prior = await env.DB_USERS.prepare(
       'SELECT status, provider_id FROM email_sends WHERE idem_key = ?1',
@@ -115,12 +162,12 @@ export async function sendAll(
       .bind(o.key)
       .first<{ status: string; provider_id: string | null }>();
     if (prior?.status === 'sent' || prior?.status === 'dry_run') {
-      await finish(env, deps, o, prior.status, null);
+      await finish(env, deps, o, prior.status, null, false, day);
       count(o.planned.kind, prior.status);
       continue;
     }
 
-    if (!(await reserveSlot(env, day))) {
+    if (!(await reserveSlot(env, day, cap))) {
       summary.capReached = true;
       break;
     }
@@ -134,7 +181,7 @@ export async function sendAll(
           key: o.key,
         }),
       );
-      await finish(env, deps, o, 'dry_run', null);
+      await finish(env, deps, o, 'dry_run', null, true, day);
       count(o.planned.kind, 'dry_run');
       continue;
     }
@@ -156,7 +203,7 @@ export async function sendAll(
           subject: o.rendered.subject,
           text: o.rendered.text,
           html: o.rendered.html,
-          headers: unsubscribeHeaders(o.unsubscribeUrl),
+          ...(o.unsubscribeUrl ? { headers: unsubscribeHeaders(o.unsubscribeUrl) } : {}),
         }),
         signal: AbortSignal.timeout(10_000),
       });
@@ -175,7 +222,7 @@ export async function sendAll(
         const j = (await res.json()) as { id?: unknown };
         if (typeof j.id === 'string') providerId = j.id;
       } catch {}
-      await finish(env, deps, o, 'sent', providerId);
+      await finish(env, deps, o, 'sent', providerId, true, day);
       count(o.planned.kind, 'sent');
       continue;
     }

@@ -20,7 +20,7 @@ describe('TABLE_DATABASE', () => {
   }
 
   it('maps every table in every migration exactly once, to its own database', () => {
-    expect(fromSql.length).toBe(29);
+    expect(fromSql.length).toBe(31);
     expect(new Set(fromSql.map(([t]) => t)).size).toBe(fromSql.length);
     expect(Object.entries(TABLE_DATABASE).sort()).toEqual([...fromSql].sort());
   });

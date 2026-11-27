@@ -81,6 +81,9 @@ beforeEach(async () => {
   limitKeys = [];
   clerkRan = 0;
   await E.DB_USERS.exec('DELETE FROM mcp_blocks');
+  await (env as any).DB_ADVISORIES.exec(
+    "INSERT OR IGNORE INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES ('npm', 'lodash', 'osv', 'T-1', 0, 'T-1', 'SEMVER')",
+  );
 });
 
 describe('a signed MCP call', () => {
@@ -135,7 +138,8 @@ describe('route allow-list and scopes', () => {
       ['DELETE', '/v1/me'],
       ['GET', '/v1/me/saved-searches'],
       ['POST', '/webhooks/clerk'],
-      ['PATCH', '/v1/me'],
+      ['PATCH', '/v1/me/watch/CVE-1'],
+      ['PATCH', '/v1/me/saved-searches'],
       ['HEAD', '/v1/search'],
     ] as const) {
       const res = await mcp(method, path, { id: admin });
@@ -164,7 +168,7 @@ describe('route allow-list and scopes', () => {
   });
   it('mti:watch passes the scope check on a watch write', async () => {
     const res = await mcp('PUT', '/v1/me/watch/packages/npm/lodash', { id: BOTH, body: '{}' });
-    expect(res.status).toBe(501); // stub, after auth
+    expect(res.status).toBe(200);
   });
   it('every route has its scope in the table', () => {
     expect(findMcpRoute('GET', '/v1/entries/CVE-2025-1')?.scope).toBe('mti:read');
@@ -271,12 +275,7 @@ describe('block list', () => {
 
 describe('stubs', () => {
   it('answer 501 for a signed-in caller and 401 for an anonymous one', async () => {
-    const stubs: [string, string][] = [
-      ['GET', '/v1/me/watch/packages'],
-      ['PUT', '/v1/me/watch/packages/npm/lodash'],
-      ['DELETE', '/v1/me/watch/packages/npm/lodash'],
-      ['GET', '/v1/me/changes'],
-    ];
+    const stubs: [string, string][] = [['GET', '/v1/me/changes']];
     for (const [method, path] of stubs) {
       const anon = await fetchApp(new Request(`https://ti-api.internal${path}`, { method }));
       expect(anon.status, `anon ${method} ${path}`).toBe(401);
@@ -343,6 +342,13 @@ describe('deleteUserData', () => {
       db.prepare(
         `INSERT INTO watch_packages (user_id, ecosystem, name, created_at) VALUES ('user_keep', 'npm', 'a', '2026-01-01')`,
       ),
+      db.prepare(
+        `INSERT INTO watch_events (id, user_id, at, action, target, via) VALUES ('ev_del', 'user_del', '2026-11-25', 'add', 'pkg:npm/a', 'mcp')`,
+      ),
+      db.prepare(`INSERT INTO instant_counts (user_id, day, n) VALUES ('user_del', '2026-11-26', 2)`),
+      db.prepare(
+        `INSERT INTO watch_events (id, user_id, at, action, target, via) VALUES ('ev_keep', 'user_keep', '2026-11-25', 'add', 'pkg:npm/a', 'mcp')`,
+      ),
     ]);
     await deleteUserData(db, 'user_del', NOW);
     for (const t of [
@@ -350,6 +356,8 @@ describe('deleteUserData', () => {
       'watch WHERE user_id',
       'watch_packages WHERE user_id',
       'package_usage WHERE user_id',
+      'watch_events WHERE user_id',
+      'instant_counts WHERE user_id',
     ]) {
       const row = await db.prepare(`SELECT count(*) AS n FROM ${t} = 'user_del'`).first<{ n: number }>();
       expect(row?.n, t).toBe(0);

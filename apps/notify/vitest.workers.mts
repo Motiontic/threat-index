@@ -5,6 +5,12 @@ export default workerProject(
   'notify',
   'notify',
   ['test/**/*.workers.test.ts'],
-  { DB_SIGNALS: 'signals', DB_USERS: 'users', DB_VULNS: 'vulns', DB_WORLD: 'world' },
+  {
+    DB_SIGNALS: 'signals',
+    DB_USERS: 'users',
+    DB_VULNS: 'vulns',
+    DB_WORLD: 'world',
+    DB_ADVISORIES: 'advisories',
+  },
   { UNSUBSCRIBE_SECRET: 'test-unsubscribe-secret' },
 );

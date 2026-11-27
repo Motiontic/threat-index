@@ -8,8 +8,8 @@ export const UNSUBSCRIBE_PATH = '/unsubscribe';
 export const MAX_UNSUBSCRIBE_TOKEN_CHARS = 1024;
 const MAX_FIELD_CHARS = 256;
 
-export type UnsubscribeScope = 'all' | 'digest' | 'watch' | 'search';
-/** `item` is the entry key for 'watch' and the saved-search id for 'search'; absent otherwise. */
+export type UnsubscribeScope = 'all' | 'digest' | 'watch' | 'search' | 'package';
+/** `item` is the entry key for 'watch', the saved-search id for 'search' and `ecosystem/name` for 'package'; absent otherwise. */
 export interface UnsubscribePayload {
   userId: string;
   scope: UnsubscribeScope;
@@ -17,7 +17,7 @@ export interface UnsubscribePayload {
   issuedAt: number;
 }
 
-const SCOPES: readonly string[] = ['all', 'digest', 'watch', 'search'];
+const SCOPES: readonly string[] = ['all', 'digest', 'watch', 'search', 'package'];
 const encoder = new TextEncoder();
 
 /** Returns a reason when the payload is not one we sign or accept, else null. */
@@ -25,7 +25,7 @@ function problem(p: UnsubscribePayload): string | null {
   if (typeof p.userId !== 'string' || p.userId === '' || p.userId.length > MAX_FIELD_CHARS)
     return 'bad userId';
   if (!SCOPES.includes(p.scope)) return 'unknown scope';
-  const needsItem = p.scope === 'watch' || p.scope === 'search';
+  const needsItem = p.scope === 'watch' || p.scope === 'search' || p.scope === 'package';
   if (needsItem) {
     if (typeof p.item !== 'string' || p.item === '') return 'missing item';
     if (p.item.length > MAX_FIELD_CHARS) return 'item too long';
