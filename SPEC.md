@@ -432,3 +432,40 @@ Tests:
 - a late row survives a busy run;
 - `Go/verify-mti.com/reset.v2` and `mti.com.evil.io` are fully defanged;
 - a removal notice goes ahead of 30 other pending notices.
+
+## Round 6: fixes from the round-5 review
+
+1. **The known-package check is two exact seeks** (`watch-packages.ts`).
+   - Today's OR form seeks on `name` only, so `PUT …/npm/linux` reads every `linux` row across `Debian:*` and
+     `Ubuntu:*`.
+   - Use `SELECT EXISTS(SELECT 1 FROM affected WHERE name = ?2 AND ecosystem = ?1) OR EXISTS(SELECT 1 FROM
+     affected WHERE name = ?2 AND ecosystem > ?1 || ':' AND ecosystem < ?1 || ';')` (or an equivalent UNION ALL
+     with LIMIT 1).
+   - The plan test asserts both `(name=? AND ecosystem=?)` and `(name=? AND ecosystem>? AND ecosystem<?)`.
+   - A test with many `linux` rows in other ecosystems shows the check reads none of them (use `.scanstats`-style
+     row counts if available, else the plan).
+2. **No permanent skip from the late bound** (`collect.ts`, `match.ts`). The late read starts at the earlier
+   of:
+   - the stored lower bound;
+   - the usual floor, `start.at` minus 6 hours.
+
+   A row whose `at` falls between the floor and the bound is always read again. Test: a change committed late,
+   with `at` between the floor and the bound, is matched on the next run.
+3. **Bounded `affected` reads; a failure never stalls alerts** (`match.ts`).
+   - Query `affected` in ordered chunks of about 100 keys or records, and stop when the pair budget is spent.
+     The rest is "unmatched" and deferred by the prefix rule.
+   - Never hold more than the budget in memory.
+   - Replace per-row array copies (`[...arr, r]`) with push.
+   - Catch a failed package-matching query: log `package_match_failed` and carry on with entry-watch and
+     saved-search matching. Hold the cursor only for package matching, so one bad run can't stop all alert
+     email.
+   - Test: a run whose `affected` rows exceed the budget defers the rest, and the next run picks them up. A
+     thrown `affected` query still sends entry-watch alerts.
+4. **"And N more" only for fully loaded windows** (`consume.ts`, `plan.ts`, `send.ts`). Set `coversBefore` only
+   when that user's whole window was loaded under the global row limit. Otherwise send the loaded rows and
+   leave the rest queued.
+5. **Notice query index.** Add `CREATE INDEX watch_events_by_user_pending ON watch_events (user_id,
+   notified_at);` to migration 0005 (not applied anywhere yet, so edit it in place).
+6. **Defang `://` too.** In shown values, write `://` as `[:]//`, so `http://10.0.0.1/x` is never a link.
+
+Don't run `git fetch` or `git push`; the branch stays local to the sandbox.
