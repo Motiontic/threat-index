@@ -161,7 +161,7 @@ describe('skeleton', () => {
       'mti_deep_query',
     ]);
   });
-  it('keeps a stub for each tool that is not built here, and enables the eight that are', async () => {
+  it('keeps a stub for each tool that is not built here, and enables the nine that are', async () => {
     const built = [
       'mti_check_packages',
       'mti_get_entry',
@@ -171,6 +171,7 @@ describe('skeleton', () => {
       'mti_search_incidents',
       'mti_get_technique',
       'mti_list_sources',
+      'mti_deep_query',
     ];
     for (const name of TOOL_ORDER) {
       const mod = (await import(`../src/tools/${name}.ts`)) as { tool: { name: string; enabled: boolean } };
@@ -185,11 +186,8 @@ describe('skeleton', () => {
       expect(mod.register()).toBeUndefined();
     }
   });
-  it('binds the McpTask Durable Object, whose methods throw NotImplementedError', async () => {
+  it('binds the McpTask Durable Object', async () => {
     const stub = E.MCP_TASKS.get(E.MCP_TASKS.idFromName('t'));
-    await runInDurableObject(stub, async (task: McpTask) => {
-      await expect(task.fetch(new Request('https://do.internal/'))).rejects.toThrow(NotImplementedError);
-      await expect(task.alarm()).rejects.toThrow(/not implemented/);
-    });
+    expect(await (stub as unknown as McpTask).exists('user_x', '0'.repeat(26))).toBe(false);
   });
 });

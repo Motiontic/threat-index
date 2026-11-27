@@ -375,7 +375,7 @@ describe('legacy clients', () => {
         { headers: h, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) },
         env,
       );
-      expect((await bodyOf(list)).result.tools).toHaveLength(8);
+      expect((await bodyOf(list)).result.tools).toHaveLength(9);
       const callRes = await post(
         {
           headers: h,

@@ -55,7 +55,7 @@ describe('token matrix', () => {
     const res = await list(await signJwt(key), {}, withApi(BASE_ENV, api));
     expect(res.status).toBe(200);
     const body = await bodyOf(res);
-    expect(body.result.tools).toHaveLength(8);
+    expect(body.result.tools).toHaveLength(9);
     spy.restore();
   });
 
