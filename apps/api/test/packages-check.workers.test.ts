@@ -346,7 +346,7 @@ describe('ranking bands', () => {
     fx('EPSS 0.10', async (name, key) => (await rec(name, key), addVuln(key, { epss: 0.1 })), 'fix_soon'),
     fx(
       'EPSS 0.099 with CVSS 7.0',
-      async (name, key) => (await rec(name, key), addVuln(key, { epss: 0.099, cvss: 7 })),
+      async (name, key) => (await rec(name, key), addVuln(key, { epss: 0.099, cvss: 7, cvss_source: 'nvd' })),
       'plan',
     ),
     fx(
