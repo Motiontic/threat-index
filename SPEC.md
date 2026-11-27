@@ -291,3 +291,67 @@ These sharpen the sections above. Where they differ, this section wins.
     - `ToolErrorCode` gains `limit_reached`, `removal_limit` and `not_found`. Edits to `shared.ts` only add
       union members, these fields and the `apiJson` mapping.
     - Don't touch `instructions.ts`: the skills change writes the watch-tool lines.
+
+## Changes from the first build (round 2)
+
+An independent review of the first build found the items below. Fix all of them on the same branch. Migration
+`0005` hasn't been applied anywhere outside loop sandboxes, so edit it in place rather than adding `0006`.
+
+1. **One user can't clog the queue** (blocker). Today `loadQueue` reads the oldest 5,000 rows across all users,
+   and each email deletes only the 50 items it sends.
+   - Cap queued rows per user at 200. When matching would go over, drop the excess and count it.
+   - Load the queue per user: at most the 50 newest rows per user, using a window function. So one user's
+     backlog can't fill the read for everyone.
+   - Each email holds up to 50 items in this order: entry-watch items, then package items, then saved-search
+     items, newest first within each group. If more were queued, end with one line: "and N more updates on
+     your watchlist" (a link to the watchlist page).
+   - Every queued row an email covers, shown or counted, is deleted when that email is sent.
+2. **Matching order and budget.**
+   - Match `new_advisory` records first, then other kinds.
+   - Late rows already queued or sent for that user aren't matched again.
+   - If the package-match query budget runs out, stop the forward cursor after the last change whose matching
+     finished. The rest are matched on the next run, never skipped.
+   - Process hits in change order, not in sorted package order, so the same packages don't always lose.
+3. **Only real packages can be watched.**
+   - `PUT /v1/me/watch/packages/...` checks `DB_ADVISORIES.affected` for at least one row for that package. For
+     OS ecosystems, the ecosystem is matched before its first `:`.
+   - If there is none: 404 `unknown_package`. The tool error text is "MTI has no records for that package yet,
+     so it can't be watched."
+   - The distinct watched-set read gets `ORDER BY ecosystem, name`, and its cap rises to 50,000 rows, with the
+     log line.
+4. **Email budget split.**
+   - Notices have their own budget: at most 20 a day in all, and at most 2 per user per day. Pending events carry
+     over to the next run.
+   - Alerts have the rest: at most 75 a day, so the total stays within 95.
+   - Pick notice users by the oldest pending event (`watch_events_pending` index), not by user id.
+   - Drive the notice query from that index, not a scan of all users.
+5. **No attacker text that looks like something else.**
+   - `clean()` also strips Unicode format characters (category Cf), including bidi controls and zero-width
+     characters.
+   - In notices and alerts, a package name or entry ID is shown only if it matches `^[A-Za-z0-9@/._:-]{1,100}$`.
+     Otherwise it reads "a package (see your watchlist)".
+   - A fixed version is shown only if it matches `^[A-Za-z0-9.+~:_-]{1,40}$`. Otherwise it is left out.
+   - Any shown value whose last dot is followed by 2 or more letters is written with that dot as `[.]`
+     (`verify-mti[.]com`), so mail clients don't turn it into a link. Client hosts are always written this way.
+6. **Verified email everywhere.**
+   - `getClerkUser` in `apps/api/src/lib/clerk-api.ts` (used by `loadOrCreateUser`) applies the same
+     verified-only rule as the webhook: add `verification` to its schema.
+7. **First-load never announces.** `first-load.ts` drops `new_advisory` rows in every mode, not only the modes
+   that drop package rows.
+8. **Package info lookups are linear.**
+   - `loadPackageInfo` queries `affected` by `vuln_key` only (the indexed column), in chunks, and filters names
+     in memory.
+   - No nested chunk loops.
+9. **Instant cap counts instant emails only.**
+   - Add `instant_counts (user_id, day, n)` to migration 0005, with primary key `(user_id, day)`.
+   - Increment it for each instant email sent, and read it for the cap.
+   - Delete rows older than 2 days.
+   - Don't scan `alerts_sent` for this.
+10. **Webhook safety.**
+    - `user.created` for a user row that already exists doesn't overwrite the email.
+    - When a stored non-empty address is cleared because no verified address remains, log `email_cleared` (warn,
+      no address in the log).
+    - Existing unverified rows are not backfilled.
+11. **Small fixes from the loop's own review.**
+    - The `remove` event names the entry key actually deleted. Write one event per removed key.
+    - The rest of that review is covered by item 9.
