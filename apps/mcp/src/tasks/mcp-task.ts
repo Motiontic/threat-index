@@ -95,6 +95,8 @@ export interface GetResult {
 export interface Deps {
   now: () => number;
   api: ApiFn;
+  /** When the one alarm really fires for a wanted time. Tests push it out so the alarm only runs when they say. */
+  armAt?: (wanted: number) => number;
 }
 
 interface CheckProgress {
@@ -187,7 +189,7 @@ export class McpTask extends DurableObject<Env> {
     };
     const at = Math.min(r.a ?? Number.POSITIVE_INFINITY, r.e ?? Number.POSITIVE_INFINITY);
     if (!Number.isFinite(at)) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(Math.max(at, this.now()));
+    else await this.ctx.storage.setAlarm(this.deps.armAt ? this.deps.armAt(at) : Math.max(at, this.now()));
   }
 
   /** The start of every call: purge, and put the alarm back if it went missing. */
@@ -531,9 +533,13 @@ export class McpTask extends DurableObject<Env> {
         try {
           await this.step(id);
           this.sql.exec('UPDATE tasks SET faults = 0 WHERE id = ?', id);
-        } catch {
+        } catch (e) {
           const r = this.row(id);
           if (!r) continue;
+          logEvent('warn', 'mcp_task_fault', {
+            task: id.slice(0, 6),
+            error: e instanceof Error ? e.name : 'unknown',
+          });
           const faults = r.faults + 1;
           if (faults >= MAX_FAULTS && r.status === 'working') this.fail(id);
           else

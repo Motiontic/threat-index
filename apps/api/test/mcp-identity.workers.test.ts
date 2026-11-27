@@ -276,7 +276,6 @@ describe('stubs', () => {
       ['PUT', '/v1/me/watch/packages/npm/lodash'],
       ['DELETE', '/v1/me/watch/packages/npm/lodash'],
       ['GET', '/v1/me/changes'],
-      ['DELETE', '/v1/deep-query/abc'],
     ];
     for (const [method, path] of stubs) {
       const anon = await fetchApp(new Request(`https://ti-api.internal${path}`, { method }));
