@@ -404,9 +404,13 @@ export interface MatchContext {
   start?: Cursor;
 }
 
-/** Orders changes for package matching: forward rows before late ones; `new_advisory` before other kinds. */
-function matchOrder(changes: Change[], forwardCount: number): Change[] {
-  const rank = (c: Change, i: number) => (i < forwardCount ? 0 : 2) + (c.kind === 'new_advisory' ? 0 : 1);
+/**
+ * Orders changes for package matching: the first forward change always leads (so each run finishes it and the
+ * cursor advances, whatever the budget); then forward rows before late ones, `new_advisory` before other kinds.
+ */
+export function matchOrder(changes: Change[], forwardCount: number): Change[] {
+  const rank = (c: Change, i: number) =>
+    i === 0 && forwardCount > 0 ? -1 : (i < forwardCount ? 0 : 2) + (c.kind === 'new_advisory' ? 0 : 1);
   return changes
     .map((c, i) => ({ c, i, r: rank(c, i) }))
     .sort((x, y) => x.r - y.r || x.i - y.i)

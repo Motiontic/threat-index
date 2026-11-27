@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type EntityDoc, matchesSearch, parseTriggers } from '../src/match';
+import { type EntityDoc, matchesSearch, matchOrder, parseTriggers } from '../src/match';
 
 const doc = (o: Partial<EntityDoc> = {}): EntityDoc => ({
   type: 'vuln',
@@ -61,5 +61,34 @@ describe('parseTriggers', () => {
       ['breach_notice', 'epss_band', 'fix_released', 'newly_exploited', 'public_exploit'].sort(),
     );
     expect(parseTriggers('["cvss_change"]').has('cvss_change')).toBe(true);
+  });
+});
+
+describe('matchOrder', () => {
+  const ch = (id: string, kind: string) => ({
+    id,
+    entity_key: id,
+    kind,
+    old: null,
+    new: null,
+    at: '2026-11-01T00:00:00Z',
+    source: null,
+  });
+  it('keeps the first forward change first even behind many new_advisory changes', () => {
+    const changes = [
+      ch('first', 'kev_added'),
+      ...Array.from({ length: 600 }, (_, i) => ch(`n${i}`, 'new_advisory')),
+    ];
+    const order = matchOrder(changes, changes.length);
+    expect(order[0]?.id).toBe('first');
+    expect(order[1]?.id).toBe('n0');
+  });
+  it('puts new_advisory first, forward before late, when the first change is itself leading', () => {
+    const changes = [ch('a', 'kev_added'), ch('b', 'new_advisory'), ch('late', 'new_advisory')];
+    expect(matchOrder(changes, 2).map((c) => c.id)).toEqual(['a', 'b', 'late']);
+  });
+  it('has no forced leader when there are no forward rows', () => {
+    const changes = [ch('a', 'kev_added'), ch('b', 'new_advisory')];
+    expect(matchOrder(changes, 0).map((c) => c.id)).toEqual(['b', 'a']);
   });
 });
