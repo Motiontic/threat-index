@@ -266,7 +266,13 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
   let written = 0;
   if (records.length > 0) {
     const linked = await deps.link(records, linkDeps(env, deps));
-    deps.log('linked', { sourceId: source.id, runId: msg.runId, step: msg.step, docs: linked.docs.length });
+    deps.log('linked', {
+      sourceId: source.id,
+      runId: msg.runId,
+      step: msg.step,
+      docs: linked.docs.length,
+      newAdvisories: linked.newAdvisories ?? 0,
+    });
     if (linked.rows.length > 0) {
       const databases = databasesFromEnv(env as unknown as Record<string, unknown>);
       for (const part of splitRows(linked.rows)) {

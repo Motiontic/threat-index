@@ -35,6 +35,9 @@ import type { Job, JobContext, JobDeps } from '../types.ts';
 const BATCH = 5000;
 const ROW_TABLES: readonly string[] = ['vulns', 'advisories', 'signals'];
 const PACKAGE_TABLES: ReadonlySet<string> = new Set(['affected', 'package_advisories']);
+/** A record's package rows, and its `new_advisory` change: both are dropped together. */
+const isPackageRow = (r: InboxRow): boolean =>
+  PACKAGE_TABLES.has(r.table) || (r.table === 'changes' && r.row.kind === 'new_advisory');
 /** An update (`big-file`) that would write more package meter units than this leaves them to the backfill. */
 export const UPDATE_PACKAGE_WRITE_CAP = 200_000;
 
@@ -288,17 +291,17 @@ export async function runLoad(
     const result = await link(batch, deps);
     merge(result.rows);
     for (const r of result.rows) {
-      if (PACKAGE_TABLES.has(r.table)) {
+      if (isPackageRow(r)) {
         if (!keepPackages || packageOver) {
           packageDropped++;
           continue;
         }
-        packageCost += ROW_COST[r.table as keyof typeof ROW_COST];
+        packageCost += ROW_COST[r.table as keyof typeof ROW_COST] ?? 0;
         if (packageCost > UPDATE_PACKAGE_WRITE_CAP) {
           packageOver = true;
           let at = 0;
           for (const kept of rows) {
-            if (PACKAGE_TABLES.has(kept.table)) packageDropped++;
+            if (isPackageRow(kept)) packageDropped++;
             else rows[at++] = kept;
           }
           rows.length = at;
