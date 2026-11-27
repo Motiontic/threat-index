@@ -1864,3 +1864,20 @@ input.switch:checked:active::after {
     transition-duration: 0.01ms !important;
   }
 }
+
+.prose-page {
+  max-width: 46rem;
+}
+
+.prose-page h2 {
+  margin-top: 2rem;
+}
+
+/* Owner decisions still open: visible on staging and locally; production refuses the page. */
+.owner-placeholder {
+  background: transparent;
+  color: inherit;
+  font-weight: 600;
+  outline: 2px solid var(--warn);
+  outline-offset: 1px;
+}

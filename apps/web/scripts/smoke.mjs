@@ -36,6 +36,11 @@ const NVD = 'This product uses the NVD API but is not endorsed or certified by t
 const failures = [];
 const fail = (where, what) => failures.push(`${where}: ${what}`);
 
+// The built config is production: /privacy answers 503 until every [[OWNER: …]] decision is filled in.
+const PRIVACY_UNFINISHED = readFileSync(join(WEB_DIR, 'app', 'lib', 'privacy-content.ts'), 'utf8').includes(
+  '[[OWNER:',
+);
+
 const PAGES = [
   ['/', 'MTI: Motiontic Threat Index'],
   ['/search', 'Everything'],
@@ -54,6 +59,7 @@ const PAGES = [
   ['/search?type=breach&q=example', 'Results for “example”'],
   ['/sources', 'Sources'],
   ['/sources?status=on', 'Sources'],
+  ...(PRIVACY_UNFINISHED ? [] : [['/privacy', 'Privacy']]),
   ['/sign-in', 'Log in'],
   ['/sign-up', 'Sign up'],
 ];
@@ -194,7 +200,15 @@ async function runChecks() {
   for (const [path, title] of PAGES) {
     const { res, html } = await get(path);
     checkDocument(path, res, html, { title });
-    if (path === '/') stylesheet = html.match(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/)?.[1];
+    if (path === '/') {
+      stylesheet = html.match(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/)?.[1];
+      if (!html.includes('href="/privacy"')) fail(path, 'footer has no /privacy link');
+    }
+  }
+  if (PRIVACY_UNFINISHED) {
+    const { res } = await get('/privacy');
+    if (res.status !== 503)
+      fail('/privacy', `status ${res.status}, wanted 503 while [[OWNER: decisions remain`);
   }
 
   {
