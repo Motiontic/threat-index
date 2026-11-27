@@ -100,6 +100,34 @@ describe('definitions', () => {
   });
 });
 
+describe('tasks', () => {
+  it('the watch tools never become tasks, even when the client declares the Tasks extension', async () => {
+    const WITH_TASKS = {
+      [CLIENT_CAPABILITIES_META_KEY]: { extensions: { 'io.modelcontextprotocol/tasks': {} } },
+    };
+    for (const [tool, args] of [
+      ['mti_watch_add', { ecosystem: 'npm', name: 'left-pad' }],
+      ['mti_watch_remove', { ecosystem: 'npm', name: 'left-pad' }],
+      ['mti_watch_list', {}],
+    ] as const) {
+      const r = await call(
+        tool,
+        args as Record<string, unknown>,
+        api(ME_ON, (_req, seen) =>
+          seen.method === 'GET'
+            ? ok({ items: [], limit: 200 })
+            : seen.method === 'DELETE'
+              ? ok({ removed: true })
+              : ok({ created: true }),
+        ),
+        { meta: WITH_TASKS },
+      );
+      expect([tool, r.result?.resultType, r.result?.taskId]).toEqual([tool, 'complete', undefined]);
+      expect(r.result?.structuredContent ?? r.result?.content).toBeDefined();
+    }
+  });
+});
+
 describe('mti_watch_add', () => {
   it('adds a package by ecosystem and name: encoded path, empty body, one PUT', async () => {
     const r = await call(

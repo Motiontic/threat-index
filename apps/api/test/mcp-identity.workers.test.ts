@@ -275,9 +275,7 @@ describe('block list', () => {
 
 describe('stubs', () => {
   it('answer 501 for a signed-in caller and 401 for an anonymous one', async () => {
-    const stubs: [string, string][] = [
-      ['GET', '/v1/me/changes'],
-    ];
+    const stubs: [string, string][] = [['GET', '/v1/me/changes']];
     for (const [method, path] of stubs) {
       const anon = await fetchApp(new Request(`https://ti-api.internal${path}`, { method }));
       expect(anon.status, `anon ${method} ${path}`).toBe(401);
