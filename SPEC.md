@@ -38,10 +38,10 @@ are rows it has already matched, and the 15:00 run logged `changes: 1000` for 50
 3. **Structure.** `collect` reads one page from a given cursor. `runNotify` loops over pages. Planning, rendering and
    sending (steps 3–5) still run once, after the last page, as today. Watchlist notices still go first.
 4. **D1 budget.** Measure D1 calls per page in a test, with entry watches, package watches and saved searches all
-   present. Then set `MAX_PAGES_PER_RUN` to the largest value, at least 8, that keeps one whole run under 500 D1
-   calls: all pages, plus planning, up to `MAX_EMAILS_PER_RUN` sends, notices and the digest-hour prune. Count each
-   `batch()` as one call and each statement inside it as well. Put the measured numbers and the chosen value in
-   PROOF.md.
+   present. Count them the way Cloudflare does (round 2 decision 1): each `first()`, `all()` or `run()` is one call,
+   and each `batch()` is one call however many statements it holds. Set `MAX_PAGES_PER_RUN` to 8. Show in a test
+   that one whole run stays under 500 D1 calls: all 8 pages, plus planning, `MAX_EMAILS_PER_RUN` sends, notices and
+   the digest-hour prune. Put the measured numbers in PROOF.md, with the D1 calls per page and per send.
 5. **Say when it's behind.** When a run stops with forward rows still unread (page or time budget), log
    `{"event":"notify.behind","pages":N,"read":R,"lagHours":H}`. `lagHours` is runAt minus the cursor's `at`, in
    hours, with one decimal place. Add `pages` to the existing `notify.run` log. Logs never contain user IDs, email
@@ -79,3 +79,16 @@ are rows it has already matched, and the 15:00 run logged `changes: 1000` for 50
 2. One run reads up to `MAX_PAGES_PER_RUN` × 500 forward changes and saves the cursor after every page.
 3. `notify.behind` is logged whenever a run stops with rows still unread.
 4. D1 calls per run are measured and stay under 500.
+
+## Round 2 decisions
+
+1. **Count D1 calls the way Cloudflare does.** On Workers Paid, Cloudflare allows 1,000 D1 queries per Worker
+   invocation, and "a `db.batch()` call counts as a single query against it, not one query per statement" (D1
+   limits page, Batch limits section). Round 1 counted each statement in a batch as well, which made the 500
+   ceiling impossible even before this change. Count each `batch()` as one call. The 500 ceiling stays, as half of
+   Cloudflare's limit.
+2. **`MAX_PAGES_PER_RUN` is 8.** If the corrected count of a whole run with 8 pages still goes over 500, stop and
+   report the numbers. Don't lower the page count on your own.
+3. **Keep the round 1 work.** The page loop, the per-page cursor save, the late read on page 1 only, `notify.behind`
+   and the time budget are already in the worktree (uncommitted). Keep them, fix the count test, then run the
+   existing notify tests, `pnpm build` and the lockfile check.
