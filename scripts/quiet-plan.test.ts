@@ -75,8 +75,8 @@ describe('planQuiet: one fixture row per kind and reason', () => {
   it('first-load rows: until the first completed run, all for a never-completed source, none without runs', () => {
     const boundaries = firstLoadBoundaries(
       [
-        { source_id: 'epss', status: 'ok', finished_at: '2026-11-25T12:30:00Z', error: null },
-        { source_id: 'epss', status: 'ok', finished_at: '2026-11-26T12:30:00Z', error: null },
+        { source_id: 'nuclei', status: 'ok', finished_at: '2026-11-25T12:30:00Z', error: null },
+        { source_id: 'nuclei', status: 'ok', finished_at: '2026-11-26T12:30:00Z', error: null },
         { source_id: 'hibp', status: 'failed', finished_at: '2026-11-25T01:00:00Z', error: 'x' },
         {
           source_id: 'debian',
@@ -87,19 +87,19 @@ describe('planQuiet: one fixture row per kind and reason', () => {
       ],
       [{ source_id: 'msrc', kind: 'first-load', status: 'complete', finished_at: '2026-11-25T13:00:00Z' }],
     );
-    expect(boundaries.get('epss')).toEqual({ until: '2026-11-25T12:30:00Z' });
+    expect(boundaries.get('nuclei')).toEqual({ until: '2026-11-25T12:30:00Z' });
     expect(boundaries.get('hibp')).toEqual({ all: true });
     expect(boundaries.get('debian')).toEqual({ all: true }); // only a step-limit run
     expect(boundaries.get('msrc')).toEqual({ until: '2026-11-25T13:00:00Z' });
     expect(boundaries.has('cisa-vulnrichment')).toBe(false);
 
     const rows = [
-      row('e1', 'epss_band', 'epss'), // at 12:00, before the run ended
-      row('e2', 'epss_band', 'epss', { at: '2026-11-25T13:00:00Z' }), // after it: alerts
+      row('e1', 'public_exploit', 'nuclei'), // at 12:00, before the run ended
+      row('e2', 'public_exploit', 'nuclei', { at: '2026-11-25T13:00:00Z' }), // after it: alerts
       row('h1', 'breach_notice', 'hibp', { new: 'hibp:1' }),
       row('m1', 'fix_released', 'msrc'),
       row('v1', 'newly_exploited', 'cisa-vulnrichment', { new: '2026-11-24' }),
-      row('o1', 'newly_exploited', 'epss', { new: '2015-01-01' }), // old wins over first_load
+      row('o1', 'newly_exploited', 'nuclei', { new: '2015-01-01' }), // old wins over first_load
     ];
     const u = byId(planQuiet(rows, maps({ boundaries })).updates);
     expect(u.e1).toMatchObject({ quiet: 'first_load' });
@@ -108,6 +108,30 @@ describe('planQuiet: one fixture row per kind and reason', () => {
     expect(u.m1).toMatchObject({ quiet: 'first_load' });
     expect(u.v1).toEqual({ id: 'v1', event_at: '2026-11-24', quiet: null });
     expect(u.o1).toMatchObject({ quiet: 'old' });
+  });
+
+  it('never marks epss_band first_load, and ignores skipped runs', () => {
+    const boundaries = firstLoadBoundaries(
+      [
+        // epss runs only hand off to the epss-diff job, so none completes a pass
+        { source_id: 'epss', status: 'heavy', finished_at: '2026-11-25T00:00:05Z', error: null },
+        // a source read from another source's records: only skipped runs
+        {
+          source_id: 'cisa-vulnrichment',
+          status: 'skipped',
+          finished_at: '2026-11-25T00:00:00Z',
+          error: 'x',
+        },
+      ],
+      [{ source_id: 'epss', kind: 'epss-diff', status: 'complete', finished_at: '2026-11-25T00:10:00Z' }],
+    );
+    expect(boundaries.get('epss')).toEqual({ all: true });
+    expect(boundaries.has('cisa-vulnrichment')).toBe(false);
+    const rows = [
+      row('p1', 'epss_band', 'epss', { new: '0.2' }),
+      row('c1', 'cvss_change', 'cisa-vulnrichment'),
+    ];
+    expect(planQuiet(rows, maps({ boundaries })).updates).toEqual([]);
   });
 
   it('never touches a row that is already quiet, and never plans `held`', () => {
