@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Change } from '../src/collect';
+import { collect } from '../src/collect';
 import { runNotify } from '../src/consume';
+import { matchAndQueue } from '../src/match';
 import {
   captureLogs,
   E,
@@ -13,6 +16,7 @@ import {
   seedChange,
   seedEvent,
   seedPkgWatch,
+  seedSearch,
   seedUser,
   seedVuln,
   seedWatch,
@@ -110,7 +114,7 @@ describe('package watch matching', () => {
     expect(await queueOf('u1')).toEqual([{ change_id: 'k1', via: 'pkg:Debian/openssl' }]);
   });
 
-  it('uses at most 15 D1 queries to match, however many changes there are', async () => {
+  it('matches one watched package among 450 changes', async () => {
     await seedUser('u1', { instant: 0, digest: 'daily' });
     await seedPkgWatch('u1', 'PyPI', 'langchain');
     await seedAffected('PyPI', 'langchain', 'osv', 'X', 'CVE-2026-0000', '1');
@@ -236,7 +240,7 @@ describe('watchlist change notices', () => {
     expect(mail?.to).toEqual(['u1@example.com']);
     expect(mail?.subject).toBe('Your MTI watchlist was changed');
     expect(mail?.text).toContain(
-      'Added to your watchlist: PyPI/langchain · app (self-reported): agent.example[.]test',
+      'Added to your watchlist: PyPI/langchain · app (self-reported): agent[.]example[.]test',
     );
     expect(mail?.text).toContain('Removed from your watchlist: CVE-2026-1');
     expect(mail?.text).toContain('Email digest turned on');
@@ -367,49 +371,211 @@ describe('one user cannot clog the queue', () => {
   });
 });
 
-describe('matching budget', () => {
-  it('holds the cursor after the last change whose matching finished, and matches the rest next run', async () => {
+describe('queue window by class', () => {
+  it('the per-user window and the "and N more" cut keep watch rows first, then packages, then searches, newest first', async () => {
     await seedUser('u1', { instant: 0, digest: 'daily' });
-    await seedPkgWatch('u1', 'PyPI', 'langchain');
-    // 500 new_advisory changes need 12 record lookups; the budget allows 11 (45 records each).
-    await E.DB_SIGNALS.batch(
+    const mk = (id: string, via: string, at: string) => [
+      E.DB_SIGNALS.prepare(
+        "INSERT INTO changes (id, entity_key, kind, at) VALUES (?1, ?2, 'public_exploit', ?3)",
+      ).bind(id, `CVE-2026-${id}`, T('01:00')),
+      E.DB_USERS.prepare(
+        'INSERT INTO alert_queue (user_id, change_id, created_at, via) VALUES (?1, ?2, ?3, ?4)',
+      ).bind('u1', id, at, via),
+    ];
+    // 5 old entry-watch rows, 5 old package rows, then 60 newer saved-search rows
+    const sig: D1PreparedStatement[] = [];
+    const usr: D1PreparedStatement[] = [];
+    const add = (id: string, via: string, at: string) => {
+      const [a, b] = mk(id, via, at) as [D1PreparedStatement, D1PreparedStatement];
+      sig.push(a);
+      usr.push(b);
+    };
+    for (let i = 0; i < 5; i++) add(`w${i}`, 'watch', `2026-11-23T00:0${i}:00.000Z`);
+    for (let i = 0; i < 5; i++) add(`p${i}`, 'pkg:npm/x', `2026-11-23T00:1${i}:00.000Z`);
+    for (let i = 0; i < 60; i++)
+      add(
+        `s${String(i).padStart(2, '0')}`,
+        'search:x',
+        `2026-11-23T02:${String(i).padStart(2, '0')}:00.000Z`,
+      );
+    await E.DB_SIGNALS.batch(sig);
+    await E.DB_USERS.batch(usr);
+    const f = fakeFetch();
+    await runNotify(withKey(), MON_3, f.deps);
+    expect(f.sent).toHaveLength(1);
+    const text = f.sent[0]?.body.text ?? '';
+    expect(text.match(/^- /gm)).toHaveLength(50);
+    expect(text).toContain('and 20 more updates on your watchlist');
+    // every watch and package row is in the email: 10 of 50 shown, so 40 searches follow
+    expect(new Set(text.match(/CVE-2026-(w|p)\d/g))).toHaveProperty('size', 10);
+    expect(await queueOf('u1')).toEqual([]);
+    expect(
+      (await rows<{ n: number }>("SELECT COUNT(*) AS n FROM alerts_sent WHERE user_id = 'u1'"))[0]?.n,
+    ).toBe(70);
+  });
+});
+
+const cursorRow = async () =>
+  JSON.parse(
+    (await rows<{ value: string }>("SELECT value FROM notify_state WHERE name = 'cursor'"))[0]?.value ?? '{}',
+  );
+
+describe('package matching', () => {
+  it('uses two D1 reads for the packages, however many changes there are, and one change touching 500 watched packages queues them all', async () => {
+    await E.DB_USERS.batch(
       Array.from({ length: 500 }, (_, i) =>
-        E.DB_SIGNALS.prepare(
-          "INSERT INTO changes (id, entity_key, kind, new, at, source) VALUES (?1, ?2, 'new_advisory', ?3, ?4, 'osv')",
-        ).bind(`a${String(i).padStart(4, '0')}`, `CVE-2026-${i}`, `osv:R${i}`, T('07:00')),
+        E.DB_USERS.prepare(
+          `INSERT INTO users (id, email, created_at, alert_instant, digest, digest_weekday) VALUES (?1, ?2, '2026-01-01T00:00:00.000Z', 0, 'daily', 1)`,
+        ).bind(`w${i}`, `w${i}@example.com`),
       ),
     );
-    const cursor = async () =>
-      JSON.parse(
-        (await rows<{ value: string }>("SELECT value FROM notify_state WHERE name = 'cursor'"))[0]?.value ??
-          '{}',
-      ).id;
+    await E.DB_USERS.batch(
+      Array.from({ length: 500 }, (_, i) =>
+        E.DB_USERS.prepare(
+          "INSERT INTO watch_packages (user_id, ecosystem, name, created_at, alerts_on) VALUES (?1, 'npm', ?2, '2026-01-01T00:00:00.000Z', 1)",
+        ).bind(`w${i}`, `pkg-${i}`),
+      ),
+    );
+    await E.DB_ADVISORIES.batch(
+      Array.from({ length: 500 }, (_, i) =>
+        E.DB_ADVISORIES.prepare(
+          "INSERT INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES ('npm', ?1, 'osv', 'BIG', 0, 'CVE-2026-5000', 'SEMVER')",
+        ).bind(`pkg-${i}`),
+      ),
+    );
+    await seedChange('big1', 'CVE-2026-5000', 'public_exploit', T('07:00'));
+    const stmts = [];
+    for (let i = 0; i < 449; i++)
+      stmts.push(
+        E.DB_SIGNALS.prepare(
+          "INSERT INTO changes (id, entity_key, kind, at, source) VALUES (?1, ?2, 'public_exploit', ?3, 'osv')",
+        ).bind(`m${i}`, `CVE-2026-${String(i).padStart(4, '0')}`, T('07:01')),
+      );
+    await E.DB_SIGNALS.batch(stmts);
     await runNotify(withKey(), MON_9, fakeFetch().deps);
-    expect(logs.lines.some((l) => l.includes('notify.package_match_truncated'))).toBe(true);
-    expect(await cursor()).toBe('a0494');
-    // The record of the last (unmatched) change affects the watched package: it is matched on the next run.
-    await seedAffected('PyPI', 'langchain', 'osv', 'R499', 'CVE-2026-499', '1.0');
-    await runNotify(withKey(), new Date('2026-11-23T12:00:00.000Z'), fakeFetch().deps);
-    expect(await cursor()).toBe('a0499');
-    expect(await queueOf('u1')).toEqual([{ change_id: 'a0499', via: 'pkg:PyPI/langchain' }]);
+    const queued = await rows<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM alert_queue WHERE change_id = 'big1' AND via LIKE 'pkg:npm/pkg-%'",
+    );
+    expect(queued[0]?.n).toBe(500);
+    expect(logs.lines.some((l) => l.includes('notify.package_match_truncated'))).toBe(false);
   });
 
-  it('matches in change order: when users cannot all be read, the earliest changes win, not the lowest package names', async () => {
+  it('holds the cursor after the last change whose matching finished: the matched set is a prefix, and the rest is matched next run', async () => {
     await seedUser('u1', { instant: 0, digest: 'daily' });
-    // 140 watched packages, each hit by its own change; z-packages come first in change order
-    const n = 140;
-    const names = Array.from({ length: n }, (_, i) => `pkg-${String(n - i).padStart(3, '0')}`);
-    for (const [i, name] of names.entries()) {
-      await seedPkgWatch('u1', 'PyPI', name);
-      await seedAffected('PyPI', name, 'osv', `R${i}`, `CVE-2026-${i}`, '1.0');
-      await seedChange(`k${String(i).padStart(3, '0')}`, `CVE-2026-${i}`, 'public_exploit', T('07:00'));
+    for (let i = 0; i < 5; i++) {
+      await seedPkgWatch('u1', 'PyPI', `pkg-${i}`);
+      await seedAffected('PyPI', `pkg-${i}`, 'osv', `R${i}`, `CVE-2026-${i}`, '1.0');
+      await seedChange(`k${i}`, `CVE-2026-${i}`, 'public_exploit', T(`07:0${i}`));
     }
+    const got = await collect(E, MON_9);
+    await matchAndQueue(E, got.changes, got.cursor, MON_9, {
+      forwardCount: got.forwardCount,
+      start: got.start,
+      lateFull: got.lateFull,
+      pairBytes: 45, // room for the first two changes
+    });
+    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['k0', 'k1']);
+    expect((await cursorRow()).id).toBe('k1');
+    expect(logs.lines.some((l) => l.includes('notify.package_match_truncated'))).toBe(true);
+    expect(logs.lines.join('\n')).not.toContain('pkg-');
     await runNotify(withKey(), MON_9, fakeFetch().deps);
-    const queued = (await queueOf('u1')).map((r) => r.change_id);
-    expect(queued).toHaveLength(135); // 3 user queries of 45 packages
-    expect(queued).toContain('k000');
-    expect(queued).not.toContain('k139');
-    expect(logs.lines.some((l) => l.includes('notify.cursor_held'))).toBe(true);
+    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['k0', 'k1', 'k2', 'k3', 'k4']);
+    expect((await cursorRow()).id).toBe('k4');
+  });
+
+  it('a late row survives a busy run: its bound is kept with the cursor, past the 6-hour window', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    const ats = { f: T('08:30'), l1: T('07:00'), l2: T('07:01'), l3: T('07:02') };
+    for (const [i, [id, at]] of Object.entries(ats).entries()) {
+      await seedPkgWatch('u1', 'PyPI', `pkg-${i}`);
+      await seedAffected('PyPI', `pkg-${i}`, 'osv', `R${i}`, `CVE-2026-${i}`, '1.0');
+      await seedChange(id, `CVE-2026-${i}`, 'public_exploit', at);
+    }
+    await E.DB_USERS.prepare("INSERT INTO notify_state (name, value, updated_at) VALUES ('cursor', ?1, ?2)")
+      .bind(JSON.stringify({ at: T('08:00'), id: 'z', since: T('01:00') }), T('08:00'))
+      .run();
+    const got = await collect(E, MON_9);
+    expect(got.changes.map((c) => c.id)).toEqual(['f', 'l1', 'l2', 'l3']);
+    await matchAndQueue(E, got.changes, got.cursor, MON_9, {
+      forwardCount: got.forwardCount,
+      start: got.start,
+      lateFull: got.lateFull,
+      pairBytes: 45, // the forward change and one late row
+    });
+    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['f', 'l1']);
+    expect((await cursorRow()).late).toEqual({ at: ats.l2, id: 'l2' });
+    // Hours pass and the cursor moves far ahead: the waiting rows are still read.
+    await E.DB_USERS.prepare(
+      "UPDATE notify_state SET value = json_set(value, '$.at', ?1) WHERE name = 'cursor'",
+    )
+      .bind(T('20:00'))
+      .run();
+    await runNotify(withKey(), MON_9, fakeFetch().deps);
+    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['f', 'l1', 'l2', 'l3']);
+    expect((await cursorRow()).late).toBeUndefined();
+  });
+});
+
+describe('queue cap by class', () => {
+  const change = (id: string, key: string): Change => ({
+    id,
+    entity_key: key,
+    kind: 'public_exploit',
+    old: null,
+    new: null,
+    at: T('07:00'),
+    source: 'osv',
+  });
+  const fill = (user: string, n: number, via: string, tag: string) =>
+    E.DB_USERS.batch(
+      Array.from({ length: n }, (_, i) =>
+        E.DB_USERS.prepare(
+          'INSERT INTO alert_queue (user_id, change_id, created_at, via) VALUES (?1, ?2, ?3, ?4)',
+        ).bind(
+          user,
+          `${tag}${String(i).padStart(3, '0')}`,
+          `2026-11-23T0${1 + Math.floor(i / 60)}:${String(i % 60).padStart(2, '0')}:00.000Z`,
+          via,
+        ),
+      ),
+    );
+  const queue = async (cid: string) => (await queueOf('u1')).filter((r) => r.change_id === cid).length;
+
+  it('a new watch row evicts the oldest saved-search row, never a watch row', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    await seedWatch('u1', 'CVE-2026-1');
+    await fill('u1', 150, 'watch', 'w');
+    await fill('u1', 50, 'search:x', 's');
+    await matchAndQueue(E, [change('new1', 'CVE-2026-1')], { at: T('06:00'), id: '' }, MON_9);
+    const q = await queueOf('u1');
+    expect(q).toHaveLength(200);
+    expect(await queue('new1')).toBe(1);
+    expect(q.filter((r) => r.via === 'watch')).toHaveLength(151);
+    expect(q.map((r) => r.change_id)).not.toContain('s000'); // the oldest search row went
+    expect(q.map((r) => r.change_id)).toContain('s049');
+  });
+
+  it('with 200 watch rows the oldest watch row goes', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    await seedWatch('u1', 'CVE-2026-1');
+    await fill('u1', 200, 'watch', 'w');
+    await matchAndQueue(E, [change('new1', 'CVE-2026-1')], { at: T('06:00'), id: '' }, MON_9);
+    const ids = (await queueOf('u1')).map((r) => r.change_id);
+    expect(ids).toHaveLength(200);
+    expect(ids).toContain('new1');
+    expect(ids).not.toContain('w000');
+    expect(ids).toContain('w001');
+  });
+
+  it('a new saved-search row at the cap is dropped, and watch rows are untouched', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    await seedSearch('u1', 'x', 'exploit', {});
+    await seedVuln('CVE-2026-1', 'An exploit');
+    await fill('u1', 200, 'watch', 'w');
+    await matchAndQueue(E, [change('new1', 'CVE-2026-1')], { at: T('06:00'), id: '' }, MON_9);
+    const ids = (await queueOf('u1')).map((r) => r.change_id);
+    expect(ids).toHaveLength(200);
+    expect(ids).not.toContain('new1');
   });
 });
 
@@ -463,5 +629,40 @@ describe('notice budget', () => {
     expect(f.sent).toHaveLength(20 + 0); // the day's 20 are used
     await run('2026-11-24T12:00:00.000Z');
     expect(f.sent).toHaveLength(23); // u00, u01 and `twice` (its day count starts over)
+  });
+});
+
+describe('notice priority', () => {
+  it('a removal notice goes ahead of 30 other pending notices', async () => {
+    for (let i = 0; i < 30; i++) {
+      const id = `a${String(i).padStart(2, '0')}`;
+      await seedUser(id, { instant: 0, digest: 'off' });
+      await seedEvent(id, `e${i}`, `2026-11-23T05:${String(i).padStart(2, '0')}:00.000Z`, 'add', 'pkg:npm/x');
+    }
+    await seedUser('zz', { instant: 0, digest: 'off' });
+    await seedEvent('zz', 'rm', '2026-11-23T08:00:00.000Z', 'remove', 'pkg:npm/x'); // the newest of all
+    const f = fakeFetch();
+    await runNotify(withKey(), MON_9, f.deps);
+    expect(f.sent).toHaveLength(20);
+    expect(f.sent[0]?.body.to[0]).toBe('zz@example.com');
+  });
+
+  it('a user with fewer notices in the last 24 hours goes before one with more', async () => {
+    await seedUser('busy', { instant: 0, digest: 'off' });
+    await seedEvent(
+      'busy',
+      'b0',
+      '2026-11-22T20:00:00.000Z',
+      'add',
+      'pkg:npm/x',
+      null,
+      '2026-11-22T21:00:00.000Z',
+    );
+    await seedEvent('busy', 'b1', '2026-11-23T05:00:00.000Z', 'add', 'pkg:npm/x');
+    await seedUser('quiet', { instant: 0, digest: 'off' });
+    await seedEvent('quiet', 'q1', '2026-11-23T06:00:00.000Z', 'add', 'pkg:npm/x');
+    const f = fakeFetch();
+    await runNotify(withKey(), MON_9, f.deps);
+    expect(f.sent.map((s) => s.body.to[0])).toEqual(['quiet@example.com', 'busy@example.com']);
   });
 });

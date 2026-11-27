@@ -104,7 +104,7 @@ async function dryRun(api: FakeApi) {
   const { ctx } = fakeCtx(api);
   await backfill(job({ id: J(0), kind: 'affected-backfill' }), ctx, deps(), limits(12));
 }
-async function writeRun(api: FakeApi, n: number, cap = 12, extra: object = {}) {
+async function writeRun(api: FakeApi, n: number, cap = 14, extra: object = {}) {
   const { ctx, logs } = fakeCtx(api);
   await backfill(job({ id: J(n), kind: 'affected-backfill' }), ctx, deps(extra), limits(cap));
   return logs;
@@ -140,11 +140,11 @@ describe('affected-backfill', () => {
       parseFailures: 0,
       packageRecords: 5,
       rows: 10,
-      writes: 25,
+      writes: 30,
     });
-    expect(g?.byEcosystem).toEqual({ npm: { rows: 5, writes: 15 } });
+    expect(g?.byEcosystem).toEqual({ npm: { rows: 5, writes: 20 } });
     expect(g?.byRangeType).toEqual({ SEMVER: 0, ECOSYSTEM: 5, EXACT: 0 });
-    expect(counts.total).toEqual({ rows: 10, writes: 25, days: 3 });
+    expect(counts.total).toEqual({ rows: 10, writes: 30, days: 3 });
     expect(counts.dailyWriteCap).toBe(12);
     expect(state(api).countedBy).toBe(J(0));
     expect(state(api).sources[SRC]?.after).toBeNull();
@@ -161,9 +161,9 @@ describe('affected-backfill', () => {
       after: 'GHSA-aaaa-bbbb-0002',
       done: false,
       records: 2,
-      writes: 10,
+      writes: 12,
     });
-    expect(st.writesToday).toBe(10);
+    expect(st.writesToday).toBe(12);
     const rows1 = chunkRows(api, J(1), 0);
     expect(rows1.map((r) => r.table)).toEqual([
       'affected',
@@ -175,7 +175,7 @@ describe('affected-backfill', () => {
     // Same day: only what is left of the cap (2 units): nothing fits.
     await writeRun(api, 2);
     st = state(api);
-    expect(st.writesToday).toBe(10);
+    expect(st.writesToday).toBe(12);
     expect(st.sources[SRC]?.after).toBe('GHSA-aaaa-bbbb-0002');
     expect(manifest(api, J(2)).chunks).toEqual([]);
 
@@ -184,7 +184,7 @@ describe('affected-backfill', () => {
     await writeRun(api, 3);
     st = state(api);
     expect(st.sources[SRC]).toMatchObject({ after: 'GHSA-aaaa-bbbb-0004', done: false });
-    expect(st.writesToday).toBe(10);
+    expect(st.writesToday).toBe(12);
     const rows3 = chunkRows(api, J(3), 0);
     const g3 = rows3.find((r) => r.table === 'affected' && r.row.source_id === 'GHSA-aaaa-bbbb-0003');
     expect(g3?.row.fixed).toBe('3.3.3');

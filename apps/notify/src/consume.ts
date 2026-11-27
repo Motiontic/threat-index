@@ -55,7 +55,7 @@ async function loadQueue(env: Env): Promise<{ rows: QueueRow[]; backlog: Map<str
               u.email, u.alert_instant, u.digest, u.digest_weekday, u.email_suppressed, u.deleted_at
        FROM (
          SELECT q.user_id, q.change_id, q.via, q.created_at,
-                ROW_NUMBER() OVER (PARTITION BY q.user_id ORDER BY q.created_at DESC, q.change_id DESC) AS rn,
+                ROW_NUMBER() OVER (PARTITION BY q.user_id ORDER BY CASE WHEN q.via = 'watch' THEN 0 WHEN q.via LIKE 'pkg:%' THEN 1 ELSE 2 END, q.created_at DESC, q.change_id DESC) AS rn,
                 COUNT(*) OVER (PARTITION BY q.user_id) AS total,
                 SUM(CASE WHEN q.via = 'watch' OR q.via LIKE 'pkg:%' THEN 1 ELSE 0 END) OVER (PARTITION BY q.user_id) AS total_watch
          FROM alert_queue q
@@ -213,8 +213,9 @@ async function noticesToday(env: Env, runAt: Date): Promise<number> {
 
 /**
  * "Your MTI watchlist was changed": one email per user with pending MCP changes whose oldest is at least 10
- * minutes old, at most one an hour and two a day per user, and NOTICE_DAILY_CAP a day in all. Users are picked by
- * their oldest pending event, driven from the `watch_events_pending` index. Events not mailed carry over to the
+ * minutes old, at most one an hour and two a day per user, and NOTICE_DAILY_CAP a day in all. Users are picked:
+ * pending removals and digest changes first, then fewest notices in 24 hours, then oldest pending event (driven
+ * from the `watch_events_pending` index). Events not mailed carry over to the
  * next run. Sent even when alerts are off, to the account's own address only.
  */
 async function sendWatchNotices(env: Env, d: Deps, runAt: Date): Promise<void> {
@@ -223,31 +224,51 @@ async function sendWatchNotices(env: Env, d: Deps, runAt: Date): Promise<void> {
   const oldEnough = new Date(runAt.getTime() - NOTICE_MIN_AGE_MS).toISOString();
   const gap = new Date(runAt.getTime() - NOTICE_GAP_MS).toISOString();
   const dayStart = `${utcDay(runAt)}T00:00:00.000Z`;
+  const cut24 = new Date(runAt.getTime() - DAY_MS).toISOString();
+  // Driven from the pending events (index `watch_events_pending`). A pending removal or digest change goes
+  // first, then the users with the fewest notices in the last 24 hours, then the oldest pending event.
   const users = (
     await env.DB_USERS.prepare(
       `SELECT p.user_id AS id, u.email FROM (
-         SELECT user_id, MIN(at) AS oldest FROM watch_events WHERE notified_at IS NULL
+         SELECT user_id, MIN(at) AS oldest, MAX(action IN ('remove', 'digest_on')) AS urgent
+         FROM watch_events WHERE notified_at IS NULL
          GROUP BY user_id HAVING MIN(at) <= ?1
        ) p JOIN users u ON u.id = p.user_id
        WHERE u.email_suppressed = 0 AND u.deleted_at IS NULL AND u.email != ''
          AND NOT EXISTS (SELECT 1 FROM watch_events e WHERE e.user_id = p.user_id AND e.notified_at > ?2)
          AND (SELECT COUNT(DISTINCT e.notified_at) FROM watch_events e WHERE e.user_id = p.user_id AND e.notified_at >= ?3) < ?4
-       ORDER BY p.oldest, p.user_id LIMIT ?5`,
+       ORDER BY p.urgent DESC,
+         (SELECT COUNT(DISTINCT e.notified_at) FROM watch_events e WHERE e.user_id = p.user_id AND e.notified_at >= ?6),
+         p.oldest, p.user_id LIMIT ?5`,
     )
-      .bind(oldEnough, gap, dayStart, NOTICE_PER_USER_PER_DAY, room)
+      .bind(oldEnough, gap, dayStart, NOTICE_PER_USER_PER_DAY, room, cut24)
       .all<{ id: string; email: string }>()
   ).results;
   if (users.length === 0) return;
+  // One read for every chosen user's events (at most MAX_NOTICE_EVENTS each, oldest first).
+  const eventRows = (
+    await env.DB_USERS.prepare(
+      `SELECT user_id, id, at, action, target, client_host FROM (
+         SELECT user_id, id, at, action, target, client_host,
+                ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY at, id) AS rn
+         FROM watch_events WHERE notified_at IS NULL AND user_id IN (SELECT value FROM json_each(?1))
+       ) WHERE rn <= ?2 ORDER BY user_id, at, id`,
+    )
+      .bind(JSON.stringify(users.map((u) => u.id)), MAX_NOTICE_EVENTS)
+      .all<{
+        user_id: string;
+        id: string;
+        at: string;
+        action: string;
+        target: string;
+        client_host: string | null;
+      }>()
+  ).results;
+  const eventsOf = new Map<string, typeof eventRows>();
+  for (const e of eventRows) eventsOf.set(e.user_id, [...(eventsOf.get(e.user_id) ?? []), e]);
   const out: Outgoing[] = [];
   for (const u of users) {
-    const events = (
-      await env.DB_USERS.prepare(
-        `SELECT id, at, action, target, client_host FROM watch_events
-         WHERE user_id = ?1 AND notified_at IS NULL ORDER BY at, id LIMIT ?2`,
-      )
-        .bind(u.id, MAX_NOTICE_EVENTS)
-        .all<{ id: string; at: string; action: string; target: string; client_host: string | null }>()
-    ).results;
+    const events = eventsOf.get(u.id) ?? [];
     if (events.length === 0) continue;
     const ids = events.map((e) => e.id);
     out.push({
@@ -312,6 +333,7 @@ export async function runNotify(env: Env, runAt: Date, deps: Partial<Deps> = {})
   const queued = await matchAndQueue(env, got.changes, got.cursor, runAt, {
     forwardCount: got.forwardCount,
     start: got.start,
+    lateFull: got.lateFull,
   });
 
   // 3. Plan.

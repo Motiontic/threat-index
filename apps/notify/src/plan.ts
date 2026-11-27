@@ -46,8 +46,8 @@ export interface PlannedEmail {
   hidden: PlanItem[];
   /** Queued rows this email covers but does not list: "and N more updates on your watchlist". */
   more: number;
-  /** When `more > 0`: the queued rows older than this (created_at, change_id) are covered too, and deleted with it. */
-  coversBefore?: { createdAt: string; changeId: string; watchOnly: boolean };
+  /** When `more > 0`: queued rows ranking after this one (class, then newest first) are covered too, and deleted with it. */
+  coversBefore?: { cls: number; createdAt: string; changeId: string; watchOnly: boolean };
 }
 
 export interface Plan {
@@ -69,6 +69,14 @@ const classOf = (via: string): number => (via === 'watch' ? 0 : via.startsWith('
 const emailOrder = (a: PlanItem, b: PlanItem) =>
   classOf(a.via) - classOf(b.via) ||
   (a.change.at === b.change.at ? (a.changeId < b.changeId ? 1 : -1) : a.change.at < b.change.at ? 1 : -1);
+
+/** True when `a` ranks after `b` in queue order: class first, then newest first. */
+const rankAfter = (a: QueueRow, b: QueueRow): boolean =>
+  classOf(a.via) !== classOf(b.via)
+    ? classOf(a.via) > classOf(b.via)
+    : a.createdAt !== b.createdAt
+      ? a.createdAt < b.createdAt
+      : a.changeId < b.changeId;
 
 /** An entry watch or a package watch: the rows instant alerts are for. */
 export const isWatchVia = (via: string): boolean => via === 'watch' || via.startsWith('pkg:');
@@ -101,9 +109,8 @@ export function plan(
     byUser.set(r.userId, u);
     u.loaded++;
     if (classOf(r.via) < 2) u.loadedWatch++;
-    // The oldest loaded row: queued rows older than it were not read.
-    if (r.createdAt < u.edge.createdAt || (r.createdAt === u.edge.createdAt && r.changeId < u.edge.changeId))
-      u.edge = r;
+    // The last loaded row in class order: queued rows ranking after it were not read.
+    if (rankAfter(r, u.edge)) u.edge = r;
     if (r.suppressed !== 0 || r.deleted !== null || r.email === '') {
       drop.push({ userId: r.userId, changeId: r.changeId });
       continue;
@@ -149,7 +156,14 @@ export function plan(
       hidden: sorted.slice(MAX_ITEMS_PER_EMAIL),
       more,
       ...(unread > 0
-        ? { coversBefore: { createdAt: u.edge.createdAt, changeId: u.edge.changeId, watchOnly } }
+        ? {
+            coversBefore: {
+              cls: classOf(u.edge.via),
+              createdAt: u.edge.createdAt,
+              changeId: u.edge.changeId,
+              watchOnly,
+            },
+          }
         : {}),
     });
   }

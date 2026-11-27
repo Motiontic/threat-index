@@ -145,6 +145,7 @@ describe('plan: package rows and the per-user instant cap', () => {
     expect(p.emails[0]?.items).toHaveLength(50);
     expect(p.emails[0]?.more).toBe(70); // an instant email counts the watch rows it did not read
     expect(p.emails[0]?.coversBefore).toEqual({
+      cls: 0,
       createdAt: '2026-11-23T01:00:00.000Z',
       changeId: 'c0',
       watchOnly: true,

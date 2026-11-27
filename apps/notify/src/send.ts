@@ -83,18 +83,22 @@ async function finish(
     // Queued rows the email counted ("and N more") but did not list: older than the oldest row it read.
     ...(coversBefore
       ? (() => {
-          const where = `user_id = ?1 AND (created_at < ?2 OR (created_at = ?2 AND change_id < ?3))${
+          // Rows ranking after the edge: a later class, or the same class and older (class, then newest first).
+          const cls = "CASE WHEN via = 'watch' THEN 0 WHEN via LIKE 'pkg:%' THEN 1 ELSE 2 END";
+          const where = `user_id = ?1 AND (${cls} > ?5 OR (${cls} = ?5 AND (created_at < ?2 OR (created_at = ?2 AND change_id < ?3))))${
             coversBefore.watchOnly ? " AND (via = 'watch' OR via LIKE 'pkg:%')" : ''
           }`;
           return [
             env.DB_USERS.prepare(
               `INSERT OR IGNORE INTO alerts_sent (user_id, change_id, sent_at)
                SELECT user_id, change_id, ?4 FROM alert_queue WHERE ${where}`,
-            ).bind(userId, coversBefore.createdAt, coversBefore.changeId, now),
+            ).bind(userId, coversBefore.createdAt, coversBefore.changeId, now, coversBefore.cls),
             env.DB_USERS.prepare(`DELETE FROM alert_queue WHERE ${where}`).bind(
               userId,
               coversBefore.createdAt,
               coversBefore.changeId,
+              null,
+              coversBefore.cls,
             ),
           ];
         })()

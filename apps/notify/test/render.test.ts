@@ -172,7 +172,7 @@ describe('text that can look like something else', () => {
       clientHost: 'evil.example.com',
     });
     expect(l).toContain('a package (see your watchlist)');
-    expect(l).toContain('app (self-reported): evil.example[.]com');
+    expect(l).toContain('app (self-reported): evil[.]example[.]com');
   });
   it('"and N more updates on your watchlist" ends the email and counts into the subject', () => {
     const r = renderEmail({

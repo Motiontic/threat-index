@@ -46,7 +46,7 @@ it('the loader allows both package tables', () => {
   expect(INBOX_TABLES.has('package_advisories')).toBe(true);
 });
 
-it('a package chunk passes readChunk and planWrites, at 3 and 2 units per row', async () => {
+it('a package chunk passes readChunk and planWrites, at 4 and 2 units per row', async () => {
   const stream = new Blob([rows.map((r) => JSON.stringify(r)).join('\n')])
     .stream()
     .pipeThrough(new CompressionStream('gzip'));
@@ -59,5 +59,5 @@ it('a package chunk passes readChunk and planWrites, at 3 and 2 units per row', 
   const plan = planWrites(read);
   expect(plan.rows).toBe(4);
   expect(plan.cost).toBe(3 * ROW_COST.affected + ROW_COST.package_advisories);
-  expect(plan.cost).toBe(11);
+  expect(plan.cost).toBe(14);
 });

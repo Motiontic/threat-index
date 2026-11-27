@@ -26,9 +26,8 @@ export const MAX_QUEUED_PER_USER = 200;
 export const MAX_QUEUE_READ_PER_USER = 50;
 /** Instant emails per user per UTC day; beyond it items wait for the digest. */
 export const MAX_INSTANT_PER_USER_PER_DAY = 5;
-/** Package matching never uses more D1 queries than this in one run. */
-export const MAX_MATCH_QUERIES = 15;
-export const MAX_WATCHED_PACKAGES = 50_000;
+/** Size of the package list one run reads watchers for (one statement). Changes past it wait for the next run. */
+export const MAX_PAIR_BYTES = 400_000;
 /** A watchlist change is mailed once it is this old, at most once an hour per user, up to this many at a time. */
 export const NOTICE_MIN_AGE_MS = 10 * 60_000;
 export const NOTICE_GAP_MS = HOUR_MS;
