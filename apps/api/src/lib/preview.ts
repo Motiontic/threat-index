@@ -24,6 +24,7 @@ export interface VulnRow {
   cvss: number | null;
   cvss_version: string | null;
   cvss_source: string | null;
+  cvss_from?: string | null;
   cwe: string | null;
   kev_added: string | null;
   ransomware: number;
@@ -88,6 +89,8 @@ export function toPreview(
   if (opt(row.modified) !== undefined) out.modified = row.modified as string;
   if (opt(row.cvss) !== undefined) out.cvss = row.cvss as number;
   if (opt(row.cvss_version) !== undefined) out.cvssVersion = row.cvss_version as string;
+  if (opt(row.cvss) !== undefined && opt(row.cvss_source) !== undefined)
+    out.cvssSource = row.cvss_source as string;
   if (opt(row.kev_added) !== undefined) out.kevAdded = row.kev_added as string;
   if (opt(row.epss) !== undefined) out.epss = row.epss as number;
   return out;

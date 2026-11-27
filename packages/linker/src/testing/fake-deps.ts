@@ -146,6 +146,7 @@ export function vulnRow(key: string, over: Row = {}): Row {
     cvss: null,
     cvss_version: null,
     cvss_source: null,
+    cvss_from: null,
     cwe: '[]',
     kev_added: null,
     kev_due: null,

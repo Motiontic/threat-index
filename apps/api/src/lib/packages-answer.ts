@@ -3,6 +3,8 @@
  * `routes/entries.ts` applies: hidden sources are dropped before matching and appear nowhere; link-only
  * sources show id, source and URL only.
  */
+
+import { cvssCandidates, cvssShown } from '@ti/core/cvss';
 import type {
   CheckMatch,
   CheckResponse,
@@ -173,7 +175,8 @@ export function buildAnswer(input: BuildInput): { response: CheckResponse; stats
 
       const full = g.records.filter((r) => mode(r.source) === 'full');
       const firstRows = full.map((r) => r.rows[0] as AffectedRecordRow);
-      const cvssVisible = vuln && vuln.cvss !== null && visible(vuln.cvss_source) ? vuln.cvss : null;
+      // Shown only when every source that may have delivered the score is visible (an empty list hides it).
+      const cvssVisible = vuln && vuln.cvss !== null && cvssShown(vuln, visible) ? vuln.cvss : null;
       const nums = firstRows.map((r) => numericSeverity(r.severity)).filter((n): n is number => n !== null);
       const rankCvss = cvssVisible ?? (nums.length ? Math.max(...nums) : null);
       const labels = firstRows
@@ -211,7 +214,7 @@ export function buildAnswer(input: BuildInput): { response: CheckResponse; stats
         cmp,
       );
       for (const s of sources) usedSources.add(s);
-      if (vuln?.cvss_source && cvssVisible !== null) usedSources.add(vuln.cvss_source);
+      if (vuln && cvssVisible !== null) for (const id of cvssCandidates(vuln)) usedSources.add(id);
 
       const match: CheckMatch = {
         id: key,

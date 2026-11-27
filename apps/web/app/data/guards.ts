@@ -102,6 +102,7 @@ export function guardEntryPreview(value: unknown): EntryPreview {
   put(out, 'modified', optStr(o, 'modified', 'entry'));
   put(out, 'cvss', optNum(o, 'cvss', 'entry'));
   put(out, 'cvssVersion', optStr(o, 'cvssVersion', 'entry'));
+  put(out, 'cvssSource', optStr(o, 'cvssSource', 'entry'));
   put(out, 'kevAdded', optStr(o, 'kevAdded', 'entry'));
   put(out, 'epss', optNum(o, 'epss', 'entry'));
   return out;

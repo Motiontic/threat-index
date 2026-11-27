@@ -120,6 +120,7 @@ const PREVIEW_KEYS = [
   'aliases',
   'credits',
   'cvss',
+  'cvssSource',
   'cvssVersion',
   'epss',
   'exploited',
@@ -257,6 +258,42 @@ describe('4. licence', () => {
     await E.SETTINGS.delete('source:nvd');
     expect(vis.entry).not.toHaveProperty('cvss');
     expect(vis.entry).not.toHaveProperty('cvssVersion');
+  });
+});
+
+describe('5a. cvss visibility follows the delivering source', () => {
+  it('shows a CISA-ADP score from the visible cve-list record, with attribution and no scorer credit', async () => {
+    await vuln('CVE-2021-44228', { cvss: 10, cvss_source: 'CISA-ADP', sources: '["cve-list"]' });
+    const { entry } = await json(await get('/v1/entries/CVE-2021-44228'));
+    expect(entry.cvss).toBe(10);
+    expect(entry.cvssSource).toBe('CISA-ADP');
+    expect(entry.credits.map((c: any) => c.sourceId)).not.toContain('CISA-ADP');
+  });
+  it('an explicit cvss_from wins; a hidden delivering source hides score and scorer name', async () => {
+    await vuln('CVE-2030-0060', { cvss: 9.1, cvss_source: 'GitHub_M', sources: '["cve-list"]' });
+    await E.DB_VULNS.prepare("UPDATE vulns SET cvss_from = 'cve-list' WHERE key = 'CVE-2030-0060'").run();
+    await E.SETTINGS.put('source:cve-list', '{"display":"hidden"}');
+    const hid = await json(await get('/v1/entries/CVE-2030-0060', { user: true }));
+    await E.SETTINGS.delete('source:cve-list');
+    expect(hid.entry).not.toHaveProperty('cvss');
+    expect(hid.entry).not.toHaveProperty('cvssSource');
+    const vis = await json(await get('/v1/entries/CVE-2030-0060', { user: true }));
+    expect(vis.entry.cvss).toBe(9.1);
+  });
+  it('an old row that cve-list or enisa may have delivered shows only while both are visible', async () => {
+    await vuln('CVE-2030-0061', { cvss: 8.8, cvss_source: 'GitHub_M', sources: '["cve-list","enisa"]' });
+    const shown = await json(await get('/v1/entries/CVE-2030-0061', { user: true }));
+    expect(shown.entry.cvss).toBe(8.8);
+    await E.SETTINGS.put('source:enisa', '{"display":"hidden"}');
+    const res = await json(await get('/v1/entries/CVE-2030-0061', { user: true }));
+    await E.SETTINGS.delete('source:enisa');
+    expect(res.entry).not.toHaveProperty('cvss');
+    expect(res.entry).not.toHaveProperty('cvssSource');
+  });
+  it('an old row with a CNA scorer and no score-carrying source hides the score', async () => {
+    await vuln('CVE-2030-0062', { cvss: 7.5, cvss_source: 'GitHub_M', sources: '["cisa-kev"]' });
+    const res = await json(await get('/v1/entries/CVE-2030-0062', { user: true }));
+    expect(res.entry).not.toHaveProperty('cvss');
   });
 });
 

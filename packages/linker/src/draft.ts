@@ -16,6 +16,7 @@ const VULN_TYPES: Record<string, ColType> = {
   cvss: 'real',
   cvss_version: 'text',
   cvss_source: 'text',
+  cvss_from: 'text',
   cwe: 'text',
   kev_added: 'text',
   kev_due: 'text',
@@ -75,6 +76,7 @@ export function emptyVulnRow(key: string): Row {
     cvss: null,
     cvss_version: null,
     cvss_source: null,
+    cvss_from: null,
     cwe: '[]',
     kev_added: null,
     kev_due: null,
@@ -171,6 +173,7 @@ export function mergeVulnRows(hub: Row, other: Row): Row {
     'cvss',
     'cvss_version',
     'cvss_source',
+    'cvss_from',
   ]);
   for (const c of COLUMNS.vulns) {
     if (!special.has(c) && lacks(key, c, out[c]) && !lacks(key, c, other[c])) out[c] = other[c];
@@ -179,6 +182,7 @@ export function mergeVulnRows(hub: Row, other: Row): Row {
     out.cvss = other.cvss ?? null;
     out.cvss_version = other.cvss_version ?? null;
     out.cvss_source = other.cvss_source ?? null;
+    out.cvss_from = other.cvss_from ?? null;
   }
   out.kev_added = earliest(out.kev_added, other.kev_added);
   for (const f of ['ransomware', 'exploit_public', 'ai_related']) {

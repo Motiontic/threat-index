@@ -55,6 +55,7 @@ export const COLUMNS: Record<LinkTable, readonly string[]> = {
     'hot',
     'sources',
     'doc_key',
+    'cvss_from',
   ],
   advisories: ['source', 'source_id', 'vuln_key', 'status', 'published', 'modified', 'url', 'licence'],
   signals: ['vuln_key', 'kind', 'source', 'ref', 'first_seen', 'evidence_date', 'url'],

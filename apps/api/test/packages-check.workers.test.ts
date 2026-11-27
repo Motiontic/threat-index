@@ -138,6 +138,7 @@ async function addVuln(
     title: string;
     cvss: number;
     cvss_source: string;
+    sources: string;
     epss: number;
     kev_added: string;
     ransomware: number;
@@ -145,8 +146,8 @@ async function addVuln(
   }> = {},
 ) {
   await E.DB_VULNS.prepare(
-    `INSERT INTO vulns (key, kind, title, modified, cvss, cvss_source, epss, kev_added, ransomware, exploit_public)
-     VALUES (?1, ?2, ?3, '2026-01-01T00:00:00Z', ?4, ?5, ?6, ?7, ?8, ?9)`,
+    `INSERT INTO vulns (key, kind, title, modified, cvss, cvss_source, epss, kev_added, ransomware, exploit_public, sources)
+     VALUES (?1, ?2, ?3, '2026-01-01T00:00:00Z', ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
   )
     .bind(
       key,
@@ -158,6 +159,7 @@ async function addVuln(
       v.kev_added ?? null,
       v.ransomware ?? 0,
       v.exploit_public ?? 0,
+      v.sources ?? '[]',
     )
     .run();
 }
@@ -344,7 +346,7 @@ describe('ranking bands', () => {
     fx('EPSS 0.10', async (name, key) => (await rec(name, key), addVuln(key, { epss: 0.1 })), 'fix_soon'),
     fx(
       'EPSS 0.099 with CVSS 7.0',
-      async (name, key) => (await rec(name, key), addVuln(key, { epss: 0.099, cvss: 7 })),
+      async (name, key) => (await rec(name, key), addVuln(key, { epss: 0.099, cvss: 7, cvss_source: 'nvd' })),
       'plan',
     ),
     fx(
@@ -825,6 +827,25 @@ describe('licence hiding', () => {
     expect(hid.results[0].matches[0].cvss).toBeNull();
     expect(hid.results[0].priority).toBe('note');
     expect(hid.credits.map((c: any) => c.sourceId)).not.toContain('nvd');
+  });
+  it('a CVSS 9.8 scored by a CNA name ranks plan when the cve-list record delivered it', async () => {
+    await addRecord({ id: 'GHSA-d', key: 'CVE-2099-5010', name: 'cna' });
+    await addVuln('CVE-2099-5010', { cvss: 9.8, cvss_source: 'GitHub_M', sources: '["cve-list"]' });
+    const r = (await checkOne(pk('cna'))).results[0];
+    expect(r.matches[0].cvss).toBe(9.8);
+    expect(r.priority).toBe('plan');
+    await setDisplay('cve-list', 'hidden');
+    const hid = (await checkOne(pk('cna'))).results[0];
+    expect(hid.matches[0].cvss).toBeNull();
+    expect(hid.priority).toBe('note');
+  });
+  it('a CNA-named score on an old row that cve-list or enisa may have delivered needs both visible', async () => {
+    await addRecord({ id: 'GHSA-e', key: 'CVE-2099-5011', name: 'eu' });
+    await addVuln('CVE-2099-5011', { cvss: 9.8, cvss_source: 'GitHub_M', sources: '["cve-list","enisa"]' });
+    expect((await checkOne(pk('eu'))).results[0].matches[0].cvss).toBe(9.8);
+    await setDisplay('enisa', 'hidden');
+    const r = (await checkOne(pk('eu'))).results[0];
+    expect(r.matches[0].cvss).toBeNull();
   });
   it('link mode shows id, URL and source only', async () => {
     await addRecord({
