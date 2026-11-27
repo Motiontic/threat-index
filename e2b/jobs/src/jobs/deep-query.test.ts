@@ -57,6 +57,12 @@ describe('buildSql', () => {
     expect(sql).toContain(`'from': 'VARCHAR', 'to': 'VARCHAR'}`);
     expect(sql).toContain(`substr(json_extract_string(record, '$.firstSeen'), 1, 10) BETWEEN`);
   });
+  it('turns off extension autoinstall and autoload before anything is read', () => {
+    const sql = buildSql('kev-additions', ['p-0.ndjson.gz'], '/d');
+    expect(
+      sql.startsWith('SET autoinstall_known_extensions=false;\nSET autoload_known_extensions=false;'),
+    ).toBe(true);
+  });
   it('names only generated files', () => {
     const sql = buildSql('kev-additions', ['p-0.ndjson.gz'], "/tmp/a'b");
     expect(sql).toContain("/tmp/a''b/p-0.ndjson.gz");

@@ -363,7 +363,7 @@ describe('GET /v1/deep-query/:id', () => {
 
 describe('DELETE /v1/deep-query/:id', () => {
   const owner = () => deepOwner(SECRET as string, USER);
-  it('cancels the owner\'s running job, kills its sandbox, and GET then shows failed/cancelled', async () => {
+  it("cancels the owner's running job, kills its sandbox, and GET then shows failed/cancelled", async () => {
     const id = ULID(2);
     await seed(id, await owner(), 'running', minutesAgo(1), 'sbx-live');
     await putRequest(id);
