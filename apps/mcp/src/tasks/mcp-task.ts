@@ -173,7 +173,7 @@ export class McpTask extends DurableObject<Env> {
         request_id TEXT NOT NULL, job_id TEXT, progress TEXT NOT NULL, outcome TEXT, meta TEXT,
         faults INTEGER NOT NULL DEFAULT 0, cancel_job INTEGER NOT NULL DEFAULT 0)`);
       sql.exec(
-        'CREATE TABLE IF NOT EXISTS input (task_id TEXT NOT NULL, chunk INTEGER NOT NULL, start INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (task_id, chunk))',
+        'CREATE TABLE IF NOT EXISTS input (task_id TEXT NOT NULL, chunk INTEGER NOT NULL, start INTEGER NOT NULL, data TEXT NOT NULL, orig TEXT NOT NULL, PRIMARY KEY (task_id, chunk))',
       );
       sql.exec(`CREATE TABLE IF NOT EXISTS item (
         task_id TEXT NOT NULL, seq INTEGER NOT NULL, krank INTEGER NOT NULL, prank INTEGER NOT NULL,
@@ -349,24 +349,26 @@ export class McpTask extends DurableObject<Env> {
     await this.enter();
     const seen = new Set<string>();
     const unique: unknown[] = [];
-    for (const p of packages) {
+    const origin: number[] = []; // each kept package's position in the caller's list
+    for (const [pos, p] of packages.entries()) {
       const r = rec(p);
       const key =
         typeof r.purl === 'string' ? `p|${r.purl}` : JSON.stringify([r.ecosystem, r.name, r.version]);
       if (seen.has(key)) continue;
       seen.add(key);
       unique.push(p);
+      origin.push(pos);
     }
     const merged = packages.length - unique.length;
     const note = merged > 0 ? `${merged} duplicate packages were merged.` : null;
     const enc = new TextEncoder();
-    const chunks: { start: number; data: string }[] = [];
+    const chunks: { start: number; data: string; orig: number[] }[] = [];
     let cur: string[] = [];
     let bytes = 0;
     let start = 0;
     const flush = () => {
       if (cur.length === 0) return;
-      chunks.push({ start, data: `[${cur.join(',')}]` });
+      chunks.push({ start, data: `[${cur.join(',')}]`, orig: origin.slice(start, start + cur.length) });
       start += cur.length;
       cur = [];
       bytes = 0;
@@ -391,11 +393,12 @@ export class McpTask extends DurableObject<Env> {
       }
       for (const [i, c] of chunks.entries())
         this.sql.exec(
-          'INSERT INTO input (task_id, chunk, start, data) VALUES (?, ?, ?, ?)',
+          'INSERT INTO input (task_id, chunk, start, data, orig) VALUES (?, ?, ?, ?, ?)',
           res.id,
           i,
           c.start,
           c.data,
+          JSON.stringify(c.orig),
         );
       out = { ok: true, task: this.view(this.row(res.id) as Row) };
     });
@@ -767,9 +770,10 @@ export class McpTask extends DurableObject<Env> {
         return;
       }
       const input = this.sql
-        .exec('SELECT start, data FROM input WHERE task_id = ? AND chunk = ?', r.id, p.next)
-        .one() as { start: number; data: string };
+        .exec('SELECT start, data, orig FROM input WHERE task_id = ? AND chunk = ?', r.id, p.next)
+        .one() as { start: number; data: string; orig: string };
       const packages = JSON.parse(input.data) as unknown[];
+      const orig = JSON.parse(input.orig) as number[];
 
       let res: Response | null = null;
       let timedOut = false;
@@ -794,13 +798,13 @@ export class McpTask extends DurableObject<Env> {
       if (res?.status === 200) {
         const read = await readJsonResult(res, CHECK_BODY_CAP);
         if (read.ok && read.value !== null && typeof read.value === 'object') {
-          if (this.saveChunk(after, p, input.start, packages, read.value)) chunks++;
+          if (this.saveChunk(after, p, input.start, packages, orig, read.value)) chunks++;
           if (this.row(r.id)?.status !== 'working') return;
           continue;
         }
         if (!read.ok && read.reason === 'too_large') {
           // Charged already, and the same answer would come back: never retried. The chunk is listed as not checked.
-          this.skipChunk(after, p, input.start, packages.length);
+          this.skipChunk(after, p, orig);
           chunks++;
           continue;
         }
@@ -862,7 +866,14 @@ export class McpTask extends DurableObject<Env> {
   }
 
   /** Writes one chunk's items and the new progress in one step, only if the task is still working. */
-  private saveChunk(r: Row, p: CheckProgress, base: number, packages: unknown[], body: unknown): boolean {
+  private saveChunk(
+    r: Row,
+    p: CheckProgress,
+    base: number,
+    packages: unknown[],
+    orig: number[],
+    body: unknown,
+  ): boolean {
     const f = formatCheck(body, packages, this.env);
     const chunk = p.next;
     const asOf =
@@ -897,7 +908,10 @@ export class McpTask extends DurableObject<Env> {
       for (const x of f.rejected)
         this.reject(
           next,
-          (e) => rows.push([2, 0, base + e.index, { index: base + e.index, reason: e.reason }]),
+          (e) => {
+            const at = orig[e.index] ?? base + e.index;
+            rows.push([2, 0, at, { index: at, reason: e.reason }]);
+          },
           x,
         );
       for (const row of rows)
@@ -920,7 +934,8 @@ export class McpTask extends DurableObject<Env> {
   }
 
   /** A chunk whose answer was over the byte cap: its packages are listed as not checked, and the task goes on. */
-  private skipChunk(r: Row, p: CheckProgress, base: number, n: number): void {
+  private skipChunk(r: Row, p: CheckProgress, orig: number[]): void {
+    const n = orig.length;
     const next: CheckProgress = {
       ...p,
       next: p.next + 1,
@@ -933,7 +948,7 @@ export class McpTask extends DurableObject<Env> {
       let seq = p.next * 100_000;
       const rows: { index: number; reason: string }[] = [];
       for (let i = 0; i < n; i++)
-        this.reject(next, (e) => rows.push(e), { index: base + i, reason: 'answer_too_large' });
+        this.reject(next, (e) => rows.push(e), { index: orig[i] as number, reason: 'answer_too_large' });
       next.items += rows.length;
       if (!this.setProgress(r.id, next, this.now())) return;
       for (const e of rows)

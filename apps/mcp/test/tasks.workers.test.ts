@@ -1223,6 +1223,28 @@ describe('long checks: storage and charges', () => {
     expect(done.result.structuredContent.notes).toContain('301 duplicate packages were merged.');
   });
 
+  it('reports rejected indexes in the caller’s list, not the merged one', async () => {
+    // Caller positions: 0..999 base, 1000..1004 duplicates of base[0..4], 1005 the package the API rejects.
+    const base = pk(1000);
+    const bad = { purl: 'pkg:npm/bad@1.0.0' };
+    const packages = [...base, ...base.slice(0, 5), bad];
+    await setApi(SUB, (_i, c) =>
+      ok(
+        emptyAnswer(c.body.packages.length, {
+          rejected: c.body.packages
+            .map((p: any, i: number) => (p.purl === bad.purl ? { index: i, reason: 'bad_version' } : null))
+            .filter(Boolean),
+        }),
+      ),
+    );
+    const { body } = await call(tokenA, 'tools/call', {
+      name: 'mti_check_packages',
+      arguments: { packages },
+    });
+    const done = await runToEnd(SUB, body.result.taskId);
+    expect(done.result.structuredContent.rejected).toEqual([{ index: 1005, reason: 'bad_version' }]);
+  });
+
   it('splits chunks by size as well as count: at most 900 KB a chunk', async () => {
     const big = Array.from({ length: 1001 }, (_, i) => ({ purl: `pkg:npm/${'€'.repeat(400)}${i}@1.0.0` }));
     await setApi(SUB, (_i, c) => ok(emptyAnswer(c.body.packages.length)));
