@@ -126,8 +126,8 @@ export function launcherFromEnv(env: Bindings): JobLauncher | null {
           timeoutMs,
           metadata,
           requestTimeoutMs: E2B_REQUEST_TIMEOUT_MS,
-          // The backfill reads and writes through the MTI API only; the job checks that nothing else answers.
-          ...(metadata.kind === 'affected-backfill'
+          // These jobs read and write through the MTI API only; the job checks that nothing else answers.
+          ...(metadata.kind === 'affected-backfill' || metadata.kind === 'deep-query'
             ? { network: { allowOut: [apiHost], denyOut: ({ allTraffic }) => [allTraffic] } }
             : {}),
         });
