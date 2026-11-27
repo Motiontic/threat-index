@@ -5,6 +5,7 @@ import { canIngest, displayMode } from '@ti/core/licence';
 import { readSourceSettings, unknownFieldsKey } from '@ti/core/settings';
 import type { CredentialName, Cursor, ParsedRecord, ParseResult } from '@ti/core/types';
 import { databasesFromEnv } from '@ti/db/write';
+import { countQuiet, firstLoadQuiet, holdOver } from '@ti/linker/age';
 import { MAX_ITEMS_PER_STEP, type PatternContext, type PatternResult } from '@ti/patterns/types';
 import { SOURCE_BY_ID, type SourceConfig } from '@ti/sources/registry';
 import { retryDelaySeconds } from './backoff';
@@ -121,12 +122,22 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
   const db = env.DB_CONTROL;
 
   // 2. Cursor and run row, in one round trip.
-  const [cursorRes, runRes] = await db.batch<Record<string, unknown>>([
+  // The third statement says whether the source has finished a pass before this run: its changes alert only then.
+  const [cursorRes, runRes, passRes] = await db.batch<Record<string, unknown>>([
     db.prepare('SELECT kind, value, etag FROM cursors WHERE source_id = ?1').bind(source.id),
-    db.prepare('SELECT status FROM runs WHERE id = ?1').bind(msg.runId),
+    db.prepare('SELECT status, alerts FROM runs WHERE id = ?1').bind(msg.runId),
+    db
+      .prepare(
+        `SELECT EXISTS (SELECT 1 FROM runs WHERE source_id = ?1 AND id != ?2 AND (status = 'unchanged'
+             OR (status = 'ok' AND (error IS NULL OR error NOT LIKE 'step limit reached%'))))
+           OR EXISTS (SELECT 1 FROM jobs WHERE source_id = ?1 AND status = 'complete'
+             AND kind IN ('first-load', 'big-file')) AS done`,
+      )
+      .bind(source.id, msg.runId),
   ]);
   const stored = (cursorRes?.results[0] as unknown as StoredCursor | undefined) ?? null;
-  const run = (runRes?.results[0] as { status: string } | undefined) ?? null;
+  const run = (runRes?.results[0] as { status: string; alerts: number } | undefined) ?? null;
+  const firstPass = !(passRes?.results[0] as { done: number } | undefined)?.done;
   if (run && run.status !== 'running') return { ack: true, status: 'duplicate' };
 
   // 3. KV override.
@@ -264,8 +275,16 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
 
   // 13.
   let written = 0;
+  let alerts = 0;
   if (records.length > 0) {
     const linked = await deps.link(records, linkDeps(env, deps));
+    // Quiet rows are stored like any other. Age is already set by the linker; a first pass adds `first_load`,
+    // and rows past the run's limit are held.
+    const changeRows = linked.rows.filter((r) => r.table === 'changes').map((r) => r.row);
+    if (firstPass) firstLoadQuiet(changeRows);
+    const hold = holdOver(changeRows, run?.alerts ?? 0);
+    alerts = hold.alerts;
+    logQuiet(source.id, msg, countQuiet(changeRows), hold.held);
     deps.log('linked', {
       sourceId: source.id,
       runId: msg.runId,
@@ -290,6 +309,7 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
     bytes,
     last,
     warning,
+    alerts,
   });
   if (!committed) {
     deps.log('step already committed by a twin', { sourceId: source.id, runId: msg.runId, step: msg.step });
@@ -320,6 +340,19 @@ async function execute(msg: JobMessage, env: Env, deps: StepDeps): Promise<StepO
     return { ack: true, status: 'failed' };
   }
   return { ack: true, status: 'ok' };
+}
+
+/** Counts only: no entity keys, user IDs or email addresses. One line per step that has any. */
+function logQuiet(
+  sourceId: string,
+  msg: JobMessage,
+  counts: { old: number; firstLoad: number; held: number },
+  held: number,
+): void {
+  const ids = { sourceId, runId: msg.runId };
+  if (held > 0) console.log(JSON.stringify({ event: 'changes.held', ...ids, held }));
+  if (counts.old + counts.firstLoad + counts.held > 0)
+    console.log(JSON.stringify({ event: 'changes.quiet', ...ids, step: msg.step, ...counts }));
 }
 
 /** Why a source with no pull config is skipped: say what the source is, not that something is missing. */
@@ -405,7 +438,14 @@ async function commitCursor(
   msg: JobMessage,
   next: Cursor | null,
   deps: StepDeps,
-  r: { found: number; written: number; bytes: number; last: boolean; warning: string | null },
+  r: {
+    found: number;
+    written: number;
+    bytes: number;
+    last: boolean;
+    warning: string | null;
+    alerts: number;
+  },
 ): Promise<boolean> {
   const db = env.DB_CONTROL;
   const at = deps.now().toISOString();
@@ -436,13 +476,23 @@ async function commitCursor(
           .bind(sourceId, next.kind, next.value, next.etag ?? null, at);
   const runStmt = db
     .prepare(
-      `UPDATE runs SET found = found + ?1, written = written + ?2, bytes = bytes + ?3,
+      `UPDATE runs SET found = found + ?1, written = written + ?2, bytes = bytes + ?3, alerts = alerts + ?9,
          status = CASE WHEN ?4 = 1 THEN 'ok' ELSE status END,
          finished_at = CASE WHEN ?4 = 1 THEN ?5 ELSE finished_at END,
          error = COALESCE(?6, CASE WHEN error LIKE 'parse failed%' THEN error END)
        WHERE id = ?7 AND status = 'running' AND (?8 = 0 OR changes() > 0)`,
     )
-    .bind(r.found, r.written, r.bytes, r.last ? 1 : 0, at, r.warning, msg.runId, cursorStmt ? 1 : 0);
+    .bind(
+      r.found,
+      r.written,
+      r.bytes,
+      r.last ? 1 : 0,
+      at,
+      r.warning,
+      msg.runId,
+      cursorStmt ? 1 : 0,
+      r.alerts,
+    );
   if (!cursorStmt) {
     // Nothing to commit: the stored cursor stays. The run is still recorded, once (it must be `running`).
     return ((await runStmt.run()).meta.changes ?? 0) > 0;
