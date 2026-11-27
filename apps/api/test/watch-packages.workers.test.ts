@@ -151,6 +151,20 @@ describe('package watches', () => {
     expect((await web('PUT', `${P}/Debian/curl`, A)).status).toBe(404);
   });
 
+  it('the known-package check is one seek on affected_by_name, never a range scan of the primary key', async () => {
+    const sql = `SELECT 1 AS x FROM affected WHERE name = ?2 AND (ecosystem = ?1 OR (ecosystem > ?1 || ':' AND ecosystem < ?1 || ';')) LIMIT 1`;
+    for (const eco of ['npm', 'Debian']) {
+      const plan = (await E.DB_ADVISORIES.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(eco, 'openssl').all<{
+        detail: string;
+      }>()).results.map((r) => r.detail);
+      const text = plan.join(' | ');
+      expect(text).toContain('affected_by_name');
+      expect(text).toMatch(/name\s*=\s*\?/);
+      expect(text).not.toMatch(/SCAN/);
+      expect(text).not.toContain('sqlite_autoindex_affected');
+    }
+  });
+
   it('refuses a bad ecosystem or name with 400 invalid_argument', async () => {
     for (const path of [
       `${P}/nope/x`,

@@ -66,7 +66,7 @@ route.put('/v1/me/watch/packages/:ecosystem/:name', requireUser, async (c) => {
     const label = `pkg:${ecosystem}/${name}`;
     // Only a package MTI has records for can be watched. An OS ecosystem (`Debian`) also matches `Debian:12`.
     const known = await c.env.DB_ADVISORIES.prepare(
-      `SELECT 1 AS x FROM affected WHERE name = ?2 AND (ecosystem = ?1 OR (ecosystem >= ?1 || ':' AND ecosystem < ?1 || ';')) LIMIT 1`,
+      `SELECT 1 AS x FROM affected WHERE name = ?2 AND (ecosystem = ?1 OR (ecosystem > ?1 || ':' AND ecosystem < ?1 || ';')) LIMIT 1`,
     )
       .bind(ecosystem, name)
       .first();

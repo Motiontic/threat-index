@@ -65,13 +65,11 @@ const SHOWN_VERSION = /^[A-Za-z0-9.+~:_-]{1,40}$/;
 export const UNSHOWN_NAME = 'a package (see your watchlist)';
 
 /**
- * Writes the last dot as `[.]` when 2 or more letters follow it (`verify-mti[.]com`), so a mail client does not
- * turn the value into a link. `always` does it whatever follows (client hosts).
+ * Writes every dot followed by a letter as `[.]` (`Go/verify-mti[.]com/reset[.]v2`), so a mail client does not
+ * turn the value into a link. `always` does it for every dot (client hosts).
  */
 export function defang(v: string, always = false): string {
-  const at = v.lastIndexOf('.');
-  if (at < 0) return v;
-  return always || /^[A-Za-z]{2,}/.test(v.slice(at + 1)) ? `${v.slice(0, at)}[.]${v.slice(at + 1)}` : v;
+  return v.replace(always ? /\./g : /\.(?=[A-Za-z])/g, '[.]');
 }
 
 /** A package name or entry ID as it may be shown: checked, then defanged. */

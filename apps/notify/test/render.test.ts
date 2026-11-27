@@ -132,14 +132,16 @@ describe('text that can look like something else', () => {
   it('clean strips format characters: bidi controls and zero-width', () => {
     expect(clean('a\u202eb\u200bc\u2066d\ufeffe')).toBe('abcde');
   });
-  it('defang writes the last dot as [.] when 2+ letters follow it', () => {
+  it('defang writes every dot followed by a letter as [.]; hosts every dot', () => {
     expect(defang('verify-mti.com')).toBe('verify-mti[.]com');
     expect(defang('1.2.3')).toBe('1.2.3');
     expect(defang('1.2.3rc')).toBe('1.2.3rc');
     expect(defang('left-pad.js')).toBe('left-pad[.]js');
     expect(defang('localhost', true)).toBe('localhost');
-    expect(defang('agent.example.test', true)).toBe('agent.example[.]test');
+    expect(defang('agent.example.test', true)).toBe('agent[.]example[.]test');
     expect(defang('a.b1', true)).toBe('a[.]b1');
+    expect(defang('Go/verify-mti.com/reset.v2')).toBe('Go/verify-mti[.]com/reset[.]v2');
+    expect(defang('mti.com.evil.io')).toBe('mti[.]com[.]evil[.]io');
   });
   it('shownName shows only the allowed characters, else a fixed phrase', () => {
     expect(shownName('PyPI/langchain')).toBe('PyPI/langchain');
