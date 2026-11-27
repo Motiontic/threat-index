@@ -4,7 +4,8 @@ import type { Env } from '../env';
 
 export const CALL_TIMEOUT_MS = 25_000;
 export const CHECK_BODY_CAP = 4 * 1024 * 1024;
-export const DEEP_BODY_CAP = 5 * 1024 * 1024;
+/** The deep-query job's own result cap (5 MiB) plus room for the rest of the API's answer. */
+export const DEEP_BODY_CAP = 5 * 1024 * 1024 + 64 * 1024;
 const SMALL_BODY_CAP = 4096;
 
 export type ApiFn = (
@@ -25,11 +26,13 @@ export const apiVia =
       signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
     });
 
-/** Reads a JSON body up to `cap` bytes. Null when it is over the cap or is not JSON. */
-export async function readJsonCapped(res: Response, cap: number): Promise<unknown | null> {
+export type Capped = { ok: true; value: unknown } | { ok: false; reason: 'too_large' | 'bad' };
+
+/** Reads a JSON body up to `cap` bytes, and says why when it cannot: over the cap, or not JSON. */
+export async function readJsonResult(res: Response, cap: number): Promise<Capped> {
   try {
     const reader = res.body?.getReader();
-    if (!reader) return null;
+    if (!reader) return { ok: false, reason: 'bad' };
     const chunks: Uint8Array[] = [];
     let total = 0;
     for (;;) {
@@ -38,7 +41,7 @@ export async function readJsonCapped(res: Response, cap: number): Promise<unknow
       total += value.length;
       if (total > cap) {
         await reader.cancel().catch(() => {});
-        return null;
+        return { ok: false, reason: 'too_large' };
       }
       chunks.push(value);
     }
@@ -48,10 +51,16 @@ export async function readJsonCapped(res: Response, cap: number): Promise<unknow
       buf.set(c, off);
       off += c.length;
     }
-    return JSON.parse(new TextDecoder().decode(buf));
+    return { ok: true, value: JSON.parse(new TextDecoder().decode(buf)) };
   } catch {
-    return null;
+    return { ok: false, reason: 'bad' };
   }
+}
+
+/** Reads a JSON body up to `cap` bytes. Null when it is over the cap or is not JSON. */
+export async function readJsonCapped(res: Response, cap: number): Promise<unknown | null> {
+  const r = await readJsonResult(res, cap);
+  return r.ok ? r.value : null;
 }
 
 /** A small error body's `error` field, and the body is released either way. */

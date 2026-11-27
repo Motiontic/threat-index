@@ -155,8 +155,7 @@ describe('tool definitions', () => {
 describe('instructions', () => {
   it('are under 4,096 characters and name every enabled tool', () => {
     expect(INSTRUCTIONS.length).toBeLessThan(4096);
-    // mti_deep_query's line is written by the skills change (instructions.ts is not touched here).
-    for (const t of enabledTools()) if (t.name !== 'mti_deep_query') expect(INSTRUCTIONS).toContain(t.name);
+    for (const t of enabledTools()) expect(INSTRUCTIONS).toContain(t.name);
   });
   it('pass the hidden-character, URL and HTML rules', () => {
     expect(hasBadText(INSTRUCTIONS.replace(/\n/g, ' '))).toBe(false);

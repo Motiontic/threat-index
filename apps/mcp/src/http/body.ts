@@ -4,7 +4,8 @@ export const MAX_HEADER_BYTES = 16_384;
 export const MAX_HEADER_VALUE_BYTES = 8_192;
 export const MAX_JSON_DEPTH = 32;
 export const MAX_CHECK_BODY_BYTES = 3_145_728;
-export const MAX_TOOL_INPUT_ELEMENTS = 80_100; // 20,000 packages × 4 plus the wrapper
+export const MAX_TOOL_INPUT_ELEMENTS = 4_100;
+export const MAX_CHECK_INPUT_ELEMENTS = 80_100; // 20,000 packages × 4 plus the wrapper
 
 const enc = new TextEncoder();
 
@@ -51,4 +52,20 @@ export function jsonDepthOk(text: string, max: number): boolean {
     } else if (ch === 0x7d || ch === 0x5d) depth--;
   }
   return true;
+}
+
+/** The SDK's own count of elements in a tool's arguments (array items and object keys, all levels), stopping past `max`. */
+export function elementCount(value: unknown, max: number): number {
+  let count = 0;
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== 'object') continue;
+    const kids = Array.isArray(node) ? node : Object.values(node);
+    for (const child of kids) {
+      if (++count > max) return count;
+      if (child !== null && typeof child === 'object') stack.push(child);
+    }
+  }
+  return count;
 }

@@ -14,7 +14,16 @@ import { checkConfig, MAX_RUN_MS } from './config';
 import { openCursor } from './cursor';
 import type { Env } from './env';
 import { interceptTask } from './ext/tasks';
-import { bodyLimitFor, bodyOverCap, headersTooLarge, jsonDepthOk, MAX_JSON_DEPTH } from './http/body';
+import {
+  bodyLimitFor,
+  bodyOverCap,
+  elementCount,
+  headersTooLarge,
+  jsonDepthOk,
+  MAX_CHECK_INPUT_ELEMENTS,
+  MAX_JSON_DEPTH,
+  MAX_TOOL_INPUT_ELEMENTS,
+} from './http/body';
 import { APP_CODES, rpcError } from './http/errors';
 import { normaliseResponse, type SeenInfo } from './http/normalise';
 import { allowedOrigins, checkOrigin, preflight } from './http/origin';
@@ -212,6 +221,16 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
   log.method = method;
   if (bodyOverCap(text, method === 'tools/call' && params.name === 'mti_check_packages'))
     return refuse(413, APP_CODES.body_too_large);
+  {
+    // The SDK's own limit is the large one, for the one tool that needs it; every other request keeps the small one.
+    const isCheck = method === 'tools/call' && params.name === 'mti_check_packages';
+    const counted = method === 'tools/call' ? params.arguments : params;
+    const cap = isCheck ? MAX_CHECK_INPUT_ELEMENTS : MAX_TOOL_INPUT_ELEMENTS;
+    if (elementCount(counted, cap) > cap) {
+      const id = typeof msg.id === 'string' || typeof msg.id === 'number' ? msg.id : null;
+      return send(rpcError(200, -32602, requestId, id, { field: 'input' }), 'rpc_error', { code: -32602 });
+    }
+  }
   if (method === 'tools/call') {
     log.tool = (TOOL_ORDER as readonly unknown[]).includes(params.name) ? (params.name as string) : 'other';
     const args =

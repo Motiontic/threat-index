@@ -17,6 +17,7 @@ import { TRUST_META } from '../trust';
 export const TASKS_EXTENSION = 'io.modelcontextprotocol/tasks';
 export const TASK_METHODS = new Set(['tasks/get', 'tasks/update', 'tasks/cancel']);
 const MAX_INLINE = 1000;
+const REVISION = '2026-07-28';
 
 /** The entry `server/discover` lists under `capabilities.extensions`. */
 export const capability = (): Record<string, Record<string, string>> => ({ [TASKS_EXTENSION]: {} });
@@ -79,22 +80,30 @@ function taskAnswer(t: TaskView): Record<string, unknown> {
   };
 }
 
-/** Whether this request is one the pipeline answers itself, and what kind. */
+/**
+ * Whether this request is one the pipeline answers itself, and what kind. A notification (no `id`) and anything
+ * that is not JSON-RPC 2.0 is never taken: the SDK path answers those as it always has.
+ */
 function classify(
   c: TaskRequest,
 ): { kind: 'tasks' } | { kind: 'tool'; name: ToolName; args: Record<string, unknown> } | null {
+  if (c.msg.jsonrpc !== '2.0') return null;
+  if (typeof c.msg.id !== 'string' && typeof c.msg.id !== 'number') return null;
   const method = c.msg.method;
   if (typeof method === 'string' && TASK_METHODS.has(method)) return { kind: 'tasks' };
   if (method !== 'tools/call') return null;
   const name = c.params.name;
   const args = obj(c.params.arguments) ?? {};
-  if (name === 'mti_deep_query' && typeof args.cursor !== 'string') return { kind: 'tool', name, args };
+  if (name === 'mti_deep_query' && typeof args.cursor !== 'string' && TOOLS[name]?.enabled)
+    return { kind: 'tool', name, args };
   if (
     name === 'mti_check_packages' &&
     c.era === 'modern' &&
+    obj(c.params._meta)?.[PROTOCOL_VERSION_META_KEY] === REVISION &&
     declaresTasks(c.params) &&
     Array.isArray(args.packages) &&
-    args.packages.length > MAX_INLINE
+    args.packages.length > MAX_INLINE &&
+    TOOLS[name]?.enabled
   )
     return { kind: 'tool', name, args };
   return null;
@@ -107,6 +116,8 @@ function headerMismatch(c: TaskRequest): boolean {
   const h = c.request.headers;
   if (h.get('mcp-protocol-version')?.trim() !== revision) return true;
   if (h.get('mcp-method')?.trim() !== c.msg.method) return true;
+  // A taskId that is not a string is answered -32602 by the handler, not refused here.
+  if (c.msg.method !== 'tools/call' && typeof c.params.taskId !== 'string') return false;
   const want = c.msg.method === 'tools/call' ? c.params.name : c.params.taskId;
   return !(typeof want === 'string' && c.mcpName.present && c.mcpName.value === want);
 }
@@ -120,11 +131,12 @@ function headerMismatch(c: TaskRequest): boolean {
 export async function interceptTask(c: TaskRequest): Promise<Intercepted | null> {
   const what = classify(c);
   if (!what) return null;
-  const id = typeof c.msg.id === 'string' || typeof c.msg.id === 'number' ? c.msg.id : null;
+  const id = c.msg.id as string | number;
   const rpc = (res: Response, code: number): Intercepted => ({ res, outcome: 'rpc_error', extra: { code } });
 
+  const current = c.era === 'modern' && obj(c.params._meta)?.[PROTOCOL_VERSION_META_KEY] === REVISION;
   if (c.era === 'modern' && headerMismatch(c)) return rpc(rpcError(400, -32020, c.requestId, id), -32020);
-  if (c.era !== 'modern' || !declaresTasks(c.params)) return rpc(missingCapability(c.requestId, id), -32021);
+  if (!current || !declaresTasks(c.params)) return rpc(missingCapability(c.requestId, id), -32021);
   if (what.kind === 'tool') return startTask(c, what.name, what.args, id);
   return handleTaskMethod(c, id);
 }
@@ -156,12 +168,15 @@ async function handleTaskMethod(c: TaskRequest, id: string | number | null): Pro
         base.resultType = 'complete';
         if (g.failed)
           return {
-            res: ok(id, { ...base, error: { code: -32603, message: 'Internal error' } }),
+            res: ok(id, {
+              ...base,
+              error: { code: -32603, message: 'Internal error', data: { requestId: g.requestId } },
+            }),
             outcome: 'ok',
             extra: {},
           };
         if (g.outcome?.kind === 'tool_error') {
-          const result = failureResult(c.requestId, {
+          const result = failureResult(g.requestId ?? c.requestId, {
             ok: false,
             code: g.outcome.code as ToolErrorCode,
             ...(g.outcome.retryAfter ? { retryAfter: g.outcome.retryAfter } : {}),
@@ -229,6 +244,9 @@ async function startTask(
   if (off !== null && off !== undefined) return fail({ ok: false, code: 'tool_off' });
   if (!validator.getValidator(def.inputSchema as never)(args).valid)
     return fail({ ok: false, code: 'invalid_argument', field: 'input' });
+  // Starting a deep query needs a template (a call with only a cursor never gets here). Checked before a slot is reserved.
+  if (name === 'mti_deep_query' && typeof args.template !== 'string')
+    return fail({ ok: false, code: 'invalid_argument', field: 'template' });
   const bad = findBadText(args);
   if (bad) return fail({ ok: false, code: 'invalid_argument', field: bad, problem: 'bad_characters' });
 

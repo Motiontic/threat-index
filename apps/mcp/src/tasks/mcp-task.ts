@@ -5,7 +5,7 @@ import type { McpIdentity } from '@ti/core/mcp-user';
 import type { Env } from '../env';
 import { CHECK_OUTPUT_SCHEMA, formatCheck, PRIORITIES } from '../tools/check-format';
 import { credits as formatCredits, rec } from '../tools/common';
-import { DEEP_OUTPUT_SCHEMA, deepRows } from '../tools/deep-format';
+import { DEEP_OUTPUT_SCHEMA, DEEP_TEMPLATES, type DeepTemplate, deepRows } from '../tools/deep-format';
 import { newTaskId } from './ids';
 import { fitPage, MAX_PAGE_ITEMS } from './pages';
 import {
@@ -15,6 +15,7 @@ import {
   DEEP_BODY_CAP,
   errorName,
   readJsonCapped,
+  readJsonResult,
   retryAfterSeconds,
 } from './upstream';
 
@@ -35,13 +36,18 @@ export const POLL_MS: Record<TaskKind, number> = { check: 10_000, deep_query: 20
 export const MAX_WORKING = 3;
 export const MAX_STORED = 20;
 export const CHUNK = 1000;
+/** ti-api's body cap is 1 MiB; a chunk stays under 900 KB serialised. */
+export const CHUNK_BYTES = 900 * 1024;
+const MAX_REJECTED = 1000;
 const ALARM_MAX_CHUNKS = 5;
 const ALARM_MAX_MS = 60_000;
 const DEEP_POLL_MS = 15_000;
 const MAX_TRIES = 3;
+const MAX_TIMEOUT_TRIES = 2;
 const MAX_FAULTS = 3;
 const MAX_DEEP_POLL_FAILS = 5;
 const MAX_CURSOR_OFFSET = 20_000;
+const TOOL_OF = { check: 'mti_check_packages', deep_query: 'mti_deep_query' } as const;
 const JOB_ID = /^[0-9A-Z]{26}$/;
 
 interface Row {
@@ -90,6 +96,8 @@ export interface GetResult {
   outcome?: ToolOutcome;
   failed?: boolean;
   page?: PageOut;
+  /** The task's own request ID (not the poll's), for the text of a failure. */
+  requestId?: string;
 }
 
 export interface Deps {
@@ -111,6 +119,11 @@ interface CheckProgress {
   notes: string[];
   chunks: number;
   polls: number;
+  /** Items stored so far. */
+  items: number;
+  rejectedKept: number;
+  rejectedExtra: number;
+  notChecked: number;
 }
 const emptyProgress = (): CheckProgress => ({
   next: 0,
@@ -124,11 +137,21 @@ const emptyProgress = (): CheckProgress => ({
   notes: [],
   chunks: 0,
   polls: 0,
+  items: 0,
+  rejectedKept: 0,
+  rejectedExtra: 0,
+  notChecked: 0,
 });
 
 const validator = new CfWorkerJsonSchemaValidator({ draft: '2020-12' });
-const checkValid = validator.getValidator(CHECK_OUTPUT_SCHEMA as never);
-const deepValid = validator.getValidator(DEEP_OUTPUT_SCHEMA as never);
+const props = (schema: unknown) => (schema as { properties: Record<string, { items: unknown }> }).properties;
+/** Each stored item is checked against the tool's own output schema when it is written. */
+const itemValid = {
+  results: validator.getValidator(props(CHECK_OUTPUT_SCHEMA).results?.items as never),
+  noRecord: validator.getValidator(props(CHECK_OUTPUT_SCHEMA).noRecord?.items as never),
+  rejected: validator.getValidator(props(CHECK_OUTPUT_SCHEMA).rejected?.items as never),
+  rows: validator.getValidator(props(DEEP_OUTPUT_SCHEMA).rows?.items as never),
+};
 
 /**
  * One Durable Object per user: all of that user's MCP Tasks, their stored input and their results. The work runs
@@ -150,12 +173,13 @@ export class McpTask extends DurableObject<Env> {
         request_id TEXT NOT NULL, job_id TEXT, progress TEXT NOT NULL, outcome TEXT, meta TEXT,
         faults INTEGER NOT NULL DEFAULT 0, cancel_job INTEGER NOT NULL DEFAULT 0)`);
       sql.exec(
-        'CREATE TABLE IF NOT EXISTS input (task_id TEXT NOT NULL, chunk INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (task_id, chunk))',
+        'CREATE TABLE IF NOT EXISTS input (task_id TEXT NOT NULL, chunk INTEGER NOT NULL, start INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (task_id, chunk))',
       );
       sql.exec(`CREATE TABLE IF NOT EXISTS item (
         task_id TEXT NOT NULL, seq INTEGER NOT NULL, krank INTEGER NOT NULL, prank INTEGER NOT NULL,
-        pos INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (task_id, seq))`);
+        pos INTEGER NOT NULL, ord INTEGER, data TEXT NOT NULL, PRIMARY KEY (task_id, seq))`);
       sql.exec('CREATE INDEX IF NOT EXISTS item_order ON item (task_id, krank, prank, pos, seq)');
+      sql.exec('CREATE INDEX IF NOT EXISTS item_ord ON item (task_id, ord)');
     });
   }
 
@@ -280,6 +304,7 @@ export class McpTask extends DurableObject<Env> {
     tokenExp: number,
     nextRunAt: number,
     progress: CheckProgress,
+    message: string | null = null,
   ): { ok: true; id: string } | { ok: false } {
     const now = this.now();
     const rows = this.sql.exec('SELECT status FROM tasks WHERE expires_at > ?', now).toArray() as {
@@ -289,10 +314,11 @@ export class McpTask extends DurableObject<Env> {
     if (rows.length >= MAX_STORED) return { ok: false };
     const id = newTaskId();
     this.sql.exec(
-      `INSERT INTO tasks (id, kind, status, created_at, updated_at, expires_at, next_run_at, owner, scopes, client_id,
-         token_exp, request_id, progress) VALUES (?, ?, 'working', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (id, kind, status, status_message, created_at, updated_at, expires_at, next_run_at, owner, scopes,
+         client_id, token_exp, request_id, progress) VALUES (?, ?, 'working', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       kind,
+      message,
       now,
       now,
       now + TTL_MS[kind],
@@ -314,27 +340,66 @@ export class McpTask extends DurableObject<Env> {
     return this.owned(sub, taskId) !== null;
   }
 
-  /** Stores a check of 1,001 or more packages and arms the alarm that runs it. */
+  /**
+   * Stores a check of 1,001 or more packages and arms the alarm that runs it. Packages that repeat (the same
+   * purl, or the same ecosystem, name and version) are merged first, so a list cannot buy storage or charges
+   * with copies. The input is stored in chunks of at most 1,000 packages and 900 KB.
+   */
   async createCheck(identity: McpIdentity, tokenExp: number, packages: unknown[]): Promise<CreateResult> {
     await this.enter();
+    const seen = new Set<string>();
+    const unique: unknown[] = [];
+    for (const p of packages) {
+      const r = rec(p);
+      const key =
+        typeof r.purl === 'string' ? `p|${r.purl}` : JSON.stringify([r.ecosystem, r.name, r.version]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(p);
+    }
+    const merged = packages.length - unique.length;
+    const note = merged > 0 ? `${merged} duplicate packages were merged.` : null;
+    const enc = new TextEncoder();
+    const chunks: { start: number; data: string }[] = [];
+    let cur: string[] = [];
+    let bytes = 0;
+    let start = 0;
+    const flush = () => {
+      if (cur.length === 0) return;
+      chunks.push({ start, data: `[${cur.join(',')}]` });
+      start += cur.length;
+      cur = [];
+      bytes = 0;
+    };
+    for (const p of unique) {
+      const text = JSON.stringify(p);
+      const n = enc.encode(text).length + 1;
+      if (cur.length >= CHUNK || bytes + n > CHUNK_BYTES) flush();
+      cur.push(text);
+      bytes += n;
+    }
+    flush();
+
     let out: CreateResult | undefined;
     this.ctx.storage.transactionSync(() => {
       const progress = emptyProgress();
-      const res = this.reserve('check', identity, tokenExp, this.now(), progress);
+      if (note) progress.notes.push(note);
+      const res = this.reserve('check', identity, tokenExp, this.now(), progress, note);
       if (!res.ok) {
         out = { ok: false, code: 'too_many_tasks' };
         return;
       }
-      for (let c = 0; c * CHUNK < packages.length; c++)
+      for (const [i, c] of chunks.entries())
         this.sql.exec(
-          'INSERT INTO input (task_id, chunk, data) VALUES (?, ?, ?)',
+          'INSERT INTO input (task_id, chunk, start, data) VALUES (?, ?, ?, ?)',
           res.id,
-          c,
-          JSON.stringify(packages.slice(c * CHUNK, (c + 1) * CHUNK)),
+          i,
+          c.start,
+          c.data,
         );
       out = { ok: true, task: this.view(this.row(res.id) as Row) };
     });
-    if (out?.ok) this.log(this.row(out.task.taskId) as Row, { packages: packages.length });
+    if (out?.ok) this.log(this.row(out.task.taskId) as Row, { packages: unique.length, merged });
     await this.schedule();
     return out as CreateResult;
   }
@@ -417,11 +482,12 @@ export class McpTask extends DurableObject<Env> {
     const r = this.owned(sub, taskId);
     if (!r) return { found: false };
     const task = this.view(r);
-    if (r.status === 'failed') return { found: true, task, failed: true };
+    const requestId = r.request_id;
+    if (r.status === 'failed') return { found: true, task, failed: true, requestId };
     if (r.status !== 'completed') return { found: true, task };
     const outcome = JSON.parse(r.outcome ?? '{"kind":"ok"}') as ToolOutcome;
-    if (outcome.kind !== 'ok') return { found: true, task, outcome };
-    return { found: true, task, outcome, page: this.pageOf(r, 0) ?? undefined };
+    if (outcome.kind !== 'ok') return { found: true, task, outcome, requestId };
+    return { found: true, task, outcome, page: this.pageOf(r, 0) ?? undefined, requestId };
   }
 
   /** A stored page of a finished task, or null for an unknown, foreign, expired or wrong-kind task. */
@@ -455,22 +521,24 @@ export class McpTask extends DurableObject<Env> {
 
   // ---- pages ---------------------------------------------------------------------------------------------
 
+  /**
+   * One page of a finished task's items, read by key: `ord` is the item's place in the final order (set once when
+   * the task completes), and `offset` is the `ord` the page starts at.
+   */
   private pageOf(r: Row, offset: number): PageOut | null {
     if (!Number.isInteger(offset) || offset < 0 || offset > MAX_CURSOR_OFFSET) return null;
-    const total = (
-      this.sql.exec('SELECT COUNT(*) AS n FROM item WHERE task_id = ?', r.id).one() as { n: number }
-    ).n;
+    const meta = JSON.parse(r.meta ?? '{}') as Record<string, any>;
+    const total = Number.isInteger(meta.items) ? (meta.items as number) : 0;
     if (offset > total) return null;
     const rows = this.sql
       .exec(
-        'SELECT krank, data FROM item WHERE task_id = ? ORDER BY krank, prank, pos, seq LIMIT ? OFFSET ?',
+        'SELECT krank, data FROM item WHERE task_id = ? AND ord >= ? ORDER BY ord LIMIT ?',
         r.id,
-        MAX_PAGE_ITEMS,
         offset,
+        MAX_PAGE_ITEMS,
       )
       .toArray() as { krank: number; data: string }[];
     const items = rows.map((x) => ({ k: x.krank, d: JSON.parse(x.data) as unknown }));
-    const meta = JSON.parse(r.meta ?? '{}') as Record<string, any>;
     const build = (n: number, more: boolean): Record<string, unknown> => {
       const part = items.slice(0, n);
       if (r.kind === 'check')
@@ -503,19 +571,15 @@ export class McpTask extends DurableObject<Env> {
     return { data, next };
   }
 
-  /** Checks every page of a finished task against the tool's output schema. */
-  private pagesValid(r: Row): boolean {
-    const check = r.kind === 'check' ? checkValid : deepValid;
-    let offset = 0;
-    for (let guard = 0; guard < 2000; guard++) {
-      const p = this.pageOf(r, offset);
-      if (!p) return false;
-      const data = { ...p.data, nextCursor: p.next === null ? null : 'x'.repeat(100) };
-      if (!check(data).valid) return false;
-      if (p.next === null) return true;
-      offset = p.next;
-    }
-    return false;
+  /** Gives every item of a finished task its place in the final order, once. */
+  private rank(id: string): void {
+    this.sql.exec(
+      `WITH r AS (SELECT seq AS s, ROW_NUMBER() OVER (ORDER BY krank, prank, pos, seq) - 1 AS n
+                  FROM item WHERE task_id = ?)
+       UPDATE item SET ord = r.n FROM r WHERE item.task_id = ? AND item.seq = r.s`,
+      id,
+      id,
+    );
   }
 
   // ---- the alarm -----------------------------------------------------------------------------------------
@@ -578,18 +642,21 @@ export class McpTask extends DurableObject<Env> {
       );
       return;
     }
-    let done = false;
-    try {
-      const res = await this.deps.api(identity, {
-        method: 'DELETE',
-        path: `/v1/deep-query/${r.job_id}`,
-        requestId: `${r.request_id}-x`,
-      });
-      await res.body?.cancel().catch(() => {});
-      done = res.status === 200 || res.status === 404;
-    } catch {
-      done = false;
-    }
+    // No call after the token's expiry: the retries stop and the identity is cleared.
+    let done = this.now() >= r.token_exp;
+    if (!done)
+      try {
+        const res = await this.deps.api(identity, {
+          method: 'DELETE',
+          path: `/v1/deep-query/${r.job_id}`,
+          requestId: `${r.request_id}-x`,
+        });
+        await res.body?.cancel().catch(() => {});
+        // 401 and 403 are final too: the same identity will not get a different answer.
+        done = res.status === 200 || res.status === 404 || res.status === 401 || res.status === 403;
+      } catch {
+        done = false;
+      }
     if (done)
       this.sql.exec(
         'UPDATE tasks SET cancel_job = 0, next_run_at = NULL, scopes = NULL, client_id = NULL WHERE id = ?',
@@ -617,31 +684,56 @@ export class McpTask extends DurableObject<Env> {
 
   // ---- check runner --------------------------------------------------------------------------------------
 
+  /** True when the tool's off-switch is set (the same key the SDK path reads). */
+  private async toolOff(kind: TaskKind): Promise<boolean> {
+    try {
+      const v = await this.env.SETTINGS.get(`mcp:tool:${TOOL_OF[kind]}:off`, { cacheTtl: 60 });
+      return v !== null && v !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Completes a check with what it has: the merged answer so far, `truncated: true` and a note. */
   private finishCheck(r: Row, partial: boolean, note?: string): void {
     const p = this.progressOf(r.id);
     const notes = [...p.notes];
-    if (note && notes.length < 10) notes.push(note);
+    if (p.rejectedExtra > 0) notes.push(`${p.rejectedExtra} more rejected packages are not listed.`);
+    if (p.notChecked > 0)
+      notes.push(`${p.notChecked} packages were not checked: the answer for them was too large.`);
+    if (note) notes.push(note);
     const meta = {
       asOf: p.asOf ?? new Date(this.now()).toISOString(),
       checked: p.checked,
       matched: p.matched,
       summary: p.summary,
       credits: p.credits,
-      notes,
-      partial,
+      notes: notes.slice(0, 10),
+      partial: partial || p.notChecked > 0,
+      items: p.items,
     };
-    this.sql.exec(
-      "UPDATE tasks SET meta = ? WHERE id = ? AND status = 'working'",
-      JSON.stringify(meta),
-      r.id,
-    );
-    const fresh = { ...(this.row(r.id) as Row), meta: JSON.stringify(meta) };
-    // Each stored page is checked against the tool's output schema before the task is called complete.
-    if (!this.pagesValid(fresh)) {
-      this.fail(r.id);
-      return;
-    }
-    this.end(r.id, 'completed', { kind: 'ok' });
+    this.ctx.storage.transactionSync(() => {
+      const hit = this.sql
+        .exec(
+          "UPDATE tasks SET meta = ? WHERE id = ? AND status = 'working' RETURNING id",
+          JSON.stringify(meta),
+          r.id,
+        )
+        .toArray();
+      if (hit.length === 0) return;
+      this.rank(r.id);
+      this.end(r.id, 'completed', { kind: 'ok' });
+    });
+  }
+
+  /**
+   * A terminal error. With finished chunks the task completes with the merged partial answer and a note; with
+   * none it completes with the tool error.
+   */
+  private endCheck(r: Row, code: string, note: (done: number) => string): void {
+    const done = this.progressOf(r.id).done;
+    if (done > 0) this.finishCheck(r, true, note(done));
+    else this.toolError(r.id, code, { note: note(0) });
   }
 
   private async stepCheck(r: Row): Promise<void> {
@@ -651,19 +743,20 @@ export class McpTask extends DurableObject<Env> {
       const cur = this.row(r.id);
       if (!cur || cur.status !== 'working') return;
       const now = this.now();
-      if (now >= cur.created_at + CHECK_MAX_RUN_MS) {
-        this.toolError(r.id, 'timeout');
-        return;
-      }
-      if (now >= cur.token_exp) {
-        this.toolError(r.id, 'timeout', { note: 'Sign-in expired.' });
-        return;
-      }
+      if (now >= cur.created_at + CHECK_MAX_RUN_MS)
+        return this.endCheck(cur, 'timeout', (n) => `Time limit reached after ${n} packages.`);
+      if (now >= cur.token_exp)
+        return this.endCheck(cur, 'timeout', (n) =>
+          n > 0 ? `Sign-in expired after ${n} packages.` : 'Sign-in expired.',
+        );
+      if (await this.toolOff('check')) return void this.toolError(r.id, 'tool_off');
+      const live = this.row(r.id);
+      if (!live || live.status !== 'working') return;
+
       const p = this.progressOf(r.id);
-      const inputRows = this.sql
-        .exec('SELECT data FROM input WHERE task_id = ? ORDER BY chunk', r.id)
-        .toArray();
-      const total = inputRows.length;
+      const total = (
+        this.sql.exec('SELECT COUNT(*) AS n FROM input WHERE task_id = ?', r.id).one() as { n: number }
+      ).n;
       if (p.next >= total) {
         this.finishCheck(cur, false);
         return;
@@ -673,15 +766,13 @@ export class McpTask extends DurableObject<Env> {
         this.toolError(r.id, 'internal');
         return;
       }
-      const packages = JSON.parse(
-        (
-          this.sql.exec('SELECT data FROM input WHERE task_id = ? AND chunk = ?', r.id, p.next).one() as {
-            data: string;
-          }
-        ).data,
-      ) as unknown[];
+      const input = this.sql
+        .exec('SELECT start, data FROM input WHERE task_id = ? AND chunk = ?', r.id, p.next)
+        .one() as { start: number; data: string };
+      const packages = JSON.parse(input.data) as unknown[];
 
       let res: Response | null = null;
+      let timedOut = false;
       try {
         res = await this.deps.api(identity, {
           method: 'POST',
@@ -689,8 +780,9 @@ export class McpTask extends DurableObject<Env> {
           body: { packages },
           requestId: `${cur.request_id}-c${p.next}`,
         });
-      } catch {
+      } catch (e) {
         res = null;
+        timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
       }
       // Cancelled (or ended) while the call was in flight: the answer is dropped.
       const after = this.row(r.id);
@@ -700,13 +792,19 @@ export class McpTask extends DurableObject<Env> {
       }
 
       if (res?.status === 200) {
-        const body = await readJsonCapped(res, CHECK_BODY_CAP);
-        if (body !== null && typeof body === 'object') {
-          this.saveChunk(after, p, packages, body, total);
+        const read = await readJsonResult(res, CHECK_BODY_CAP);
+        if (read.ok && read.value !== null && typeof read.value === 'object') {
+          if (this.saveChunk(after, p, input.start, packages, read.value)) chunks++;
+          if (this.row(r.id)?.status !== 'working') return;
+          continue;
+        }
+        if (!read.ok && read.reason === 'too_large') {
+          // Charged already, and the same answer would come back: never retried. The chunk is listed as not checked.
+          this.skipChunk(after, p, input.start, packages.length);
           chunks++;
           continue;
         }
-        res = null; // over the cap or not JSON: a failed try
+        res = null; // not JSON: a failed try
       }
       if (res && res.status === 429) {
         const retry = retryAfterSeconds(res);
@@ -716,22 +814,31 @@ export class McpTask extends DurableObject<Env> {
           return;
         }
         const resume = this.now() + retry * 1000;
-        if (resume >= after.created_at + CHECK_MAX_RUN_MS) this.toolError(r.id, 'timeout');
+        if (resume >= after.created_at + CHECK_MAX_RUN_MS)
+          this.endCheck(after, 'timeout', (n) => `Time limit reached after ${n} packages.`);
         else this.setProgress(r.id, p, resume);
         return;
       }
       if (res && res.status !== 200) {
         const name =
           res.status === 403 ? await errorName(res) : (await res.body?.cancel().catch(() => {}), null);
-        if (res.status === 403) return void this.toolError(r.id, name === 'blocked' ? 'blocked' : 'internal');
+        if (res.status === 403) {
+          if (name === 'blocked')
+            return this.endCheck(after, 'blocked', (n) => `Account blocked after ${n} packages.`);
+          return void this.toolError(r.id, 'internal');
+        }
         if (res.status === 401) return void this.toolError(r.id, 'internal');
         if (res.status === 400) return void this.toolError(r.id, 'invalid_argument', { field: 'packages' });
         if (res.status === 501) return void this.toolError(r.id, 'not_available_yet');
       }
-      // Down, over the cap or not JSON: three tries a chunk, then the task ends.
+      // Down, a bad body or a timeout. Three tries a chunk; after a timeout (the call may have been charged) two.
       p.tries += 1;
-      if (p.tries >= MAX_TRIES) {
-        this.toolError(r.id, 'upstream_unavailable');
+      if (p.tries >= (timedOut ? MAX_TIMEOUT_TRIES : MAX_TRIES)) {
+        this.endCheck(
+          after,
+          'upstream_unavailable',
+          (n) => `The MTI API was unavailable after ${n} packages.`,
+        );
         return;
       }
       this.setProgress(r.id, p, this.now() + 2000 * p.tries);
@@ -741,11 +848,23 @@ export class McpTask extends DurableObject<Env> {
     this.sql.exec("UPDATE tasks SET next_run_at = ? WHERE id = ? AND status = 'working'", this.now(), r.id);
   }
 
+  /** Adds a rejected entry, up to the cap; the rest are only counted. */
+  private reject(
+    p: CheckProgress,
+    put: (x: { index: number; reason: string }) => void,
+    e: { index: number; reason: string },
+  ) {
+    if (p.rejectedKept >= MAX_REJECTED) p.rejectedExtra += 1;
+    else {
+      p.rejectedKept += 1;
+      put(e);
+    }
+  }
+
   /** Writes one chunk's items and the new progress in one step, only if the task is still working. */
-  private saveChunk(r: Row, p: CheckProgress, packages: unknown[], body: unknown, total: number): void {
+  private saveChunk(r: Row, p: CheckProgress, base: number, packages: unknown[], body: unknown): boolean {
     const f = formatCheck(body, packages, this.env);
     const chunk = p.next;
-    const base = chunk * CHUNK;
     const asOf =
       typeof f.asOf === 'string' && /^\d{4}-\d{2}-\d{2}/.test(f.asOf) && f.asOf.length <= 40
         ? f.asOf
@@ -763,10 +882,29 @@ export class McpTask extends DurableObject<Env> {
       notes: [...new Set([...p.notes, ...f.notes])].slice(0, 9),
       chunks: p.chunks + 1,
     };
+    let saved = false;
     this.ctx.storage.transactionSync(() => {
-      if (!this.setProgress(r.id, next, next.next >= total ? this.now() : this.now())) return;
       let seq = chunk * 100_000;
-      const put = (krank: number, prank: number, pos: number, data: unknown) =>
+      const rows: [number, number, number, unknown][] = [];
+      for (const x of f.results) {
+        if (!itemValid.results(x.r).valid) return void this.fail(r.id);
+        rows.push([0, PRIORITIES.indexOf(x.r.priority), base + x.index, x.r]);
+      }
+      for (const x of f.noRecord) {
+        if (!itemValid.noRecord(x.n).valid) return void this.fail(r.id);
+        rows.push([1, 0, base + x.index, x.n]);
+      }
+      for (const x of f.rejected)
+        this.reject(
+          next,
+          (e) => rows.push([2, 0, base + e.index, { index: base + e.index, reason: e.reason }]),
+          x,
+        );
+      for (const row of rows)
+        if (row[0] === 2 && !itemValid.rejected(row[3]).valid) return void this.fail(r.id);
+      next.items += rows.length;
+      if (!this.setProgress(r.id, next, this.now())) return;
+      for (const [krank, prank, pos, data] of rows)
         this.sql.exec(
           'INSERT INTO item (task_id, seq, krank, prank, pos, data) VALUES (?, ?, ?, ?, ?, ?)',
           r.id,
@@ -776,9 +914,36 @@ export class McpTask extends DurableObject<Env> {
           pos,
           JSON.stringify(data),
         );
-      for (const x of f.results) put(0, PRIORITIES.indexOf(x.r.priority), base + x.index, x.r);
-      for (const x of f.noRecord) put(1, 0, base + x.index, x.n);
-      for (const x of f.rejected) put(2, 0, base + x.index, { index: base + x.index, reason: x.reason });
+      saved = true;
+    });
+    return saved;
+  }
+
+  /** A chunk whose answer was over the byte cap: its packages are listed as not checked, and the task goes on. */
+  private skipChunk(r: Row, p: CheckProgress, base: number, n: number): void {
+    const next: CheckProgress = {
+      ...p,
+      next: p.next + 1,
+      tries: 0,
+      done: p.done + n,
+      chunks: p.chunks + 1,
+      notChecked: p.notChecked + n,
+    };
+    this.ctx.storage.transactionSync(() => {
+      let seq = p.next * 100_000;
+      const rows: { index: number; reason: string }[] = [];
+      for (let i = 0; i < n; i++)
+        this.reject(next, (e) => rows.push(e), { index: base + i, reason: 'answer_too_large' });
+      next.items += rows.length;
+      if (!this.setProgress(r.id, next, this.now())) return;
+      for (const e of rows)
+        this.sql.exec(
+          'INSERT INTO item (task_id, seq, krank, prank, pos, data) VALUES (?, ?, 2, 0, ?, ?)',
+          r.id,
+          seq++,
+          e.index,
+          JSON.stringify(e),
+        );
     });
   }
 
@@ -813,6 +978,11 @@ export class McpTask extends DurableObject<Env> {
     }
     if (now >= r.created_at + DEEP_MAX_RUN_MS) return stop('timeout');
     if (now >= r.token_exp) return stop('timeout', 'Sign-in expired.');
+    if (await this.toolOff('deep_query')) return stop('tool_off');
+    {
+      const live = this.row(r.id);
+      if (!live || live.status !== 'working') return;
+    }
 
     const p = this.progressOf(r.id);
     p.polls += 1;
@@ -867,8 +1037,9 @@ export class McpTask extends DurableObject<Env> {
 
   private saveDeep(r: Row, body: Record<string, unknown>): void {
     const result = rec(body.result);
-    const rows = deepRows(result.rows);
-    const template = typeof result.template === 'string' ? result.template : '';
+    const template = DEEP_TEMPLATES.find((t) => t === result.template);
+    if (!template) return void this.toolError(r.id, 'internal');
+    const rows = deepRows(result.rows, template as DeepTemplate);
     const meta = {
       asOf: new Date(this.now()).toISOString(),
       template,
@@ -876,33 +1047,29 @@ export class McpTask extends DurableObject<Env> {
       truncated: result.truncated === true,
       credits: formatCredits(body.credits),
       notes: ['Rows are untrusted text from outside sources.'],
+      items: rows.length,
     };
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec(
-        "UPDATE tasks SET meta = ? WHERE id = ? AND status = 'working'",
-        JSON.stringify(meta),
-        r.id,
-      );
-      let seq = 0;
-      for (const row of rows)
-        this.sql.exec(
-          'INSERT INTO item (task_id, seq, krank, prank, pos, data) VALUES (?, ?, 0, 0, ?, ?)',
+      if (!rows.every((row) => itemValid.rows({ untrusted: row }).valid)) return void this.fail(r.id);
+      const hit = this.sql
+        .exec(
+          "UPDATE tasks SET meta = ? WHERE id = ? AND status = 'working' RETURNING id",
+          JSON.stringify(meta),
           r.id,
-          seq,
-          seq++,
+        )
+        .toArray();
+      if (hit.length === 0) return;
+      for (const [i, row] of rows.entries())
+        this.sql.exec(
+          'INSERT INTO item (task_id, seq, krank, prank, pos, ord, data) VALUES (?, ?, 0, 0, ?, ?, ?)',
+          r.id,
+          i,
+          i,
+          i,
           JSON.stringify(row),
         );
+      this.end(r.id, 'completed', { kind: 'ok' });
     });
-    const fresh = this.row(r.id);
-    if (!fresh || fresh.status !== 'working') {
-      this.sql.exec('DELETE FROM item WHERE task_id = ?', r.id);
-      return;
-    }
-    if (!this.pagesValid(fresh)) {
-      this.fail(r.id);
-      return;
-    }
-    this.end(r.id, 'completed', { kind: 'ok' });
   }
 }
 
