@@ -486,10 +486,11 @@ Cloudflare AI Search can replace this later.
 - `first_load`: the row came from a source's first pass (a first-load job, or collector steps until the source has a completed run or job).
 - `held`: the run (or `big-file` job) already wrote `MAX_ALERTS_PER_RUN` (2,000) alertable rows. The logs say so: `changes.held` and `changes.quiet`.
 
-Release held rows by hand once you have looked at them:
+Release held rows by hand once you have looked at them. The release also moves `at` to now: notify reads only forward from its cursor (plus a 6-hour late window), so a released row that keeps its old `at` would never be mailed. `event_at` keeps the source's date.
 
 ```sql
-UPDATE changes SET quiet = NULL WHERE quiet = 'held' AND source = ? AND at BETWEEN ? AND ?;
+UPDATE changes SET quiet = NULL, at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  WHERE quiet = 'held' AND source = ? AND at BETWEEN ? AND ?;
 ```
 
 Backlog: `node scripts/quiet-old-changes.mjs --env staging|production` is a dry run; add `--apply` to write. It only sets `event_at` and `quiet` on rows with `quiet IS NULL`, and a second run changes nothing.
