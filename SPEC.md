@@ -342,3 +342,77 @@ These sharpen the sections above. Where they differ, this section wins.
    skip.
 
 Carry on to review and QA.
+
+## Changes from the first build (round 3)
+
+An independent review of the build found the items below.
+
+**Rebase first.** Start by rebasing `feat/mcp-tasks` onto the latest `origin/main`, where the skills change
+(#61) has merged:
+- keep both sets of `KNOWN_METHODS`;
+- keep the async `buildServer`, and merge the Tasks capability into `capabilities.extensions` without replacing
+  the skills entry;
+- remove the `mti_deep_query` skip from the "INSTRUCTIONS names every enabled tool" test (the line now exists).
+
+Then fix:
+
+1. **Deep-query rows are nested** (blocker). The job emits `{ source, jobId, record: { ... } }` for
+   `cve-history`, `package-advisories`, `company-breaches` and `kev-additions`, so today's formatter returns
+   empty rows.
+   - Flatten `record` one level, using a per-template allow-list of fields, taken from what the job actually
+     writes. Examples: key or ID, aliases (joined, capped), summary, published, modified, firstSeen, kind,
+     severity, company, records.
+   - Each string goes through `clean()`.
+   - Drop `jobId`.
+   - Add a test per template that uses the job's real row shape, taken from `e2b/jobs/src/jobs/deep-query.ts`
+     and its tests, not hand-made flat rows.
+2. **No free storage from duplicates or bad entries.**
+   - Deduplicate the input (same ecosystem, name and version, or the same purl) when the task is created. The
+     answer notes how many were merged.
+   - Store at most 1,000 rejected entries per task, plus a count of the rest.
+3. **No needless re-charging.**
+   - A 200 whose body is over the byte cap is never retried. Its packages are listed as not checked (reason
+     `answer_too_large`), and the task carries on.
+   - After a timeout, retry that chunk at most once (2 tries in all).
+   - When a task ends on a terminal error (`upstream_unavailable`, `timeout`, `blocked`), complete with the
+     merged partial result, `truncated: true` and a note, as the quota path does. Never throw away finished
+     chunks.
+   - PROOF.md documents the remaining double-charge cases (a crash after a charge, and a timeout after a
+     charge).
+4. **The intercept path is as strict as the SDK.** Before intercepting, require:
+   - `jsonrpc: '2.0'`;
+   - a string or number `id` (a notification is never intercepted; `tasks/cancel` as a notification does
+     nothing);
+   - `_meta` protocol revision exactly `2026-07-28`, otherwise -32021 for `tasks/*` and `mti_deep_query`;
+   - the element cap;
+   - the tool's `enabled` flag.
+
+   A `taskId` that isn't a string gets -32602.
+5. **Chunks fit ti-api's body cap.** Split chunks by size as well as count: at most 1,000 entries and at most
+   900 KB serialised.
+6. **Stopping a deep-query cancel.**
+   - 401 and 403 answers to the DELETE are final.
+   - Stop retrying at the token's expiry.
+   - Clear the stored identity as soon as the task leaves `working`, or when cancel retries stop.
+7. **Expiry and cost.**
+   - Validate each output item against the schema when it is written, not by re-paging everything at the end.
+   - Store the item count.
+   - Page by key, not OFFSET.
+   - Count input rows with `COUNT(*)` rather than loading them.
+   - Keep each alarm's work bounded, so the alarm can't die from CPU or memory before re-arming.
+8. **Deep-query body cap** = the job's result cap plus 64 KiB, so a near-limit result can still be read.
+9. **`mti_deep_query` requires `template`** in its schema. The intercept path checks the schema before reserving
+   a slot or calling the API.
+10. **Egress and DuckDB.**
+    - Add the same `checkEgress` probe that `affected-backfill` uses to the deep-query job, so the claim in
+      `apps/api/src/lib/e2b.ts` is true.
+    - In `e2b/e2b.Dockerfile`, add a build step that runs
+      `duckdb -c "select extension_name, loaded, installed from duckdb_extensions()"` and fails the build
+      unless `json` and `parquet` are available without a download.
+    - PROOF.md records what was checked.
+11. **Small fixes.**
+    - A failed task's `tasks/get` text names the task's own request ID, not the poll's.
+    - The tool off-switch (`mcp:tool:<name>:off`) also stops running tasks: the alarm checks it before each
+      chunk or poll and completes with `tool_off`.
+    - The 80,100 element cap applies only to `tools/call` for `mti_check_packages`. Every other request keeps
+      4,100, enforced in the pipeline before the SDK.
