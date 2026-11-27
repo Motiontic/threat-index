@@ -62,6 +62,9 @@ it('(a) KEV on a stored hot CVE: signal, kev_added, sources, one newly_exploited
       new: '2025-05-05',
       at: NOW_ISO,
       source: 'cisa-kev',
+      // The KEV date is months before NOW_ISO: the row is stored but may not alert.
+      event_at: '2025-05-05',
+      quiet: 'old',
     },
   ]);
   expect(out.docs).toEqual([CVE]);
@@ -591,6 +594,8 @@ describe('(new_advisory)', () => {
         new: 'github-advisory-db:GHSA-pppp-qqqq-rrrr',
         at: NOW_ISO,
         source: 'github-advisory-db',
+        event_at: '2026-02-25',
+        quiet: null,
       },
     ]);
     expect(out.newAdvisories).toBe(1);

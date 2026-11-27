@@ -1,11 +1,42 @@
 import type { NoticeRecord } from '@ti/core/types';
+import { ageQuiet } from './age';
 import { text } from './clean';
 import { type Change, detectChanges } from './detect';
 import { toVulnState, type VulnDraft } from './draft';
 import type { Row } from './tables';
 
-function changeRow(c: Change, at: string, newId: () => string, source: string | null): Row {
-  return { id: newId(), entity_key: c.entityKey, kind: c.kind, old: c.old, new: c.new, at, source };
+function changeRow(
+  c: Change,
+  at: string,
+  newId: () => string,
+  source: string | null,
+  eventAt: string | null,
+): Row {
+  return {
+    id: newId(),
+    entity_key: c.entityKey,
+    kind: c.kind,
+    old: c.old,
+    new: c.new,
+    at,
+    source,
+    event_at: eventAt,
+    quiet: ageQuiet(eventAt, at),
+  };
+}
+
+/** The date the event happened at the source, per kind. A score change (`cvss_change`) is current: null. */
+function eventAtOf(c: Change, d: VulnDraft): string | null {
+  switch (c.kind) {
+    case 'newly_exploited':
+      return c.new;
+    case 'public_exploit':
+      return d.exploitAt;
+    case 'fix_released':
+      return d.fixAt;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -17,7 +48,13 @@ export function vulnChanges(d: VulnDraft, at: string, newId: () => string): Row[
   if (!d.before) return [];
   const after = { ...toVulnState(d.row), fixed: d.fromD1 && d.fixSource !== null };
   return detectChanges(d.before, after).map((c) =>
-    changeRow(c, at, newId, c.kind === 'fix_released' ? d.fixSource : (d.changeSource[c.kind] ?? null)),
+    changeRow(
+      c,
+      at,
+      newId,
+      c.kind === 'fix_released' ? d.fixSource : (d.changeSource[c.kind] ?? null),
+      eventAtOf(c, d),
+    ),
   );
 }
 
@@ -35,5 +72,7 @@ export function noticeChange(
     at,
     newId,
     r.source,
+    // Never occurredFrom/occurredTo: when a breach happened is not when it became public.
+    text(r.notified) ?? text(r.discovered),
   );
 }

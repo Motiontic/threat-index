@@ -101,7 +101,7 @@ export const COLUMNS: Record<LinkTable, readonly string[]> = {
     'gated',
     'modified',
   ],
-  changes: ['id', 'entity_key', 'kind', 'old', 'new', 'at', 'source'],
+  changes: ['id', 'entity_key', 'kind', 'old', 'new', 'at', 'source', 'event_at', 'quiet'],
 };
 
 /** Reserved advisories.source for the alias map; no source in the registry has this id. */
