@@ -1,5 +1,25 @@
-/** Starting text for the server instructions. A later change finalises it. Under 4,096 characters. */
-export const INSTRUCTIONS = `MTI (Motiontic Threat Index) is a read-only database of known vulnerabilities, malicious packages,
+import { enabledTools, TOOL_ORDER, type ToolName } from './tools';
+
+/** One fixed line per tool. A line appears only when its tool is enabled in this deploy. */
+const TOOL_LINES: Record<ToolName, string> = {
+  mti_check_packages:
+    'up to 1,000 packages per call; with a client that supports MCP tasks, up to 20,000 run as one task. Otherwise split longer lists.',
+  mti_check_sbom: 'check the packages listed in a CycloneDX or SPDX SBOM.',
+  mti_get_entry: 'one CVE, GHSA, OSV, MAL or EUVD ID.',
+  mti_search: 'text search over vulnerabilities and malicious packages.',
+  mti_latest_threats: 'the newest items in one category.',
+  mti_search_breaches: 'breaches by company.',
+  mti_search_incidents: 'AI incidents and cyber operations.',
+  mti_get_technique: 'one ATT&CK, ATLAS, CWE or CAPEC ID.',
+  mti_list_sources: 'where the data comes from and how fresh it is.',
+  mti_watch_add: 'watch a package or product for new problems.',
+  mti_watch_remove: 'stop watching one.',
+  mti_watch_list: 'what is being watched.',
+  mti_deep_query:
+    'a long history query (CVE history, package advisories, EPSS history, company breaches, KEV additions); runs only as a task.',
+};
+
+const HEAD = `MTI (Motiontic Threat Index) is a read-only database of known vulnerabilities, malicious packages,
 exploitation signals, breaches and AI incidents. It helps check whether software in use is already
 known to be dangerous.
 
@@ -16,11 +36,16 @@ Rules:
 6. When reporting a finding, name its sources and give the fixed version.
 
 Tools:
-- mti_check_packages: up to 1,000 packages per call; split longer lists.
-- mti_get_entry: one CVE, GHSA, OSV, MAL or EUVD ID.
-- mti_search: text search over vulnerabilities and malicious packages.
-- mti_latest_threats: the newest items in one category.
-- mti_search_breaches and mti_search_incidents: breaches by company, AI incidents and cyber operations.
-- mti_get_technique: one ATT&CK, ATLAS, CWE or CAPEC ID.
-- mti_list_sources: where the data comes from and how fresh it is.
 `;
+
+const SKILLS =
+  "Skills: mti:are-we-affected (check a project's lockfiles) and mti:safe-install (check a package before adding it).";
+
+/** The instructions for a set of enabled tools, listed in the fixed `TOOL_ORDER`. Static text. */
+export function instructionsFor(names: readonly string[]): string {
+  const lines = TOOL_ORDER.filter((n) => names.includes(n)).map((n) => `- ${n}: ${TOOL_LINES[n]}`);
+  return `${HEAD}${lines.join('\n')}\n\n${SKILLS}\n`;
+}
+
+/** Built once at module load. Under 4,096 characters with every tool enabled. */
+export const INSTRUCTIONS = instructionsFor(enabledTools().map((t) => t.name));

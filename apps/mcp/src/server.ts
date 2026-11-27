@@ -5,7 +5,7 @@ import { SERVER_INFO, TOOLS_LIST_CACHE } from './config';
 import type { Env } from './env';
 import { register as registerApps } from './ext/apps';
 import { register as registerListen } from './ext/listen';
-import { register as registerSkills } from './ext/skills';
+import { register as registerSkills, skillCatalog } from './ext/skills';
 import { register as registerTasks } from './ext/tasks';
 import { register as registerUploads } from './ext/uploads';
 import { MAX_TOOL_INPUT_ELEMENTS } from './http/body';
@@ -31,7 +31,8 @@ export interface CallDeps {
 export type { ToolName };
 
 /** A fresh server for one request. Nothing here outlives it. */
-export function buildServer(deps: CallDeps): McpServer {
+export async function buildServer(deps: CallDeps): Promise<McpServer> {
+  const catalog = await skillCatalog();
   const server = new McpServer(SERVER_INFO, {
     instructions: INSTRUCTIONS,
     capabilities: { tools: { listChanged: false } },
@@ -40,7 +41,7 @@ export function buildServer(deps: CallDeps): McpServer {
     maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
   });
   for (const def of enabledTools()) registerTool(server, def, deps);
-  registerSkills();
+  registerSkills(server, catalog);
   registerTasks();
   registerListen();
   registerApps();

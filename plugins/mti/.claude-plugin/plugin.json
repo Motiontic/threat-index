@@ -1,0 +1,6 @@
+{
+  "name": "mti",
+  "description": "MTI (Motiontic Threat Index): check project lockfiles and single packages against known vulnerabilities and malicious packages.",
+  "version": "0.1.0",
+  "homepage": "https://mti.motiontic.com/docs/mcp"
+}

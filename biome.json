@@ -12,7 +12,10 @@
       "!.gstack",
       "!SPEC.md",
       "!**/wrangler.deploy.jsonc",
-      "!**/wrangler.test.jsonc"
+      "!**/wrangler.test.jsonc",
+      "!apps/mcp/src/skills.generated.ts",
+      "!plugins/mti",
+      "!apps/mcp/skills"
     ]
   },
   "formatter": {
