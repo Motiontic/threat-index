@@ -469,3 +469,55 @@ Tests:
 6. **Defang `://` too.** In shown values, write `://` as `[:]//`, so `http://10.0.0.1/x` is never a link.
 
 Don't run `git fetch` or `git push`; the branch stays local to the sandbox.
+
+## Round 7: simpler package matching
+
+Rounds 2, 5 and 6 added a budgeted matcher: a held forward cursor, a late lower bound and a prefix rule. Each
+review found new edge cases in it: skipped changes, stalls, re-sends after 30 days, and rows silently dropped by
+a `LIMIT`. Replace it with a simpler design that always finishes a run.
+
+1. **Put `collect.ts` back** to its behaviour on `main`: the forward cursor and the 6-hour late window, with no
+   stored lower bound and no held cursor. The cursor always advances past every change a run reads.
+2. **Package matching per run, with no budget, prefix or hold** (`match.ts`):
+   - From the run's changes, take the vuln keys (kinds `newly_exploited`, `public_exploit`, `epss_band`,
+     `fix_released`, `cvss_change`) and the `(source, source_id)` records of `new_advisory` changes.
+   - Read affected packages with `SELECT DISTINCT` of the key, the base ecosystem (the part before the first
+     `:`, or the whole value) and the name. Use `WHERE vuln_key IN (SELECT value FROM json_each(?1))`, and the
+     same for records through `affected_by_record`. Use chunks of at most 200 keys, every chunk in the same run.
+     DISTINCT collapses distro releases (`Ubuntu:20.04`, `Ubuntu:22.04` → `Ubuntu`), so kernel CVEs give a few
+     rows, not hundreds. No `UNION` with `LIMIT`.
+   - Look up watchers for the resulting `(base ecosystem, name)` pairs through `watch_packages_by_package`, with
+     json_each, in chunks. A watch on `Debian` matches `Debian:12` because pairs use the base ecosystem.
+   - Hard cap per run: 50,000 distinct pairs. Past it, stop reading more chunks, log
+     `package_match_truncated` with counts (never names), and carry on. Changes past the cap get no package
+     alerts. Nothing is held or retried.
+   - Any error in package matching: log `package_match_failed` and skip package alerts for this run. Entry-watch
+     and saved-search matching, planning and sending go ahead, and the cursor advances.
+   - Remove the matched/unmatched bookkeeping, `lateFull`, the bound, and the related cursor fields. Old cursor
+     JSON with extra fields still parses.
+3. **`loadPackageInfo` can't stop sends** (`consume.ts`).
+   - Wrap it in try/catch. On failure, use an empty map: the line names the package and says "fixed version: see
+     MTI".
+   - Bound it: per planned item, read `SELECT DISTINCT fixed` for that `(vuln_key, base ecosystem, name)` with
+     `LIMIT 5`, batched with json_each. Never read every `affected` row of a vuln.
+4. **Keep everything else from rounds 2–6:**
+   - the class-ordered queue window and cap;
+   - `coversBefore` only for full windows;
+   - notices and their priority and index;
+   - defanging;
+   - the two-seek known-package check;
+   - verified email;
+   - `instant_counts`;
+   - first-load dropping `new_advisory`.
+
+Tests:
+- Delete the tests that only exercised the hold, bound and prefix logic.
+- 100 kernel CVEs × 300 Ubuntu/Debian rows plus one npm CVE in one run: the npm watcher is queued, and the
+  kernel CVEs give one pair per base ecosystem.
+- A run past the pair cap logs and advances.
+- An `affected` read that throws still sends entry-watch alerts, and the cursor advances.
+- A `loadPackageInfo` that throws still sends every planned email, including ones with `pkg:` items.
+- An OS watch on `Ubuntu` matches `Ubuntu:22.04` rows.
+- Re-running the same window doesn't send duplicates (the `alert_queue` key and `alerts_sent`).
+
+Don't run `git fetch` or `git push`.
