@@ -211,7 +211,8 @@ Every answer leaves through the existing `send`/`finish` path, with the usual he
   `rate_limited`; the 30-minute limit → `completed` with `timeout`.
 - Isolation: user B's `tasks/get`, `tasks/cancel` and task cursor for user A's task → `-32602` /
   `invalid_argument`, identical to a random ID; a malformed ID → `-32602`; a tampered cursor refused.
-- Caps: a 4th working task → `too_many_tasks`; the 21st stored task evicts the oldest finished one.
+- Caps: a 4th working task → `too_many_tasks`; a 21st stored task → `too_many_tasks`, and nothing is deleted
+  before its `ttlMs`.
 - Expiry: after 90 minutes the alarm deletes the task and its result; `tasks/get` → `-32602`.
 - Cancel: a working check stops and becomes `cancelled`; a working deep query calls the API DELETE and becomes
   `cancelled`; cancelling a finished task changes nothing.
@@ -329,3 +330,15 @@ These sharpen the sections above. Where they differ, this section wins.
 14. **Cursor-only calls.** A cursor-only `mti_deep_query` call reads a stored page and doesn't need the Tasks
     capability.
 15. **Timed tests** write past timestamps and then call `runDurableObjectAlarm`; nothing waits in real time.
+
+## Answers to the build's questions (round 2)
+
+1. **21st stored task:** refuse with `too_many_tasks` and never delete a task before its `ttlMs`, as built. The
+   Tests line saying "evicts the oldest finished one" was wrong and is corrected above.
+2. **Privacy page:** there isn't one in `apps/web`. Drop that item from this change. The retention sentence will
+   go on a privacy page that is written separately. Keep the suggested sentence in PROOF.md.
+3. **Instructions check:** keep `mti_deep_query` skipped in the "INSTRUCTIONS names every enabled tool" test for
+   now. The skills change, which lands first, writes that line. When this branch is rebased onto it, remove the
+   skip.
+
+Carry on to review and QA.
