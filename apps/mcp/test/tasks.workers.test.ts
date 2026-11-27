@@ -845,9 +845,10 @@ describe('mti_deep_query', () => {
     expect(sc.rowCount).toBe(1);
     const row = sc.rows[0].untrusted;
     // Flattened one level, only the template's columns, jobId dropped, odd keys and nested values gone.
-    expect(Object.keys(row).sort()).toEqual(['first_seen', 'kind', 'ref', 'source', 'vuln_key']);
+    // (the hostile `ref` is neither an ID nor an allowed link, so it is dropped)
+    expect(Object.keys(row).sort()).toEqual(['first_seen', 'kind', 'source', 'vuln_key']);
     expect(row.vuln_key).toBe('CVE-2026-0001');
-    expect(row.ref).not.toMatch(/https?:|<|evil\.test|\]\(/);
+    expect(row.ref).toBeUndefined();
     expect(JSON.stringify(row)).not.toContain('01HZZZ');
     expect(done.result._meta).toEqual({ untrusted: true });
   });
@@ -1124,7 +1125,12 @@ describe('deep-query rows in the job’s own shape', () => {
         vulnKey: 'CVE-2024-2',
         status: 'active',
         modified: '2024-03-01T00:00:00Z',
-        affected: [{ ecosystem: 'PyPI', name: 'foo', rangeType: 'SEMVER' }],
+        affected: [
+          { ecosystem: 'PyPI', name: 'foo', rangeType: 'SEMVER', introduced: '1.0', fixed: '1.4.2' },
+          { ecosystem: 'pypi', name: 'foo', rangeType: 'SEMVER', introduced: '2.0', lastAffected: '2.1' },
+          { ecosystem: 'PyPI', name: 'other', introduced: '9.9' },
+          { ecosystem: 'PyPI', name: 'foo', fixed: 'bad version; drop' },
+        ],
         summary: 'Bad thing',
         severity: 'HIGH',
       }),
@@ -1136,6 +1142,10 @@ describe('deep-query rows in the job’s own shape', () => {
         severity: 'HIGH',
         modified: '2024-03-01T00:00:00Z',
         status: 'active',
+        affected: [
+          { introduced: '1.0', fixed: '1.4.2' },
+          { introduced: '2.0', lastAffected: '2.1' },
+        ],
       },
     ],
     [
@@ -1186,15 +1196,178 @@ describe('deep-query rows in the job’s own shape', () => {
     ],
   ];
   it.each(cases)('%s: flattened, allow-listed, jobId dropped', (template, row, want) => {
-    const [got] = deepRows([row], template);
+    const [got] = deepRows([row], template, { ecosystem: 'PyPI', package: 'foo' });
     expect(got).toEqual(
       template === 'cve-history' ? { ...want, title: expect.not.stringMatching(/https?:|evil/) } : want,
     );
     expect(JSON.stringify(got)).not.toContain('01HZZZ');
   });
+  it('cve-history keeps ref (an ID, or a link through sourceLink) and evidence_date on signal rows; cvss_version too', () => {
+    const sig = (ref: string) =>
+      wrap('exploit-db', {
+        vulnKey: 'CVE-2024-1',
+        kind: 'public_exploit',
+        source: 'exploit-db',
+        ref,
+        firstSeen: '2024-05-05',
+        evidenceDate: '2024-05-04',
+      });
+    const [a, b, c, d] = deepRows(
+      [sig('EDB-1'), sig('EDB-2'), sig('https://evil.test/x'), sig('a b;c')],
+      'cve-history',
+    );
+    expect(a).toMatchObject({ ref: 'EDB-1', evidence_date: '2024-05-04', kind: 'public_exploit' });
+    expect(b).toMatchObject({ ref: 'EDB-2' });
+    expect(c).not.toHaveProperty('ref');
+    expect(d).not.toHaveProperty('ref');
+    const [v] = deepRows([wrap('nvd', { key: 'CVE-2024-1', cvss: 7.5, cvssVersion: '3.1' })], 'cve-history');
+    expect(v).toMatchObject({ cvss: 7.5, cvss_version: '3.1' });
+  });
+  it('summaries use the 600 cap, and at most 20 ranges are kept', () => {
+    const [got] = deepRows(
+      [
+        wrap('osv', {
+          sourceId: 'X',
+          summary: 'word '.repeat(150),
+          affected: Array.from({ length: 30 }, (_, i) => ({
+            ecosystem: 'npm',
+            name: 'p',
+            introduced: `${i}.0`,
+          })),
+        }),
+      ],
+      'package-advisories',
+      { ecosystem: 'npm', package: 'p' },
+    );
+    expect(((got?.summary as string | undefined) ?? '').length).toBeGreaterThan(200);
+    expect(((got?.summary as string | undefined) ?? '').length).toBeLessThanOrEqual(600);
+    expect(got?.affected).toHaveLength(20);
+  });
   it('a record with nothing allowed gives no row', () => {
     expect(deepRows([wrap('x', { nothing: 1 })], 'kev-additions')).toEqual([{ source: 'x' }]);
     expect(deepRows([{ jobId: 'x' }], 'kev-additions')).toEqual([]);
+  });
+});
+
+describe('retry, charge and cancel rules', () => {
+  it('timeout, then 5xx, then no third try', async () => {
+    let n = 0;
+    await setApi(SUB, (i, c) => {
+      if (!c.requestId.endsWith('-c1')) return checkOk(i, c);
+      if (n++ === 0) throw new DOMException('timed out', 'TimeoutError');
+      return new Response('x', { status: 503 });
+    });
+    const done = await runToEnd(SUB, (await startCheck(3000)).taskId);
+    expect(calls.filter((c) => c.requestId.endsWith('-c1'))).toHaveLength(2);
+    expect(done.result.structuredContent).toMatchObject({ checked: 1000, truncated: true });
+  });
+  it('a 200 with a broken body is not retried: listed answer_unreadable, task goes on', async () => {
+    await setApi(SUB, (i, c) =>
+      c.requestId.endsWith('-c1') ? new Response('not json', { status: 200 }) : checkOk(i, c),
+    );
+    const done = await runToEnd(SUB, (await startCheck(3000)).taskId);
+    expect(calls.filter((c) => c.requestId.endsWith('-c1'))).toHaveLength(1);
+    expect(await sql(SUB, "SELECT COUNT(*) AS n FROM item WHERE data LIKE '%answer_unreadable%'")).toEqual([
+      { n: 1000 },
+    ]);
+    const sc = done.result.structuredContent;
+    expect(sc.truncated).toBe(true);
+    expect(sc.notes).toContain('1000 packages were not checked: the answer for them could not be read.');
+    expect(sc.checked).toBe(2000);
+  });
+  it.each([401, 403, 400, 501])('a %i mid-task returns the partial result', async (status) => {
+    await setApi(SUB, (i, c) =>
+      c.requestId.endsWith('-c1') ? Response.json({ error: 'nope' }, { status }) : checkOk(i, c),
+    );
+    const done = await runToEnd(SUB, (await startCheck(3000)).taskId);
+    expect(done.status).toBe('completed');
+    expect(done.result.isError).toBeUndefined();
+    expect(done.result.structuredContent).toMatchObject({ checked: 1000, truncated: true });
+    expect(calls.filter((c) => c.requestId.endsWith('-c1'))).toHaveLength(1);
+  });
+  it('PyPI Foo_Bar and foo-bar count once', async () => {
+    await setApi(SUB, checkOk);
+    const extra = Array.from({ length: 1000 }, (_, i) => ({
+      ecosystem: 'PyPI',
+      name: `p${i}`,
+      version: '1',
+    }));
+    const { body } = await call(tokenA, 'tools/call', {
+      name: 'mti_check_packages',
+      arguments: {
+        packages: [
+          { ecosystem: 'PyPI', name: 'Foo_Bar', version: '1' },
+          { ecosystem: 'PyPI', name: 'foo-bar', version: '1' },
+          ...extra,
+        ],
+      },
+    });
+    const done = await runToEnd(SUB, body.result.taskId);
+    expect(done.result.structuredContent.notes).toContain('1 duplicate packages were merged.');
+    expect(calls.reduce((n, c) => n + (c.body?.packages?.length ?? 0), 0)).toBe(1001);
+  });
+  it('a cancel during the start POST sends the job DELETE once the start returns', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    await setApi(SUB, async (i, c) => {
+      if (c.method === 'POST') {
+        await gate;
+        return Response.json({ id: JOB, status: 'running' }, { status: 202 });
+      }
+      return deepApi(() => Response.json({ status: 'running' }))(i, c);
+    });
+    const started = startDeep();
+    let id = '';
+    for (let i = 0; i < 50 && !id; i++) {
+      id = ((await sql(SUB, 'SELECT id FROM tasks'))[0]?.id as string) ?? '';
+      if (!id) await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(id).not.toBe('');
+    await call(tokenA, 'tasks/cancel', { taskId: id });
+    expect((await sql(SUB, 'SELECT status FROM tasks'))[0].status).toBe('cancelled');
+    expect(calls.filter((c) => c.method === 'DELETE')).toHaveLength(0);
+    release();
+    await started;
+    const dels = calls.filter((c) => c.method === 'DELETE');
+    expect(dels).toHaveLength(1);
+    expect(dels[0]?.path).toBe(`/v1/deep-query/${JOB}`);
+    expect(await sql(SUB, 'SELECT cancel_job, scopes FROM tasks')).toEqual([{ cancel_job: 0, scopes: null }]);
+  });
+  it('an object holding old-shape tables gets the new columns and runs a long check', async () => {
+    await inDo(SUB, async (t) => {
+      const q = t.ctx.storage.sql;
+      for (const tbl of ['tasks', 'input', 'item', 'meta']) q.exec(`DROP TABLE IF EXISTS ${tbl}`);
+      q.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, status_message TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+        next_run_at INTEGER, owner TEXT NOT NULL, scopes TEXT, client_id TEXT, token_exp INTEGER NOT NULL,
+        request_id TEXT NOT NULL, job_id TEXT, progress TEXT NOT NULL, outcome TEXT, meta TEXT)`);
+      q.exec(
+        'CREATE TABLE input (task_id TEXT NOT NULL, chunk INTEGER NOT NULL, start INTEGER NOT NULL, data TEXT NOT NULL, orig TEXT NOT NULL, PRIMARY KEY (task_id, chunk))',
+      );
+      q.exec(`CREATE TABLE item (task_id TEXT NOT NULL, seq INTEGER NOT NULL, krank INTEGER NOT NULL, prank INTEGER NOT NULL,
+        pos INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (task_id, seq))`);
+      const { upgradeSchema } = await import('../src/tasks/mcp-task');
+      upgradeSchema(q);
+      upgradeSchema(q); // idempotent
+    });
+    const cols = (t: string) =>
+      sql(SUB, `SELECT name FROM pragma_table_info('${t}')`).then((r) => r.map((x) => x.name));
+    expect(await cols('tasks')).toEqual(expect.arrayContaining(['faults', 'cancel_job']));
+    expect(await cols('item')).toContain('ord');
+    expect(await sql(SUB, "SELECT v FROM meta WHERE k = 'schema_version'")).toEqual([{ v: '2' }]);
+    await setApi(SUB, checkOk);
+    const done = await runToEnd(SUB, (await startCheck(1500)).taskId);
+    expect(done.status).toBe('completed');
+    expect(done.result.structuredContent.checked).toBe(1500);
+  });
+  it('mti_deep_query has no top-level combinator and describes template or cursor', async () => {
+    const { tool } = await import('../src/tools/mti_deep_query');
+    const sch = tool.inputSchema as any;
+    for (const k of ['anyOf', 'oneOf', 'allOf']) expect(sch[k]).toBeUndefined();
+    expect(sch.properties.template.description).toMatch(/start/);
+    expect(sch.properties.cursor.description).toMatch(/next page/);
   });
 });
 

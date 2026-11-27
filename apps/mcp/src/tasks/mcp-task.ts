@@ -3,7 +3,7 @@ import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/server/valida
 import { logEvent } from '@ti/core/log';
 import type { McpIdentity } from '@ti/core/mcp-user';
 import type { Env } from '../env';
-import { CHECK_OUTPUT_SCHEMA, formatCheck, PRIORITIES } from '../tools/check-format';
+import { CHECK_OUTPUT_SCHEMA, callerPackages, formatCheck, PRIORITIES, refKey } from '../tools/check-format';
 import { credits as formatCredits, rec } from '../tools/common';
 import { DEEP_OUTPUT_SCHEMA, DEEP_TEMPLATES, type DeepTemplate, deepRows } from '../tools/deep-format';
 import { newTaskId } from './ids';
@@ -44,6 +44,8 @@ const ALARM_MAX_MS = 60_000;
 const DEEP_POLL_MS = 15_000;
 const MAX_TRIES = 3;
 const MAX_TIMEOUT_TRIES = 2;
+/** Bump when a table gains a column; the constructor adds what an older object lacks. */
+const SCHEMA_VERSION = 2;
 const MAX_FAULTS = 3;
 const MAX_DEEP_POLL_FAILS = 5;
 const MAX_CURSOR_OFFSET = 20_000;
@@ -124,6 +126,12 @@ interface CheckProgress {
   rejectedKept: number;
   rejectedExtra: number;
   notChecked: number;
+  /** Of `notChecked`, the packages whose 200 answer could not be read. */
+  unreadable?: number;
+  /** True once any try of the current chunk timed out: at most one more try, whatever fails next. */
+  timedOut?: boolean;
+  /** A deep query's package, so the rows can keep that package's version ranges. */
+  deep?: { ecosystem: string; package: string };
 }
 const emptyProgress = (): CheckProgress => ({
   next: 0,
@@ -179,7 +187,7 @@ export class McpTask extends DurableObject<Env> {
         task_id TEXT NOT NULL, seq INTEGER NOT NULL, krank INTEGER NOT NULL, prank INTEGER NOT NULL,
         pos INTEGER NOT NULL, ord INTEGER, data TEXT NOT NULL, PRIMARY KEY (task_id, seq))`);
       sql.exec('CREATE INDEX IF NOT EXISTS item_order ON item (task_id, krank, prank, pos, seq)');
-      sql.exec('CREATE INDEX IF NOT EXISTS item_ord ON item (task_id, ord)');
+      upgradeSchema(sql);
     });
   }
 
@@ -351,9 +359,15 @@ export class McpTask extends DurableObject<Env> {
     const unique: unknown[] = [];
     const origin: number[] = []; // each kept package's position in the caller's list
     for (const [pos, p] of packages.entries()) {
+      // The same normalised identity the formatter uses, so PyPI `Foo_Bar` and `foo-bar` merge. A package that
+      // cannot be normalised keeps its raw key, so it is still reported as rejected.
+      const own = [...callerPackages([p]).values()][0];
       const r = rec(p);
-      const key =
-        typeof r.purl === 'string' ? `p|${r.purl}` : JSON.stringify([r.ecosystem, r.name, r.version]);
+      const key = own
+        ? `n|${refKey(own.ref)}`
+        : typeof r.purl === 'string'
+          ? `p|${r.purl}`
+          : JSON.stringify([r.ecosystem, r.name, r.version]);
       if (seen.has(key)) continue;
       seen.add(key);
       unique.push(p);
@@ -415,7 +429,11 @@ export class McpTask extends DurableObject<Env> {
   ): Promise<CreateResult> {
     await this.enter();
     // Orphan guard: a reservation with no job after a minute is ended by the alarm.
-    const res = this.reserve('deep_query', identity, tokenExp, this.now() + 60_000, emptyProgress());
+    const progress = emptyProgress();
+    const { ecosystem, package: pkgName } = query.params;
+    if (typeof ecosystem === 'string' && typeof pkgName === 'string')
+      progress.deep = { ecosystem, package: pkgName };
+    const res = this.reserve('deep_query', identity, tokenExp, this.now() + 60_000, progress);
     if (!res.ok) return { ok: false, code: 'too_many_tasks' };
     await this.schedule();
     const drop = async () => {
@@ -466,13 +484,29 @@ export class McpTask extends DurableObject<Env> {
       await drop();
       return { ok: false, code: 'upstream_unavailable' };
     }
-    this.sql.exec(
-      "UPDATE tasks SET job_id = ?, next_run_at = ?, updated_at = ? WHERE id = ? AND status = 'working'",
-      jobId,
-      this.now() + DEEP_POLL_MS,
-      this.now(),
-      res.id,
-    );
+    const started = this.sql
+      .exec(
+        "UPDATE tasks SET job_id = ?, next_run_at = ?, updated_at = ? WHERE id = ? AND status = 'working' RETURNING id",
+        jobId,
+        this.now() + DEEP_POLL_MS,
+        this.now(),
+        res.id,
+      )
+      .toArray();
+    if (started.length === 0) {
+      // Cancelled while the start was in flight: the job is running, so stop it now (the alarm retries).
+      const gone = this.row(res.id);
+      if (!gone) return { ok: false, code: 'internal' };
+      this.sql.exec(
+        'UPDATE tasks SET job_id = ?, cancel_job = 1, next_run_at = ? WHERE id = ?',
+        jobId,
+        this.now() + DEEP_POLL_MS,
+        res.id,
+      );
+      await this.cancelJob(this.row(res.id) as Row);
+      await this.schedule();
+      return { ok: true, task: this.view(this.row(res.id) as Row) };
+    }
     const stored = this.row(res.id);
     if (!stored) return { ok: false, code: 'internal' };
     this.log(stored, { template: query.template });
@@ -508,10 +542,13 @@ export class McpTask extends DurableObject<Env> {
     const r = this.owned(sub, taskId);
     if (!r) return { found: false };
     if (r.status !== 'working') return { found: true };
-    const hasJob = r.kind === 'deep_query' && r.job_id !== null;
+    // A deep query whose start is still in flight has no job ID yet: the identity is kept so the start can send the
+    // DELETE when it returns.
+    const isDeep = r.kind === 'deep_query';
+    const hasJob = isDeep && r.job_id !== null;
     this.end(r.id, 'cancelled', null, {
       keepRun: hasJob ? this.now() : null,
-      keepIdentity: hasJob,
+      keepIdentity: isDeep,
     });
     if (hasJob) {
       this.sql.exec('UPDATE tasks SET cancel_job = 1 WHERE id = ?', r.id);
@@ -702,8 +739,13 @@ export class McpTask extends DurableObject<Env> {
     const p = this.progressOf(r.id);
     const notes = [...p.notes];
     if (p.rejectedExtra > 0) notes.push(`${p.rejectedExtra} more rejected packages are not listed.`);
-    if (p.notChecked > 0)
-      notes.push(`${p.notChecked} packages were not checked: the answer for them was too large.`);
+    const unreadable = p.unreadable ?? 0;
+    if (p.notChecked - unreadable > 0)
+      notes.push(
+        `${p.notChecked - unreadable} packages were not checked: the answer for them was too large.`,
+      );
+    if (unreadable > 0)
+      notes.push(`${unreadable} packages were not checked: the answer for them could not be read.`);
     if (note) notes.push(note);
     const meta = {
       asOf: p.asOf ?? new Date(this.now()).toISOString(),
@@ -733,10 +775,10 @@ export class McpTask extends DurableObject<Env> {
    * A terminal error. With finished chunks the task completes with the merged partial answer and a note; with
    * none it completes with the tool error.
    */
-  private endCheck(r: Row, code: string, note: (done: number) => string): void {
+  private endCheck(r: Row, code: string, note: (done: number) => string, field?: string): void {
     const done = this.progressOf(r.id).done;
     if (done > 0) this.finishCheck(r, true, note(done));
-    else this.toolError(r.id, code, { note: note(0) });
+    else this.toolError(r.id, code, { note: note(0), ...(field ? { field } : {}) });
   }
 
   private async stepCheck(r: Row): Promise<void> {
@@ -766,7 +808,7 @@ export class McpTask extends DurableObject<Env> {
       }
       const identity = this.identity(cur);
       if (!identity) {
-        this.toolError(r.id, 'internal');
+        this.endCheck(cur, 'internal', (n) => `The sign-in was lost after ${n} packages.`);
         return;
       }
       const input = this.sql
@@ -802,13 +844,16 @@ export class McpTask extends DurableObject<Env> {
           if (this.row(r.id)?.status !== 'working') return;
           continue;
         }
-        if (!read.ok && read.reason === 'too_large') {
-          // Charged already, and the same answer would come back: never retried. The chunk is listed as not checked.
-          this.skipChunk(after, p, orig);
-          chunks++;
-          continue;
-        }
-        res = null; // not JSON: a failed try
+        // Charged already: a 200 is never retried, whatever is wrong with the body. The chunk's packages are listed
+        // as not checked and the task goes on.
+        this.skipChunk(
+          after,
+          p,
+          orig,
+          read.ok || read.reason !== 'too_large' ? 'answer_unreadable' : 'answer_too_large',
+        );
+        chunks++;
+        continue;
       }
       if (res && res.status === 429) {
         const retry = retryAfterSeconds(res);
@@ -826,18 +871,41 @@ export class McpTask extends DurableObject<Env> {
       if (res && res.status !== 200) {
         const name =
           res.status === 403 ? await errorName(res) : (await res.body?.cancel().catch(() => {}), null);
+        // Terminal errors end through endCheck, so chunks that were charged are never thrown away.
         if (res.status === 403) {
           if (name === 'blocked')
             return this.endCheck(after, 'blocked', (n) => `Account blocked after ${n} packages.`);
-          return void this.toolError(r.id, 'internal');
+          return this.endCheck(
+            after,
+            'internal',
+            (n) => `The MTI API refused the request after ${n} packages.`,
+          );
         }
-        if (res.status === 401) return void this.toolError(r.id, 'internal');
-        if (res.status === 400) return void this.toolError(r.id, 'invalid_argument', { field: 'packages' });
-        if (res.status === 501) return void this.toolError(r.id, 'not_available_yet');
+        if (res.status === 401)
+          return this.endCheck(
+            after,
+            'internal',
+            (n) => `The MTI API refused the sign-in after ${n} packages.`,
+          );
+        if (res.status === 400)
+          return this.endCheck(
+            after,
+            'invalid_argument',
+            (n) => `The MTI API refused a chunk as invalid after ${n} packages.`,
+            'packages',
+          );
+        if (res.status === 501)
+          return this.endCheck(
+            after,
+            'not_available_yet',
+            (n) => `Not available: stopped after ${n} packages.`,
+          );
       }
-      // Down, a bad body or a timeout. Three tries a chunk; after a timeout (the call may have been charged) two.
+      // Down or a timeout. Three tries a chunk; once any try has timed out (the call may have been charged) one
+      // more at most, whatever the next failure is.
       p.tries += 1;
-      if (p.tries >= (timedOut ? MAX_TIMEOUT_TRIES : MAX_TRIES)) {
+      if (timedOut) p.timedOut = true;
+      if (p.tries >= (p.timedOut ? MAX_TIMEOUT_TRIES : MAX_TRIES)) {
         this.endCheck(
           after,
           'upstream_unavailable',
@@ -884,6 +952,7 @@ export class McpTask extends DurableObject<Env> {
       ...p,
       next: chunk + 1,
       tries: 0,
+      timedOut: false,
       done: p.done + packages.length,
       checked: p.checked + (f.checked ?? packages.length),
       matched: p.matched + (f.matched ?? f.results.length),
@@ -934,12 +1003,19 @@ export class McpTask extends DurableObject<Env> {
   }
 
   /** A chunk whose answer was over the byte cap: its packages are listed as not checked, and the task goes on. */
-  private skipChunk(r: Row, p: CheckProgress, orig: number[]): void {
+  private skipChunk(
+    r: Row,
+    p: CheckProgress,
+    orig: number[],
+    reason: 'answer_too_large' | 'answer_unreadable',
+  ): void {
     const n = orig.length;
     const next: CheckProgress = {
       ...p,
       next: p.next + 1,
       tries: 0,
+      timedOut: false,
+      unreadable: (p.unreadable ?? 0) + (reason === 'answer_unreadable' ? n : 0),
       done: p.done + n,
       chunks: p.chunks + 1,
       notChecked: p.notChecked + n,
@@ -948,7 +1024,7 @@ export class McpTask extends DurableObject<Env> {
       let seq = p.next * 100_000;
       const rows: { index: number; reason: string }[] = [];
       for (let i = 0; i < n; i++)
-        this.reject(next, (e) => rows.push(e), { index: orig[i] as number, reason: 'answer_too_large' });
+        this.reject(next, (e) => rows.push(e), { index: orig[i] as number, reason });
       next.items += rows.length;
       if (!this.setProgress(r.id, next, this.now())) return;
       for (const e of rows)
@@ -1054,7 +1130,7 @@ export class McpTask extends DurableObject<Env> {
     const result = rec(body.result);
     const template = DEEP_TEMPLATES.find((t) => t === result.template);
     if (!template) return void this.toolError(r.id, 'internal');
-    const rows = deepRows(result.rows, template as DeepTemplate);
+    const rows = deepRows(result.rows, template as DeepTemplate, this.progressOf(r.id).deep);
     const meta = {
       asOf: new Date(this.now()).toISOString(),
       template,
@@ -1086,6 +1162,37 @@ export class McpTask extends DurableObject<Env> {
       this.end(r.id, 'completed', { kind: 'ok' });
     });
   }
+}
+
+/** Columns added after the first release, per table. An object made by an earlier build gets them here. */
+const ADDED_COLUMNS: Record<string, [string, string][]> = {
+  tasks: [
+    ['status_message', 'TEXT'],
+    ['next_run_at', 'INTEGER'],
+    ['scopes', 'TEXT'],
+    ['client_id', 'TEXT'],
+    ['job_id', 'TEXT'],
+    ['outcome', 'TEXT'],
+    ['meta', 'TEXT'],
+    ['faults', 'INTEGER NOT NULL DEFAULT 0'],
+    ['cancel_job', 'INTEGER NOT NULL DEFAULT 0'],
+  ],
+  item: [['ord', 'INTEGER']],
+};
+
+/** Adds any missing column (checked with PRAGMA table_info first) and records the schema version in `meta`. */
+export function upgradeSchema(sql: SqlStorage): void {
+  sql.exec('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+  for (const [table, cols] of Object.entries(ADDED_COLUMNS)) {
+    const have = new Set(
+      (sql.exec(`PRAGMA table_info(${table})`).toArray() as { name: string }[]).map((c) => c.name),
+    );
+    for (const [name, type] of cols)
+      if (!have.has(name)) sql.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  }
+  sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('schema_version', ?)", String(SCHEMA_VERSION));
+  // item_ord indexes a column an old table may only just have gained.
+  sql.exec('CREATE INDEX IF NOT EXISTS item_ord ON item (task_id, ord)');
 }
 
 function mergeCredits(
