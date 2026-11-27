@@ -19,8 +19,9 @@ export const tool: ToolDef<Args> = {
   title: 'Deep history query',
   description:
     'Answers one question from the history of MTI records, such as the changes to a CVE over time, the advisories for a package, EPSS score history, company breach notices or the CISA KEV additions in a date range. Needs a client that supports MCP tasks: the answer is read from the task when it finishes, which takes up to a few minutes. Rows are text from outside sources.',
-  inputSchema: root(
-    obj(
+  // A start needs a template; a later page needs a cursor. Clients that reject a top-level anyOf are noted in PROOF.md.
+  inputSchema: root({
+    ...obj(
       {
         template: { type: 'string', enum: [...DEEP_TEMPLATES] },
         params: {
@@ -33,7 +34,8 @@ export const tool: ToolDef<Args> = {
       },
       [],
     ),
-  ),
+    anyOf: [{ required: ['template'] }, { required: ['cursor'] }],
+  }),
   outputSchema: DEEP_OUTPUT_SCHEMA,
   scope: 'mti:read',
   hints: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
