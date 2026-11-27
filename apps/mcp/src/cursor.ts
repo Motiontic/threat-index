@@ -1,7 +1,7 @@
 import { constantTimeEqual, hmac } from '@ti/core/sign';
 import type { ToolName } from './tools';
 
-export type CursorState = { c: string } | { p: number; k: number } | { o: number };
+export type CursorState = { c: string } | { p: number; k: number } | { o: number } | { t: string; o: number };
 export const CURSOR_TTL_S = 3600;
 export const MAX_CURSOR_CHARS = 512;
 
@@ -73,6 +73,8 @@ function validState(s: unknown): s is CursorState {
   if (keys === 'c') return typeof o.c === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(o.c);
   if (keys === 'k,p') return int(o.p, 1, 40) && int(o.k, 0, 24);
   if (keys === 'o') return int(o.o, 0, 1000);
+  if (keys === 'o,t')
+    return int(o.o, 0, 20_000) && typeof o.t === 'string' && /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(o.t);
   return false;
 }
 

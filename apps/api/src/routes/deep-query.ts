@@ -27,7 +27,6 @@ import {
   parseApiBase,
 } from '../lib/e2b';
 import type { AppEnv, Bindings } from '../lib/env';
-import { notImplemented } from '../lib/not-implemented';
 import { allow, limited } from '../lib/rate-limit';
 import { searchCredits } from '../lib/search-credits';
 import { JOB_ID } from './internal-jobs';
@@ -291,8 +290,38 @@ export function createDeepQueryRoute(deps: DeepQueryDeps = {}) {
     });
   });
 
-  // Stub: cancelling a deep query lands in its own change.
-  route.delete('/v1/deep-query/:id', requireUser, notImplemented);
+  route.delete('/v1/deep-query/:id', requireUser, async (c) => {
+    c.header('cache-control', 'no-store');
+    const secret = c.env.JOB_HMAC_SECRET;
+    if (!secret) return c.json({ error: 'e2b_not_configured' }, 503);
+    const id = c.req.param('id');
+    const notFound = () => c.json({ error: 'not_found' }, 404);
+    if (!JOB_ID.test(id)) return notFound();
+    const owner = await deepOwner(secret, c.get('userId'));
+    const db = c.env.DB_CONTROL;
+    const row = await db.prepare('SELECT * FROM jobs WHERE id = ?1').bind(id).first<Row>();
+    if (row?.kind !== 'deep-query' || row.source_id !== owner) return notFound();
+    // Only the owner's active row changes; a finished job keeps its status.
+    const up = await db
+      .prepare(
+        `UPDATE jobs SET status='failed', finished_at=?2, error='deep-query: cancelled'
+         WHERE id=?1 AND kind='deep-query' AND source_id=?3 AND status IN ${ACTIVE_DEEP}
+         RETURNING sandbox_id`,
+      )
+      .bind(id, now().toISOString(), owner)
+      .first<{ sandbox_id: string | null }>();
+    if (up) {
+      log('deep query cancelled', { jobId: id, status: 'failed', sandboxId: up.sandbox_id });
+      killLater(c, up.sandbox_id, id);
+      return c.json({ status: 'cancelled' });
+    }
+    const cur = await db.prepare('SELECT status, error FROM jobs WHERE id = ?1').bind(id).first<Row>();
+    if (!cur) return notFound();
+    if (cur.status === 'timed_out') return c.json({ status: 'failed' });
+    if (cur.status === 'failed')
+      return c.json({ status: cur.error === 'deep-query: cancelled' ? 'cancelled' : 'failed' });
+    return c.json({ status: cur.status === 'complete' ? 'complete' : 'running' });
+  });
 
   return route;
 }

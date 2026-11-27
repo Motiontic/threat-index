@@ -16,6 +16,8 @@ export type ToolErrorCode =
   | 'tool_off'
   | 'upstream_unavailable'
   | 'timeout'
+  | 'too_many_tasks'
+  | 'too_many_packages'
   | 'internal';
 export const HINTS = {
   readOnlyHint: true,
@@ -28,7 +30,15 @@ const MAX_UPSTREAM_BYTES = 4 * 1024 * 1024;
 
 export type ToolAnswer =
   | { ok: true; data: Record<string, unknown>; nIn?: number; nOut: number }
-  | { ok: false; code: ToolErrorCode; field?: string; problem?: InputProblem; retryAfter?: number };
+  | {
+      ok: false;
+      code: ToolErrorCode;
+      field?: string;
+      problem?: InputProblem;
+      retryAfter?: number;
+      /** Extra plain text after the fixed message (a task's reason for ending). */
+      note?: string;
+    };
 
 export interface ToolDef<A> {
   name: ToolName;
@@ -37,6 +47,10 @@ export interface ToolDef<A> {
   description: string;
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
+  /** The scope the tool needs. Default `mti:read`. */
+  scope?: 'mti:read' | 'mti:watch';
+  /** Annotation hints merged over `HINTS`. */
+  hints?: Partial<Record<keyof typeof HINTS, boolean>>;
   run(args: A, deps: CallDeps, signal: AbortSignal): Promise<ToolAnswer>;
 }
 
@@ -64,6 +78,10 @@ function failText(a: Extract<ToolAnswer, { ok: false }>): string {
       return 'MTI could not answer right now. Try again shortly.';
     case 'timeout':
       return 'The lookup took too long and was stopped.';
+    case 'too_many_tasks':
+      return 'You have 3 tasks running. Wait for one to finish.';
+    case 'too_many_packages':
+      return 'Send at most 1,000 packages per call, or use a client that supports MCP tasks.';
     case 'internal':
       return 'Something went wrong on the MTI side.';
   }
@@ -162,12 +180,22 @@ export async function apiJson<T>(
   }
 }
 
-function failure(deps: CallDeps, a: Extract<ToolAnswer, { ok: false }>) {
-  deps.stats.toolError = a.code;
+/** The tool-error result for an answer, with the request ID. Also used for the result of a finished task. */
+export function failureResult(requestId: string, a: Extract<ToolAnswer, { ok: false }>) {
   return {
     isError: true as const,
-    content: [{ type: 'text' as const, text: `${failText(a)} Request ID: ${deps.requestId}.` }],
+    content: [
+      {
+        type: 'text' as const,
+        text: `${failText(a)}${a.note ? ` ${a.note}` : ''} Request ID: ${requestId}.`,
+      },
+    ],
   };
+}
+
+function failure(deps: CallDeps, a: Extract<ToolAnswer, { ok: false }>) {
+  deps.stats.toolError = a.code;
+  return failureResult(deps.requestId, a);
 }
 
 export function registerTool(server: McpServer, def: ToolDef<never>, deps: CallDeps): void {
@@ -178,8 +206,8 @@ export function registerTool(server: McpServer, def: ToolDef<never>, deps: CallD
       description: def.description,
       inputSchema: fromJsonSchema(def.inputSchema as never, validator),
       outputSchema: fromJsonSchema(def.outputSchema as never, validator),
-      annotations: { title: def.title, ...HINTS },
-      scopeChallenge: requireScopes('mti:read'),
+      annotations: { title: def.title, ...HINTS, ...def.hints },
+      scopeChallenge: requireScopes(def.scope ?? 'mti:read'),
     },
     (async (args: unknown, ctx: { mcpReq: { signal: AbortSignal } }) => {
       deps.stats.tool = def.name;

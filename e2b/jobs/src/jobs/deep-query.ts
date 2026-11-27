@@ -15,6 +15,7 @@ import {
   MAX_RESULT_ROWS,
   validateDeepQuery,
 } from '../../../../apps/api/src/lib/deep-templates.ts';
+import { checkEgress } from '../lib/egress.ts';
 import { writeInbox } from '../lib/inbox.ts';
 import { findDuckdb } from '../lib/lake.ts';
 import { withScratch } from '../lib/work.ts';
@@ -130,6 +131,9 @@ export function buildSql(template: DeepTemplate, files: readonly string[], dir: 
   const output = q(join(dir, 'out.ndjson'));
   const input = q(join(dir, 'params.json'));
   return [
+    // json and parquet are built into the DuckDB CLI release; nothing may be fetched at run time.
+    `SET autoinstall_known_extensions=false;`,
+    `SET autoload_known_extensions=false;`,
     `CREATE VIEW parts AS ${parts};`,
     `CREATE VIEW p AS SELECT * FROM read_json(${input}, columns=${PARAM_COLS});`,
     `COPY (SELECT parts.* FROM parts, p WHERE ${where} LIMIT ${SQL_ROW_LIMIT}) TO ${output} (FORMAT json);`,
@@ -265,6 +269,7 @@ const parseLines = (text: string): Rec[] =>
 
 export const run: RunJob = async (job: Job, ctx: JobContext, deps: JobDeps = {}) => {
   const now = deps.now ?? (() => new Date());
+  await checkEgress('deep-query', deps);
   const t0 = Date.now();
   const req = await ctx.api.getObject(`jobs/${job.id}/request.json`);
   let stored: Record<string, unknown> | null = null;

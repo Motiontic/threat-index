@@ -84,7 +84,7 @@ export function strict(schema: any, path = '$'): string | null {
 
 describe('tool definitions', () => {
   const tools = enabledTools();
-  it('enables exactly the eight tools', () => expect(tools.map((t) => t.name)).toHaveLength(8));
+  it('enables exactly the nine tools', () => expect(tools.map((t) => t.name)).toHaveLength(9));
   it.each(tools.map((t) => [t.name, t] as const))('%s: strict schemas', (_n, t) => {
     expect(strict(t.inputSchema)).toBeNull();
     expect(strict(t.outputSchema)).toBeNull();

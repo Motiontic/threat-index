@@ -12,7 +12,8 @@ export async function toolsHash(): Promise<string> {
     description: t.description,
     inputSchema: t.inputSchema,
     outputSchema: t.outputSchema,
-    hints: HINTS,
+    hints: { ...HINTS, ...t.hints },
+    scope: t.scope ?? 'mti:read',
   }));
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(defs)));
   toolsHashMemo = [...new Uint8Array(d)]

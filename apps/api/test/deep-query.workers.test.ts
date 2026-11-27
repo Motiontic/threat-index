@@ -360,3 +360,43 @@ describe('GET /v1/deep-query/:id', () => {
     expect(fake.killed).toEqual(['sbx-old']);
   });
 });
+
+describe('DELETE /v1/deep-query/:id', () => {
+  const owner = () => deepOwner(SECRET as string, USER);
+  it("cancels the owner's running job, kills its sandbox, and GET then shows failed/cancelled", async () => {
+    const id = ULID(2);
+    await seed(id, await owner(), 'running', minutesAgo(1), 'sbx-live');
+    await putRequest(id);
+    const res = await call('DELETE', `/v1/deep-query/${id}`);
+    expect(res.status).toBe(200);
+    expect(await json(res)).toEqual({ status: 'cancelled' });
+    expect(fake.killed).toEqual(['sbx-live']);
+    expect(await row(id)).toMatchObject({ status: 'failed', error: 'deep-query: cancelled' });
+    const got = await json(await call('GET', `/v1/deep-query/${id}`));
+    expect(got).toMatchObject({ status: 'failed', error: 'cancelled' });
+  });
+  it('404s for another user, an unknown id and a bad id, with the same body', async () => {
+    const id = ULID(2);
+    await seed(id, await owner(), 'running', minutesAgo(1), 'sbx-live');
+    const other = await call('DELETE', `/v1/deep-query/${id}`, { user: 'user_other' });
+    const unknown = await call('DELETE', `/v1/deep-query/${ULID(9)}`);
+    const bad = await call('DELETE', '/v1/deep-query/nope');
+    expect([other.status, unknown.status, bad.status]).toEqual([404, 404, 404]);
+    expect(await json(other)).toEqual(await json(unknown));
+    expect(fake.killed).toEqual([]);
+    expect((await row(id))?.status).toBe('running');
+  });
+  it('returns the current status of a finished job and changes nothing', async () => {
+    const done = ULID(2);
+    const failed = ULID(3);
+    await seed(done, await owner(), 'complete', minutesAgo(5), 'sbx-a');
+    await seed(failed, await owner(), 'failed', minutesAgo(5), 'sbx-b', 'deep-query: query_failed');
+    expect(await json(await call('DELETE', `/v1/deep-query/${done}`))).toEqual({ status: 'complete' });
+    expect(await json(await call('DELETE', `/v1/deep-query/${failed}`))).toEqual({ status: 'failed' });
+    expect(fake.killed).toEqual([]);
+    expect((await row(done))?.status).toBe('complete');
+  });
+  it('needs sign-in', async () => {
+    expect((await call('DELETE', `/v1/deep-query/${ULID(2)}`, { user: null })).status).toBe(401);
+  });
+});

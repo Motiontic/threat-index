@@ -13,7 +13,17 @@ import { verifyAccessToken } from './auth/verify';
 import { checkConfig, MAX_RUN_MS } from './config';
 import { openCursor } from './cursor';
 import type { Env } from './env';
-import { bodyLimitFor, headersTooLarge, jsonDepthOk, MAX_JSON_DEPTH } from './http/body';
+import { interceptTask } from './ext/tasks';
+import {
+  bodyLimitFor,
+  bodyOverCap,
+  elementCount,
+  headersTooLarge,
+  jsonDepthOk,
+  MAX_CHECK_INPUT_ELEMENTS,
+  MAX_JSON_DEPTH,
+  MAX_TOOL_INPUT_ELEMENTS,
+} from './http/body';
 import { APP_CODES, rpcError } from './http/errors';
 import { normaliseResponse, type SeenInfo } from './http/normalise';
 import { allowedOrigins, checkOrigin, preflight } from './http/origin';
@@ -21,6 +31,7 @@ import { finish, json } from './http/respond';
 import { logRequest, type Outcome, type RequestLog } from './log';
 import { limitAnon } from './rate-limit';
 import { buildServer, type CallStats } from './server';
+import { taskExists } from './tasks/client';
 import { TOOL_ORDER, type ToolName } from './tools';
 import { toolsHash } from './tools-hash';
 
@@ -43,6 +54,9 @@ const KNOWN_METHODS = new Set([
   'completion/complete',
   'logging/setLevel',
   'subscriptions/listen',
+  'tasks/get',
+  'tasks/update',
+  'tasks/cancel',
 ]);
 const CELL = /^[A-Za-z0-9 _.:-]{1,60}$/;
 
@@ -205,6 +219,18 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
   const params = msg.params && typeof msg.params === 'object' ? (msg.params as Record<string, unknown>) : {};
   const method = typeof msg.method === 'string' && KNOWN_METHODS.has(msg.method) ? msg.method : 'other';
   log.method = method;
+  if (bodyOverCap(text, method === 'tools/call' && params.name === 'mti_check_packages'))
+    return refuse(413, APP_CODES.body_too_large);
+  {
+    // The SDK's own limit is the large one, for the one tool that needs it; every other request keeps the small one.
+    const isCheck = method === 'tools/call' && params.name === 'mti_check_packages';
+    const counted = method === 'tools/call' ? params.arguments : params;
+    const cap = isCheck ? MAX_CHECK_INPUT_ELEMENTS : MAX_TOOL_INPUT_ELEMENTS;
+    if (elementCount(counted, cap) > cap) {
+      const id = typeof msg.id === 'string' || typeof msg.id === 'number' ? msg.id : null;
+      return send(rpcError(200, -32602, requestId, id, { field: 'input' }), 'rpc_error', { code: -32602 });
+    }
+  }
   if (method === 'tools/call') {
     log.tool = (TOOL_ORDER as readonly unknown[]).includes(params.name) ? (params.name as string) : 'other';
     const args =
@@ -222,7 +248,9 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
               args.cursor,
               identity.sub,
             );
-      if (!st) {
+      // A task cursor also needs its task: one that expired is refused here, like a tampered cursor.
+      const taskId = st && 't' in st && typeof st.t === 'string' ? st.t : null;
+      if (!st || (taskId !== null && !(await taskExists(env, identity.sub, taskId)))) {
         const id = typeof msg.id === 'string' || typeof msg.id === 'number' ? msg.id : null;
         return send(rpcError(200, -32602, requestId, id, { field: 'cursor' }), 'rpc_error', { code: -32602 });
       }
@@ -269,6 +297,21 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
     if (hdr !== null && decodeMcpName(hdr) !== params.name) return refuse(400, -32020);
   }
   log.toolsHash = await toolsHash();
+
+  // Requests the SDK cannot answer (MCP Tasks) are answered here; everything else goes on to the SDK.
+  const nameHeader = request.headers.get('mcp-name');
+  const task = await interceptTask({
+    env,
+    identity,
+    tokenExpiresAt: expiresAt,
+    requestId,
+    request,
+    msg,
+    params,
+    era: log.era,
+    mcpName: { present: nameHeader !== null, value: nameHeader === null ? null : decodeMcpName(nameHeader) },
+  });
+  if (task) return send(task.res, task.outcome, task.extra);
 
   let res: Response;
   try {

@@ -6,9 +6,9 @@ import type { Env } from './env';
 import { register as registerApps } from './ext/apps';
 import { register as registerListen } from './ext/listen';
 import { register as registerSkills, skillCatalog } from './ext/skills';
-import { register as registerTasks } from './ext/tasks';
+import { register as registerTasks, capability as tasksCapability } from './ext/tasks';
 import { register as registerUploads } from './ext/uploads';
-import { MAX_TOOL_INPUT_ELEMENTS } from './http/body';
+import { MAX_CHECK_INPUT_ELEMENTS } from './http/body';
 import { INSTRUCTIONS } from './instructions';
 import { enabledTools, type ToolName } from './tools';
 import { registerTool, type ToolErrorCode } from './tools/shared';
@@ -35,10 +35,10 @@ export async function buildServer(deps: CallDeps): Promise<McpServer> {
   const catalog = await skillCatalog();
   const server = new McpServer(SERVER_INFO, {
     instructions: INSTRUCTIONS,
-    capabilities: { tools: { listChanged: false } },
+    capabilities: { tools: { listChanged: false }, extensions: { ...tasksCapability() } },
     cacheHints: { 'tools/list': TOOLS_LIST_CACHE },
     jsonSchemaValidator: new CfWorkerJsonSchemaValidator({ draft: '2020-12' }),
-    maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
+    maxToolInputElements: MAX_CHECK_INPUT_ELEMENTS,
   });
   for (const def of enabledTools()) registerTool(server, def, deps);
   registerSkills(server, catalog);

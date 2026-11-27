@@ -93,7 +93,7 @@ describe('launcherFromEnv', () => {
   ])('is null for %o', (o) => {
     expect(launcherFromEnv(env({ ...ok, ...o } as Record<string, string>))).toBeNull();
   });
-  it('limits a backfill sandbox to the API host, and no other kind', async () => {
+  it('limits backfill and deep-query sandboxes to the API host, and no other kind', async () => {
     const created: Record<string, unknown>[] = [];
     vi.doMock('e2b', () => ({
       Sandbox: {
@@ -107,6 +107,7 @@ describe('launcherFromEnv', () => {
       const l = launcherFromEnv(env(ok));
       await l?.create({ timeoutMs: 1000, metadata: { jobId: 'j', kind: 'affected-backfill' } });
       await l?.create({ timeoutMs: 1000, metadata: { jobId: 'j', kind: 'first-load' } });
+      await l?.create({ timeoutMs: 1000, metadata: { jobId: 'j', kind: 'deep-query' } });
     } finally {
       vi.doUnmock('e2b');
     }
@@ -117,6 +118,9 @@ describe('launcherFromEnv', () => {
     expect(net.allowOut).toEqual(['api.example.com']);
     expect(net.denyOut({ allTraffic: '0.0.0.0/0' })).toEqual(['0.0.0.0/0']);
     expect(created[1]).not.toHaveProperty('network');
+    const deepNet = created[2]?.network as typeof net;
+    expect(deepNet.allowOut).toEqual(['api.example.com']);
+    expect(deepNet.denyOut({ allTraffic: '0.0.0.0/0' })).toEqual(['0.0.0.0/0']);
   });
   it('normalises API_BASE to an origin', () => {
     expect(parseApiBase('https://api.example.com/')).toBe('https://api.example.com');

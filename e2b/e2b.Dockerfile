@@ -18,6 +18,12 @@ RUN curl -fsSL -o /tmp/duckdb.tar.gz \
  && tar -xzf /tmp/duckdb.tar.gz -C /usr/local/bin duckdb \
  && rm /tmp/duckdb.tar.gz
 RUN duckdb --version
+# deep-query reads JSON and Parquet and the sandbox may not reach the internet, so DuckDB must not need to download
+# an extension. Fail the build unless both are available as built-in or already installed.
+RUN duckdb -csv -noheader -c "select extension_name, loaded, installed from duckdb_extensions() where extension_name in ('json','parquet')" > /tmp/ext.csv \
+ && cat /tmp/ext.csv \
+ && test "$(grep -c -E '^(json|parquet),(true|false),true$' /tmp/ext.csv)" = "2" \
+ && rm /tmp/ext.csv
 
 # No NODE_OPTIONS here: commands started through the E2B SDK do not get this image's ENV. The heap limit is set
 # by /app/launch.mjs, which runs the job (run.mjs) as a child with --max-old-space-size (JOB_HEAP_MB in

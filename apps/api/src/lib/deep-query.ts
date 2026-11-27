@@ -17,6 +17,7 @@ export const DEEP_ERRORS = [
   'query_failed',
   'timed_out',
   'result_missing',
+  'cancelled',
 ] as const;
 export type DeepError = (typeof DEEP_ERRORS)[number];
 
