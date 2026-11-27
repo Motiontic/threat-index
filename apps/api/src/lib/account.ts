@@ -43,7 +43,7 @@ export const MAX_BODY_BYTES = 4096;
 /** An error response the routes throw-and-catch style: `{ error }` with a status. */
 export class HttpError extends Error {
   constructor(
-    readonly status: 400 | 401 | 404 | 409 | 502,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 429 | 502,
     readonly code: string,
   ) {
     super(code);

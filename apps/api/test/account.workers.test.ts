@@ -274,9 +274,9 @@ describe('watch', () => {
   });
   it('DELETE is idempotent', async () => {
     await call('PUT', '/v1/me/watch/CVE-2099-0001', { user: 'u1' });
-    for (let i = 0; i < 2; i++) {
+    for (const removed of [true, false]) {
       const res = await call('DELETE', '/v1/me/watch/CVE-2099-0001', { user: 'u1' });
-      expect([res.status, await json(res)]).toEqual([200, { ok: true }]);
+      expect([res.status, await json(res)]).toEqual([200, { ok: true, removed }]);
     }
     expect((await call('DELETE', '/v1/me/watch/CVE-2099-7777', { user: 'u1' })).status).toBe(200);
   });

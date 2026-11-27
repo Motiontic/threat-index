@@ -47,7 +47,7 @@ const created = (id: string, email: string, first = 'Ada') => ({
   type: 'user.created',
   data: {
     id,
-    email_addresses: [{ id: 'e1', email_address: email }],
+    email_addresses: [{ id: 'e1', email_address: email, verification: { status: 'verified' } }],
     primary_email_address_id: 'e1',
     first_name: first,
     last_name: 'L',
@@ -79,6 +79,48 @@ describe('POST /webhooks/clerk', () => {
     const row = await E.DB_USERS.prepare("SELECT email, name FROM users WHERE id = 'wh_1'").first();
     expect(row).toEqual({ email: 'a@example.test', name: 'Ada L' });
     expect(await count('webhook_events', 'id', id)).toBe(1);
+  });
+
+  it('stores only a verified address: the verified primary first, else another verified one, else empty', async () => {
+    const mk = (id: string, addrs: object[], primary: string) => ({
+      type: 'user.created',
+      data: {
+        id,
+        email_addresses: addrs,
+        primary_email_address_id: primary,
+        first_name: 'A',
+        last_name: 'B',
+      },
+    });
+    const ok = { status: 'verified' };
+    const no = { status: 'unverified' };
+    await post(
+      mk(
+        'wh_v1',
+        [
+          { id: 'e1', email_address: 'other@example.test', verification: ok },
+          { id: 'e2', email_address: 'primary@example.test', verification: ok },
+        ],
+        'e2',
+      ),
+    );
+    await post(
+      mk(
+        'wh_v2',
+        [
+          { id: 'e1', email_address: 'unverified@example.test', verification: no },
+          { id: 'e2', email_address: 'fallback@example.test', verification: ok },
+        ],
+        'e1',
+      ),
+    );
+    await post(mk('wh_v3', [{ id: 'e1', email_address: 'nope@example.test', verification: null }], 'e1'));
+    const email = async (id: string) =>
+      (await E.DB_USERS.prepare('SELECT email FROM users WHERE id = ?1').bind(id).first<{ email: string }>())
+        ?.email;
+    expect(await email('wh_v1')).toBe('primary@example.test');
+    expect(await email('wh_v2')).toBe('fallback@example.test');
+    expect(await email('wh_v3')).toBe('');
   });
 
   it('a replayed svix-id is a no-op', async () => {

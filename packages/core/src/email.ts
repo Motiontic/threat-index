@@ -2,7 +2,7 @@
  * Shared email contract between the notify worker (sends) and anything that needs to name an email.
  * The unsubscribe token format lives in `./unsubscribe`, not here.
  */
-export const EMAIL_KINDS = ['instant', 'daily', 'weekly'] as const;
+export const EMAIL_KINDS = ['instant', 'daily', 'weekly', 'watch_notice'] as const;
 export type EmailKind = (typeof EMAIL_KINDS)[number];
 
 /**

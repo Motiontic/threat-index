@@ -6,7 +6,7 @@ import type { McpScope } from './mcp-scopes';
  * A new API route used by MCP needs an entry here (REVIEW.md, "MCP").
  */
 export interface McpRoute {
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   /** Literal segments and `:param` segments. Matched against the raw path, segment by segment. */
   pattern: string;
   scope: McpScope;
@@ -41,6 +41,7 @@ export const MCP_ROUTES: readonly McpRoute[] = [
   read('GET', '/v1/me/watch'),
   read('GET', '/v1/me/watch/packages'),
   read('GET', '/v1/me/changes'),
+  watch('PATCH', '/v1/me'),
   watch('PUT', '/v1/me/watch/:id'),
   watch('DELETE', '/v1/me/watch/:id'),
   watch('PUT', '/v1/me/watch/packages/:ecosystem/:name'),

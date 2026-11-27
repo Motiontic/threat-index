@@ -39,8 +39,9 @@ route.post('/webhooks/clerk', async (c) => {
 async function handle(db: D1Database, evt: Awaited<ReturnType<typeof verifySvix>>, now: string) {
   if (evt.type === 'user.created' || evt.type === 'user.updated') {
     const d = evt.data;
-    const primary =
-      d.email_addresses.find((e) => e.id === d.primary_email_address_id) ?? d.email_addresses[0];
+    // Only a verified address is stored (the primary one first), else ''. Alerts go to this address.
+    const verified = d.email_addresses.filter((e) => e.verification?.status === 'verified');
+    const primary = verified.find((e) => e.id === d.primary_email_address_id) ?? verified[0];
     const name = [d.first_name, d.last_name].filter(Boolean).join(' ') || null;
     await db
       .prepare(

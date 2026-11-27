@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import {
   errorResponse,
+  HttpError,
   loadOrCreateUser,
   noStore,
   parseBody,
@@ -14,6 +15,7 @@ import { requireUser } from '../lib/auth';
 import { deleteClerkUser } from '../lib/clerk-api';
 import { deleteUserData } from '../lib/delete-user';
 import type { AppEnv } from '../lib/env';
+import { eventAfterChange, mcpOf } from '../lib/watch-events';
 
 const route = new Hono<AppEnv>();
 route.use('/v1/me', noStore);
@@ -45,6 +47,8 @@ const PatchBody = z
     (b) => b.displayName !== undefined || (b.alerts && Object.values(b.alerts).some((v) => v !== undefined)),
   );
 
+const McpPatch = z.object({ alerts: z.object({ digest: z.enum(['daily', 'weekly']) }).strict() }).strict();
+
 // Signed in.
 route.get('/v1/me', requireUser, async (c) => {
   try {
@@ -57,6 +61,27 @@ route.get('/v1/me', requireUser, async (c) => {
 route.patch('/v1/me', requireUser, async (c) => {
   try {
     const userId = c.get('userId');
+    const mcp = mcpOf(c);
+    if (mcp) {
+      // An MCP caller can only turn an alert digest on, and only while it is off.
+      const raw = await parseBody(c, z.unknown());
+      const asked = McpPatch.safeParse(raw);
+      if (!asked.success) throw new HttpError(403, 'not_allowed_for_mcp');
+      await loadOrCreateUser(c.env, userId);
+      const [res] = await c.env.DB_USERS.batch([
+        c.env.DB_USERS.prepare("UPDATE users SET digest = ?2 WHERE id = ?1 AND digest = 'off'").bind(
+          userId,
+          asked.data.alerts.digest,
+        ),
+        eventAfterChange(c.env.DB_USERS, mcp, 'digest_on', 'settings'),
+      ]);
+      if ((res?.meta.changes ?? 0) === 0) throw new HttpError(403, 'not_allowed_for_mcp');
+      const now = await c.env.DB_USERS.prepare(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?1`)
+        .bind(userId)
+        .first<UserRow>();
+      if (!now) return c.json({ error: 'sign_in_required' }, 401);
+      return c.json(toMe(now));
+    }
     const body: MePatch = await parseBody(c, PatchBody);
     await loadOrCreateUser(c.env, userId);
     const sets: string[] = [];
