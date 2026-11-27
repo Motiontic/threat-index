@@ -28,6 +28,7 @@ export interface Collected {
   backlog: boolean;
 }
 
+/** Only rows with `quiet IS NULL` alert; the partial index `changes_alerts` serves exactly this predicate. */
 const COLS = 'id, entity_key, kind, old, new, at, source';
 
 function parseCursor(raw: string | undefined): Cursor | null {
@@ -61,7 +62,7 @@ export async function collect(env: Env, runAt: Date, from?: PageFrom): Promise<C
 
   const forward = (
     await env.DB_SIGNALS.prepare(
-      `SELECT ${COLS} FROM changes WHERE at > ?1 OR (at = ?1 AND id > ?2) ORDER BY at, id LIMIT ?3`,
+      `SELECT ${COLS} FROM changes WHERE quiet IS NULL AND (at > ?1 OR (at = ?1 AND id > ?2)) ORDER BY at, id LIMIT ?3`,
     )
       .bind(start.at, start.id, MAX_CHANGES_PER_RUN)
       .all<Change>()
@@ -74,7 +75,7 @@ export async function collect(env: Env, runAt: Date, from?: PageFrom): Promise<C
     const from = start.since && start.since > back ? start.since : back;
     late = (
       await env.DB_SIGNALS.prepare(
-        `SELECT ${COLS} FROM changes WHERE at > ?1 AND at <= ?2 ORDER BY at, id LIMIT ?3`,
+        `SELECT ${COLS} FROM changes WHERE quiet IS NULL AND at > ?1 AND at <= ?2 ORDER BY at, id LIMIT ?3`,
       )
         .bind(from, start.at, MAX_CHANGES_PER_RUN)
         .all<Change>()
