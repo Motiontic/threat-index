@@ -79,7 +79,14 @@ async function loadQueue(env: Env): Promise<{ rows: QueueRow[]; backlog: Map<str
       }>()
   ).results;
   const backlog = new Map<string, Backlog>();
-  for (const r of rows) backlog.set(r.user_id, { total: r.total, watch: r.total_watch });
+  const loaded = new Map<string, number>();
+  for (const r of rows) {
+    loaded.set(r.user_id, (loaded.get(r.user_id) ?? 0) + 1);
+    backlog.set(r.user_id, { total: r.total, watch: r.total_watch });
+  }
+  // A window is whole when every row the per-user read allows was loaded; the global limit can cut it short.
+  for (const [userId, b] of backlog)
+    b.complete = (loaded.get(userId) ?? 0) >= Math.min(b.total, MAX_QUEUE_READ_PER_USER);
   return {
     backlog,
     rows: rows.map((r) => ({

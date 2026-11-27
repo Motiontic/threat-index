@@ -15,6 +15,9 @@ import {
 /** Most package watches one user can have. */
 export const MAX_WATCH_PACKAGES = 200;
 const MAX_NAME_CHARS = 214;
+/** Two exact seeks on `affected_by_name`: the ecosystem itself, and its OS releases (`Debian` → `Debian:12`). */
+export const KNOWN_PACKAGE_SQL = `SELECT EXISTS(SELECT 1 FROM affected WHERE name = ?2 AND ecosystem = ?1)
+  OR EXISTS(SELECT 1 FROM affected WHERE name = ?2 AND ecosystem > ?1 || ':' AND ecosystem < ?1 || ';') AS x`;
 
 const route = new Hono<AppEnv>();
 route.use('/v1/me/watch/packages', noStore);
@@ -65,12 +68,10 @@ route.put('/v1/me/watch/packages/:ecosystem/:name', requireUser, async (c) => {
     const db = c.env.DB_USERS;
     const label = `pkg:${ecosystem}/${name}`;
     // Only a package MTI has records for can be watched. An OS ecosystem (`Debian`) also matches `Debian:12`.
-    const known = await c.env.DB_ADVISORIES.prepare(
-      `SELECT 1 AS x FROM affected WHERE name = ?2 AND (ecosystem = ?1 OR (ecosystem > ?1 || ':' AND ecosystem < ?1 || ';')) LIMIT 1`,
-    )
+    const known = await c.env.DB_ADVISORIES.prepare(KNOWN_PACKAGE_SQL)
       .bind(ecosystem, name)
-      .first();
-    if (!known) throw new HttpError(404, 'unknown_package');
+      .first<{ x: number }>();
+    if (!known?.x) throw new HttpError(404, 'unknown_package');
 
     const stmts = [
       db

@@ -22,6 +22,11 @@ export interface QueueRow {
 
 /** What a user has queued in all, read next to their (at most 50) newest rows. */
 export interface Backlog {
+  /**
+   * False when the global row limit cut this user's window short: the loaded rows are sent as they are and the
+   * rest stay queued (no "and N more", nothing deleted that was not sent). Default true.
+   */
+  complete?: boolean;
   /** All the user's queued rows. */
   total: number;
   /** Those that are entry or package watches (the rows an instant email covers). */
@@ -144,7 +149,8 @@ export function plan(
     const b = backlog.get(userId);
     const watchOnly = kind === 'instant';
     // Rows the email covers without listing: loaded ones past the 50, and queued ones that were not read at all.
-    const unread = b ? Math.max(0, watchOnly ? b.watch - u.loadedWatch : b.total - u.loaded) : 0;
+    const unread =
+      b && b.complete !== false ? Math.max(0, watchOnly ? b.watch - u.loadedWatch : b.total - u.loaded) : 0;
     const more = sorted.length - shown.length + unread;
     emails.push({
       userId,

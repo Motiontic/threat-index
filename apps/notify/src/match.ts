@@ -2,7 +2,14 @@ import type { SavedSearchParams } from '@ti/core/account';
 import { searchTerms } from '@ti/core/search';
 import type { Change, Cursor } from './collect';
 import type { Env } from './env';
-import { D1_CHUNK, MAX_PAIR_BYTES, MAX_QUEUED_PER_USER, MAX_SAVED_SEARCHES } from './limits';
+import {
+  AFFECTED_KEYS_PER_QUERY,
+  AFFECTED_ROWS_PER_QUERY,
+  D1_CHUNK,
+  MAX_PAIR_BYTES,
+  MAX_QUEUED_PER_USER,
+  MAX_SAVED_SEARCHES,
+} from './limits';
 
 export const DEFAULT_TRIGGERS = [
   'newly_exploited',
@@ -156,97 +163,123 @@ export async function matchPackages(
   const none: PackageMatch = { inserts: [], unmatched: new Set() };
   if (ordered.length === 0) return none;
 
-  const vulnKeys = new Set<string>();
-  const records = new Map<string, [string, string]>();
-  for (const c of ordered) {
-    if (c.kind !== 'new_advisory') vulnKeys.add(c.entity_key);
-    else {
-      const r = recordOf(c);
-      if (r) records.set(r.source + SEP + r.sourceId, [r.source, r.sourceId]);
-    }
-  }
-  const rows =
-    vulnKeys.size + records.size === 0
-      ? []
-      : (
-          await env.DB_ADVISORIES.prepare(
-            `SELECT ecosystem, name, source, source_id, vuln_key FROM affected
-               WHERE vuln_key IN (SELECT value FROM json_each(?1))
-             UNION
-             SELECT ecosystem, name, source, source_id, vuln_key FROM affected
-               WHERE (source, source_id) IN (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?2))`,
-          )
-            .bind(JSON.stringify([...vulnKeys]), JSON.stringify([...records.values()]))
-            .all<AffectedRow>()
-        ).results;
-  const byVuln = new Map<string, AffectedRow[]>();
-  const byRecord = new Map<string, AffectedRow[]>();
-  for (const r of rows) {
-    byVuln.set(r.vuln_key, [...(byVuln.get(r.vuln_key) ?? []), r]);
-    const k = r.source + SEP + r.source_id;
-    byRecord.set(k, [...(byRecord.get(k) ?? []), r]);
-  }
-
-  // Candidate watch keys per change, in change order: the exact ecosystem and the part before the first `:`.
-  const keysOf = (c: Change): string[] => {
-    let hits: AffectedRow[] = [];
-    if (c.kind !== 'new_advisory') hits = byVuln.get(c.entity_key) ?? [];
-    else {
-      const r = recordOf(c);
-      hits = r ? (byRecord.get(r.source + SEP + r.sourceId) ?? []) : [];
-    }
-    const out = new Set<string>();
-    for (const h of hits) {
-      out.add(h.ecosystem + SEP + h.name);
-      out.add((h.ecosystem.split(':')[0] as string) + SEP + h.name);
-    }
-    return [...out];
-  };
   const changePkgs = new Map<string, string[]>();
   const readSet = new Set<string>();
   let bytes = 2;
   const unmatched = new Set<string>();
   let cut = false;
   let matched = 0;
+  let truncatedRows = 0;
   const matchedList: Change[] = [];
-  for (const c of ordered) {
-    if (cut) {
-      unmatched.add(c.id);
-      continue;
+  let next = 0;
+  // `affected` is read in ordered groups of about AFFECTED_KEYS_PER_QUERY keys or records, one group at a time, and
+  // only while the pair budget lasts: a group's rows are dropped once its changes are matched.
+  while (next < ordered.length && !cut) {
+    const group: Change[] = [];
+    const vulnKeys = new Set<string>();
+    const records = new Map<string, [string, string]>();
+    while (next < ordered.length) {
+      const c = ordered[next] as Change;
+      const r = c.kind === 'new_advisory' ? recordOf(c) : null;
+      const isNew =
+        c.kind !== 'new_advisory'
+          ? !vulnKeys.has(c.entity_key)
+          : !!r && !records.has(r.source + SEP + r.sourceId);
+      if (group.length > 0 && isNew && vulnKeys.size + records.size >= AFFECTED_KEYS_PER_QUERY) break;
+      if (c.kind !== 'new_advisory') vulnKeys.add(c.entity_key);
+      else if (r) records.set(r.source + SEP + r.sourceId, [r.source, r.sourceId]);
+      group.push(c);
+      next++;
     }
-    const keys = keysOf(c);
-    const fresh = keys.filter((k) => !readSet.has(k));
-    const size = fresh.reduce((n, k) => n + k.length + 8, 0);
-    if (matched > 0 && bytes + size > pairBytes) {
-      cut = true;
-      unmatched.add(c.id);
-      continue;
+    const rows =
+      vulnKeys.size + records.size === 0
+        ? []
+        : (
+            await env.DB_ADVISORIES.prepare(
+              `SELECT ecosystem, name, source, source_id, vuln_key FROM affected
+                 WHERE vuln_key IN (SELECT value FROM json_each(?1))
+               UNION
+               SELECT ecosystem, name, source, source_id, vuln_key FROM affected
+                 WHERE (source, source_id) IN (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?2))
+               LIMIT ?3`,
+            )
+              .bind(
+                JSON.stringify([...vulnKeys]),
+                JSON.stringify([...records.values()]),
+                AFFECTED_ROWS_PER_QUERY,
+              )
+              .all<AffectedRow>()
+          ).results;
+    if (rows.length >= AFFECTED_ROWS_PER_QUERY) truncatedRows += rows.length;
+    const byVuln = new Map<string, AffectedRow[]>();
+    const byRecord = new Map<string, AffectedRow[]>();
+    const push = (m: Map<string, AffectedRow[]>, k: string, r: AffectedRow) => {
+      const list = m.get(k);
+      if (list) list.push(r);
+      else m.set(k, [r]);
+    };
+    for (const r of rows) {
+      push(byVuln, r.vuln_key, r);
+      push(byRecord, r.source + SEP + r.source_id, r);
     }
-    let take = fresh;
-    if (matched === 0 && size > pairBytes) {
-      // The first change alone is over the budget: match what fits, so the run still makes progress.
-      let n = 2;
-      take = [];
-      for (const k of fresh) {
-        n += k.length + 8;
-        if (n > pairBytes) break;
-        take.push(k);
+
+    // Candidate watch keys per change, in change order: the exact ecosystem and the part before the first `:`.
+    const keysOf = (c: Change): string[] => {
+      let hits: AffectedRow[] = [];
+      if (c.kind !== 'new_advisory') hits = byVuln.get(c.entity_key) ?? [];
+      else {
+        const r = recordOf(c);
+        hits = r ? (byRecord.get(r.source + SEP + r.sourceId) ?? []) : [];
       }
-      console.log(
-        JSON.stringify({
-          event: 'notify.package_match_truncated',
-          packages: fresh.length,
-          kept: take.length,
-        }),
-      );
+      const out = new Set<string>();
+      for (const h of hits) {
+        out.add(h.ecosystem + SEP + h.name);
+        out.add((h.ecosystem.split(':')[0] as string) + SEP + h.name);
+      }
+      return [...out];
+    };
+    for (const c of group) {
+      if (cut) {
+        unmatched.add(c.id);
+        continue;
+      }
+      const keys = keysOf(c);
+      const fresh = keys.filter((k) => !readSet.has(k));
+      const size = fresh.reduce((n, k) => n + k.length + 8, 0);
+      if (matched > 0 && bytes + size > pairBytes) {
+        cut = true;
+        unmatched.add(c.id);
+        continue;
+      }
+      let take = fresh;
+      if (matched === 0 && size > pairBytes) {
+        // The first change alone is over the budget: match what fits, so the run still makes progress.
+        let n = 2;
+        take = [];
+        for (const k of fresh) {
+          n += k.length + 8;
+          if (n > pairBytes) break;
+          take.push(k);
+        }
+        console.log(
+          JSON.stringify({
+            event: 'notify.package_match_truncated',
+            packages: fresh.length,
+            kept: take.length,
+          }),
+        );
+      }
+      for (const k of take) readSet.add(k);
+      bytes += take.reduce((n, k) => n + k.length + 8, 0);
+      const mine = keys.filter((k) => readSet.has(k));
+      if (mine.length > 0) changePkgs.set(c.id, mine);
+      matched++;
+      matchedList.push(c);
     }
-    for (const k of take) readSet.add(k);
-    bytes += take.reduce((n, k) => n + k.length + 8, 0);
-    const mine = keys.filter((k) => readSet.has(k));
-    if (mine.length > 0) changePkgs.set(c.id, mine);
-    matched++;
-    matchedList.push(c);
   }
+  for (let i = next; i < ordered.length; i++) unmatched.add((ordered[i] as Change).id);
+  if (truncatedRows > 0)
+    console.log(JSON.stringify({ event: 'notify.package_match_truncated', affectedRows: truncatedRows }));
   if (cut)
     console.log(
       JSON.stringify({
@@ -276,10 +309,10 @@ export async function matchPackages(
     const triggers = parseTriggers(r.alert_triggers);
     triggers.add('new_advisory'); // a package watch exists to hear about new advisories
     const k = r.ecosystem + SEP + r.name;
-    watchers.set(k, [
-      ...(watchers.get(k) ?? []),
-      { userId: r.user_id, ecosystem: r.ecosystem, name: r.name, triggers },
-    ]);
+    const w = { userId: r.user_id, ecosystem: r.ecosystem, name: r.name, triggers };
+    const list = watchers.get(k);
+    if (list) list.push(w);
+    else watchers.set(k, [w]);
   }
 
   const inserts: QueueInsert[] = [];
@@ -433,11 +466,33 @@ export async function matchAndQueue(
   let saved: Cursor = cursor;
   if (changes.length > 0) {
     const byEntity = new Map<string, Change[]>();
-    for (const c of changes) byEntity.set(c.entity_key, [...(byEntity.get(c.entity_key) ?? []), c]);
+    for (const c of changes) {
+      const list = byEntity.get(c.entity_key);
+      if (list) list.push(c);
+      else byEntity.set(c.entity_key, [c]);
+    }
     const watch = await matchWatch(env, byEntity);
     const docs = await loadDocs(env, changes);
     const searches = await matchSearches(env, changes, docs);
-    const packages = await matchPackages(env, matchOrder(changes, forwardCount), ctx.pairBytes);
+    const ordered = matchOrder(changes, forwardCount);
+    let packages: PackageMatch;
+    try {
+      packages = await matchPackages(env, ordered, ctx.pairBytes);
+    } catch (err) {
+      // Package matching alone is held back: entry-watch and saved-search alerts still go out, and the cursor
+      // stops before the first package-kind change so the next run matches it again.
+      console.log(
+        JSON.stringify({
+          event: 'notify.package_match_failed',
+          changes: ordered.length,
+          error: err instanceof Error ? err.name : 'error',
+        }),
+      );
+      packages = {
+        inserts: [],
+        unmatched: new Set(ordered.filter((c) => PACKAGE_KINDS.has(c.kind)).map((c) => c.id)),
+      };
+    }
     // Entry watch first, then package watch, then saved search: a change is queued once per user (first wins).
     const seen = new Set<string>();
     for (const r of [...watch, ...packages.inserts, ...searches]) {

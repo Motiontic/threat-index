@@ -140,6 +140,8 @@ describe('text that can look like something else', () => {
     expect(defang('localhost', true)).toBe('localhost');
     expect(defang('agent.example.test', true)).toBe('agent[.]example[.]test');
     expect(defang('a.b1', true)).toBe('a[.]b1');
+    expect(defang('http://10.0.0.1/x')).toBe('http[:]//10.0.0.1/x');
+    expect(defang('a://b.c', true)).toBe('a[:]//b[.]c');
     expect(defang('Go/verify-mti.com/reset.v2')).toBe('Go/verify-mti[.]com/reset[.]v2');
     expect(defang('mti.com.evil.io')).toBe('mti[.]com[.]evil[.]io');
   });

@@ -66,10 +66,10 @@ export const UNSHOWN_NAME = 'a package (see your watchlist)';
 
 /**
  * Writes every dot followed by a letter as `[.]` (`Go/verify-mti[.]com/reset[.]v2`), so a mail client does not
- * turn the value into a link. `always` does it for every dot (client hosts).
+ * turn the value into a link. `always` does it for every dot (client hosts). `://` is written `[:]//`.
  */
 export function defang(v: string, always = false): string {
-  return v.replace(always ? /\./g : /\.(?=[A-Za-z])/g, '[.]');
+  return v.replace(always ? /\./g : /\.(?=[A-Za-z])/g, '[.]').replace(/:\/\//g, '[:]//');
 }
 
 /** A package name or entry ID as it may be shown: checked, then defanged. */

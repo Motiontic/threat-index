@@ -37,3 +37,7 @@ export const INSTANT_COUNT_TTL_DAYS = 2;
 export const WATCH_EVENT_TTL_DAYS = 30;
 /** Most distinct fixed versions listed for one package in an alert. */
 export const MAX_FIXED_LISTED = 5;
+/** `affected` is read for about this many vuln keys or records at a time, only while the pair budget lasts. */
+export const AFFECTED_KEYS_PER_QUERY = 100;
+/** Rows one `affected` read can return; more is logged as truncated. */
+export const AFFECTED_ROWS_PER_QUERY = 20_000;

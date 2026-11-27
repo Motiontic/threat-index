@@ -83,8 +83,11 @@ export async function collect(env: Env, runAt: Date): Promise<Collected> {
   if (!first) {
     const back = new Date(Date.parse(start.at) - LATE_WINDOW_HOURS * HOUR_MS).toISOString();
     const floor = start.since && start.since > back ? start.since : back;
-    // A stored bound (the first late change not matched yet) keeps it in reach however long it waits.
-    const bound = start.late && start.late.at >= (start.since ?? '') ? start.late : null;
+    // A stored bound (the first late change not matched yet) keeps it in reach however long it waits. The read
+    // starts at the earlier of the bound and the usual floor: a row committed late with an `at` between the two
+    // is read again, never skipped for good.
+    const stored = start.late && start.late.at >= (start.since ?? '') ? start.late : null;
+    const bound = stored && stored.at <= floor ? stored : null;
     late = (
       bound
         ? await env.DB_SIGNALS.prepare(

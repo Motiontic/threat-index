@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import { MCP_HEADERS, type McpIdentity, signMcpAssertion } from '@ti/core/mcp-user';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/index';
+import { KNOWN_PACKAGE_SQL } from '../src/routes/watch-packages';
 
 const SECRET = 'mcp-test-secret';
 const A = 'user_2aaaaaaaaaaa';
@@ -151,20 +152,35 @@ describe('package watches', () => {
     expect((await web('PUT', `${P}/Debian/curl`, A)).status).toBe(404);
   });
 
-  it('the known-package check is one seek on affected_by_name, never a range scan of the primary key', async () => {
-    const sql = `SELECT 1 AS x FROM affected WHERE name = ?2 AND (ecosystem = ?1 OR (ecosystem > ?1 || ':' AND ecosystem < ?1 || ';')) LIMIT 1`;
-    for (const eco of ['npm', 'Debian']) {
-      const plan = (
-        await E.DB_ADVISORIES.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(eco, 'openssl').all<{
-          detail: string;
-        }>()
-      ).results.map((r) => r.detail);
-      const text = plan.join(' | ');
-      expect(text).toContain('affected_by_name');
-      expect(text).toMatch(/name\s*=\s*\?/);
-      expect(text).not.toMatch(/SCAN/);
-      expect(text).not.toContain('sqlite_autoindex_affected');
-    }
+  it('the known-package check is two exact seeks on affected_by_name, never a scan or a name-only seek', async () => {
+    const plan = (
+      await E.DB_ADVISORIES.prepare(`EXPLAIN QUERY PLAN ${KNOWN_PACKAGE_SQL}`).bind('npm', 'openssl').all<{
+        detail: string;
+      }>()
+    ).results.map((r) => r.detail);
+    const text = plan.join(' | ');
+    expect(text).toContain('affected_by_name (name=? AND ecosystem=?)');
+    expect(text).toContain('affected_by_name (name=? AND ecosystem>? AND ecosystem<?)');
+    expect(text).not.toMatch(/SCAN (?!CONSTANT)/);
+    expect(text).not.toContain('sqlite_autoindex_affected');
+    expect(text.replace(/\(name=\? AND ecosystem[^)]*\)/g, '')).not.toMatch(/\(name=\?\)/);
+  });
+
+  it('a package name common in other ecosystems is answered without reading those rows', async () => {
+    await E.DB_ADVISORIES.batch(
+      Array.from({ length: 60 }, (_, i) =>
+        E.DB_ADVISORIES.prepare(
+          "INSERT INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES (?1, 'linux', 'osv', ?2, 0, ?2, 'ECOSYSTEM')",
+        ).bind(i % 2 ? `Debian:${i}` : `Ubuntu:${i}`, `L-${i}`),
+      ),
+    );
+    const res = await E.DB_ADVISORIES.prepare(KNOWN_PACKAGE_SQL).bind('npm', 'linux').run();
+    expect((res.results[0] as { x: number }).x).toBe(0);
+    // rows_read counts what D1 touched: two index seeks that find nothing read no `linux` row.
+    expect(res.meta.rows_read ?? 0).toBeLessThan(5);
+    const r = await web('PUT', `${P}/npm/linux`, A);
+    expect([r.status, (await json(r)).error]).toEqual([404, 'unknown_package']);
+    expect((await web('PUT', `${P}/Debian/linux`, A)).status).toBe(200);
   });
 
   it('refuses a bad ecosystem or name with 400 invalid_argument', async () => {

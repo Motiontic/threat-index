@@ -161,3 +161,19 @@ describe('plan: package rows and the per-user instant cap', () => {
     expect(digest.emails[0]?.coversBefore?.watchOnly).toBe(false);
   });
 });
+
+describe('plan: "and N more" only for a whole window', () => {
+  const two = [row('u1', 'a'), row('u1', 'b')];
+  const cs = changes(change('a', '2026-11-23T01:00:00Z'), change('b', '2026-11-23T02:00:00Z'));
+  it("counts and covers the unread rows when the user's window was fully loaded", () => {
+    const p = plan(two, cs, MON_9, new Map(), new Map([['u1', { total: 9, watch: 9, complete: true }]]));
+    expect(p.emails[0]?.more).toBe(7);
+    expect(p.emails[0]?.coversBefore).toBeDefined();
+  });
+  it('sends only the loaded rows and leaves the rest queued when the global limit cut the window short', () => {
+    const p = plan(two, cs, MON_9, new Map(), new Map([['u1', { total: 9, watch: 9, complete: false }]]));
+    expect(p.emails[0]?.more).toBe(0);
+    expect(p.emails[0]?.coversBefore).toBeUndefined();
+    expect(p.emails[0]?.items).toHaveLength(2);
+  });
+});

@@ -10,6 +10,7 @@ CREATE TABLE watch_events (
 );
 CREATE INDEX watch_events_by_user ON watch_events (user_id, at);
 CREATE INDEX watch_events_pending ON watch_events (notified_at, user_id);
+CREATE INDEX watch_events_by_user_pending ON watch_events (user_id, notified_at);
 
 -- Instant emails sent per user per UTC day, for the daily cap per user. Rows older than 2 days are deleted by notify.
 CREATE TABLE instant_counts (

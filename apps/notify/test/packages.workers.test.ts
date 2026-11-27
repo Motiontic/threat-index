@@ -516,6 +516,73 @@ describe('package matching', () => {
   });
 });
 
+describe('round 6: late bound floor, bounded affected reads, failure isolation', () => {
+  it('a change committed late with an `at` between the floor and the stored bound is matched next run', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    await seedPkgWatch('u1', 'PyPI', 'pkg-a');
+    await seedAffected('PyPI', 'pkg-a', 'osv', 'RA', 'CVE-2026-1', '1.0');
+    await seedChange('between', 'CVE-2026-1', 'public_exploit', T('16:00')); // floor 14:00 < 16:00 < bound 19:50
+    await E.DB_USERS.prepare("INSERT INTO notify_state (name, value, updated_at) VALUES ('cursor', ?1, ?2)")
+      .bind(
+        JSON.stringify({ at: T('20:00'), id: 'z', since: T('01:00'), late: { at: T('19:50'), id: 'x' } }),
+        T('20:00'),
+      )
+      .run();
+    await runNotify(withKey(), MON_9, fakeFetch().deps);
+    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['between']);
+  });
+
+  it('a run whose affected rows exceed the budget defers the rest, and the next run picks them up', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    const stmts: D1PreparedStatement[] = [];
+    for (let i = 0; i < 180; i++) {
+      stmts.push(
+        E.DB_ADVISORIES.prepare(
+          "INSERT INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES ('npm', ?1, 'osv', ?2, 0, ?3, 'SEMVER')",
+        ).bind(`pkg-${i}`, `R${i}`, `CVE-2026-${i}`),
+        E.DB_SIGNALS.prepare(
+          "INSERT INTO changes (id, entity_key, kind, at, source) VALUES (?1, ?2, 'public_exploit', ?3, 'osv')",
+        ).bind(`c${String(i).padStart(3, '0')}`, `CVE-2026-${i}`, T('07:00')),
+      );
+    }
+    await E.DB_ADVISORIES.batch(stmts.filter((_, i) => i % 2 === 0));
+    await E.DB_SIGNALS.batch(stmts.filter((_, i) => i % 2 === 1));
+    for (let i = 0; i < 180; i++) await seedPkgWatch('u1', 'npm', `pkg-${i}`);
+    const got = await collect(E, MON_9);
+    await matchAndQueue(E, got.changes, got.cursor, MON_9, {
+      forwardCount: got.forwardCount,
+      start: got.start,
+      lateFull: got.lateFull,
+      pairBytes: 2700, // about 150 changes: the budget runs out part-way through the second group of 100
+    });
+    const first = (await queueOf('u1')).length;
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(180);
+    expect((await cursorRow()).id).toBe(`c${String(first - 1).padStart(3, '0')}`);
+    for (let i = 0; i < 6; i++) await runNotify(withKey(), MON_9, fakeFetch().deps);
+    expect(await queueOf('u1')).toHaveLength(180);
+  });
+
+  it('a thrown affected query still sends entry-watch alerts and holds the package cursor', async () => {
+    await seedUser('u1');
+    await seedWatch('u1', 'CVE-2026-1');
+    await seedChange('e1', 'CVE-2026-1', 'public_exploit', T('07:00'));
+    const broken = {
+      ...withKey(),
+      DB_ADVISORIES: {
+        prepare: () => {
+          throw new Error('d1 down');
+        },
+      },
+    } as never;
+    const f = fakeFetch();
+    await runNotify(broken, MON_9, f.deps);
+    expect(f.sent).toHaveLength(1);
+    expect(logs.lines.some((l) => l.includes('notify.package_match_failed'))).toBe(true);
+    expect((await cursorRow()).id).not.toBe('e1');
+  });
+});
+
 describe('queue cap by class', () => {
   const change = (id: string, key: string): Change => ({
     id,
