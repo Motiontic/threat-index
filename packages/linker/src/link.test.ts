@@ -229,6 +229,7 @@ it('(h) CVSS: same scorer ±1.0 changes, another scorer is ignored, ±0.5 update
   const same = await link([vuln(CVE, { cvss: 8.0, cvssSource: 'nvd', cvssVersion: '3.1' })], f.deps);
   expect(same.rows.find((r) => r.table === 'vulns')?.row).toMatchObject({ cvss: 8.0 });
   expect(changes(same.rows)).toMatchObject([{ kind: 'cvss_change', old: '7', new: '8', source: 'cve-list' }]);
+  expect(same.rows.find((r) => r.table === 'vulns')?.row).toMatchObject({ cvss_from: 'cve-list' });
 
   const other = await link([vuln(CVE, { cvss: 4.0, cvssSource: 'vendor' })], f.deps);
   expect(other.rows.find((r) => r.table === 'vulns')).toBeUndefined();

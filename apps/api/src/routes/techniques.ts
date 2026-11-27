@@ -1,3 +1,4 @@
+import { cvssDeliveredBy } from '@ti/core/cvss';
 import type { Framework, TechniqueDetail, TechniqueSummary, WorldList } from '@ti/core/world-api';
 import { Hono } from 'hono';
 import { cachedPublic, guarded } from '../lib/cache';
@@ -152,7 +153,7 @@ route.get('/v1/techniques/:id', (c) =>
         const found =
           (
             await env.DB_VULNS.prepare(
-              `SELECT key, title, cvss, cvss_source, kev_added FROM vulns WHERE key IN (${placeholders(1, keys.length)})`,
+              `SELECT key, title, cvss, cvss_source, cvss_from, kev_added FROM vulns WHERE key IN (${placeholders(1, keys.length)})`,
             )
               .bind(...keys)
               .all<{
@@ -160,12 +161,16 @@ route.get('/v1/techniques/:id', (c) =>
                 title: string;
                 cvss: number | null;
                 cvss_source: string | null;
+                cvss_from: string | null;
                 kev_added: string | null;
               }>()
           ).results ?? [];
         const vd = await displayFor(
           env.SETTINGS,
-          found.flatMap((f) => (f.cvss_source ? [f.cvss_source] : [])),
+          found.flatMap((f) => {
+            const d = cvssDeliveredBy(f);
+            return d ? [d] : [];
+          }),
         );
         const byKey = new Map(found.map((f) => [f.key, f]));
         for (const k of keys) {
@@ -176,7 +181,8 @@ route.get('/v1/techniques/:id', (c) =>
             title: f.title,
             exploited: f.kev_added !== null,
           };
-          const hidden = f.cvss_source ? (vd.get(f.cvss_source) ?? 'hidden') === 'hidden' : false;
+          const from = cvssDeliveredBy(f);
+          const hidden = from ? (vd.get(from) ?? 'hidden') === 'hidden' : false;
           if (typeof f.cvss === 'number' && !hidden) item.cvss = f.cvss;
           vulns.push(item);
         }

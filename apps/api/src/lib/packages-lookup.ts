@@ -34,6 +34,7 @@ export interface HotVulnRow {
   title: string | null;
   cvss: number | null;
   cvss_source: string | null;
+  cvss_from: string | null;
   epss: number | null;
   kev_added: string | null;
   ransomware: number;
@@ -57,7 +58,7 @@ export const AFFECTED_SQL = `SELECT a.ecosystem, a.name, a.source, a.source_id, 
 FROM affected a
 JOIN package_advisories p ON p.source = a.source AND p.source_id = a.source_id
 WHERE a.ecosystem = ?1 AND a.name IN (SELECT value FROM json_each(?2)) AND p.status = 'active'`;
-export const VULNS_SQL = `SELECT key, kind, title, cvss, cvss_source, epss, kev_added, ransomware, exploit_public
+export const VULNS_SQL = `SELECT key, kind, title, cvss, cvss_source, cvss_from, epss, kev_added, ransomware, exploit_public
 FROM vulns WHERE key IN (SELECT value FROM json_each(?1))`;
 export const SIGNALS_SQL = `SELECT vuln_key, kind, source FROM signals
 WHERE vuln_key IN (SELECT value FROM json_each(?1))

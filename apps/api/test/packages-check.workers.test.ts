@@ -826,6 +826,17 @@ describe('licence hiding', () => {
     expect(hid.results[0].priority).toBe('note');
     expect(hid.credits.map((c: any) => c.sourceId)).not.toContain('nvd');
   });
+  it('a CVSS 9.8 scored by a CNA name ranks plan when the cve-list record delivered it', async () => {
+    await addRecord({ id: 'GHSA-d', key: 'CVE-2099-5010', name: 'cna' });
+    await addVuln('CVE-2099-5010', { cvss: 9.8, cvss_source: 'GitHub_M' });
+    const r = (await checkOne(pk('cna'))).results[0];
+    expect(r.matches[0].cvss).toBe(9.8);
+    expect(r.priority).toBe('plan');
+    await setDisplay('cve-list', 'hidden');
+    const hid = (await checkOne(pk('cna'))).results[0];
+    expect(hid.matches[0].cvss).toBeNull();
+    expect(hid.priority).toBe('note');
+  });
   it('link mode shows id, URL and source only', async () => {
     await addRecord({
       id: 'GHSA-l',

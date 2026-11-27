@@ -20,6 +20,7 @@ export interface EntryPreview {
   modified?: string;
   cvss?: number;
   cvssVersion?: string;
+  cvssSource?: string; // who scored it: attribution only
   exploited: boolean; // in KEV or another exploited-in-the-wild signal
   kevAdded?: string;
   epss?: number;

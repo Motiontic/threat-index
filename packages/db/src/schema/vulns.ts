@@ -29,4 +29,5 @@ export const vulns = sqliteTable('vulns', {
   hot: integer('hot').notNull().default(1),
   sources: text('sources'),
   docKey: text('doc_key'),
+  cvssFrom: text('cvss_from'),
 });

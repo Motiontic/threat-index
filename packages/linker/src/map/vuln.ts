@@ -39,6 +39,7 @@ export function applyVuln(d: VulnDraft, r: VulnRecord): void {
       row.cvss = score;
       row.cvss_version = text(r.cvssVersion) ?? row.cvss_version ?? null;
       row.cvss_source = scorer;
+      row.cvss_from = r.source;
       d.changeSource.cvss_change = r.source;
     }
   }
