@@ -152,10 +152,10 @@ This table doubles as the alias map. Any ID (GHSA, RHSA, USN, JVNDB, EUVD…) re
 
 ### `ti_signals`
 
-| Table     | Key                                   | Main columns                                                                                                                                 |
-| --------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `signals` | (`vuln_key`, `kind`, `source`, `ref`) | kind (exploited_wild / public_exploit / detection / poc / ransomware), first_seen, evidence_date, url                                        |
-| `changes` | `id` (ULID)                           | entity_key, kind (newly_exploited / public_exploit / epss_band / fix_released / cvss_change / breach_notice), old, new, at (indexed), source, event_at (when it happened at the source), quiet (null = may alert; else `old`, `first_load` or `held`; partial index `changes_alerts`) |
+| Table     | Key                                   | Main columns                                                                                                                                                            |
+| --------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `signals` | (`vuln_key`, `kind`, `source`, `ref`) | kind (exploited_wild / public_exploit / detection / poc / ransomware), first_seen, evidence_date, url                                                                   |
+| `changes` | `id` (ULID)                           | entity_key, kind (newly_exploited / public_exploit / epss_band / fix_released / cvss_change / breach_notice), old, new, at (indexed), source, event_at, quiet (see §10) |
 
 ### `ti_world`
 
