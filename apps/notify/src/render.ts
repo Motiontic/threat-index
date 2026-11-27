@@ -8,9 +8,27 @@ export interface RenderItem {
   /** Vuln title or key, company name or key. */
   title: string;
   company: boolean;
-  /** Saved search label, or null for a watched entry. */
+  /** Saved search label, or null for a watched entry or package. */
   group: string | null;
+  /** Set for a package-watch alert. */
+  pkg?: PackageInfo;
 }
+
+export interface PackageInfo {
+  /** `ecosystem/name` from our `affected` row (already normalised). */
+  label: string;
+  /** `ecosystem/name` for the subject, from the user's own watch row; null when the name fails the check. */
+  subjectLabel: string | null;
+  /** Up to five distinct fixed versions for this package, ordered; empty means none yet. */
+  fixed: string[];
+}
+
+const SUBJECT_NAME = /^[A-Za-z0-9@/._:-]{1,100}$/;
+/** The `ecosystem/name` of a watch row for a subject, or null when the name could carry anything else. */
+export function subjectPackage(ecosystem: string, name: string): string | null {
+  return SUBJECT_NAME.test(name) ? `${ecosystem}/${name}` : null;
+}
+const SUBJECT_KEY = /^[A-Za-z0-9._:-]{1,100}$/;
 
 export interface RenderInput {
   kind: EmailKind;
@@ -45,6 +63,16 @@ function pct(v: string | null): string {
   return v !== null && v !== '' && Number.isFinite(n) ? `${(n * 100).toFixed(1)}%` : (v ?? 'unknown');
 }
 
+/** "Package: PyPI/langchain. Fixed in 1.2.3" for a package alert; empty for anything else. */
+export function packageLine(i: RenderItem): string {
+  if (!i.pkg) return '';
+  const fixed =
+    i.pkg.fixed.length > 0
+      ? `Fixed in ${i.pkg.fixed.map((v) => cut(clean(v), 60)).join(', ')}`
+      : 'no fixed version yet';
+  return `Package: ${cut(clean(i.pkg.label), 100)}. ${fixed}`;
+}
+
 /** The change in words. */
 export function describeChange(c: Change): string {
   switch (c.kind) {
@@ -70,25 +98,26 @@ export function describeChange(c: Change): string {
 function shortChange(c: Change): string {
   switch (c.kind) {
     case 'newly_exploited':
-      return 'exploited in the wild';
+      return 'is exploited';
     case 'public_exploit':
       return 'has a public exploit';
     case 'epss_band':
       return 'EPSS moved';
     case 'fix_released':
-      return 'fix released';
+      return 'has a fix';
     case 'cvss_change':
       return 'CVSS changed';
     case 'breach_notice':
-      return 'new breach notice';
+      return 'has a new breach notice';
     case 'new_advisory':
-      return 'new advisory';
+      return 'has a new advisory';
     default:
-      return 'updated';
+      return 'was updated';
   }
 }
 
 export function itemTitle(i: RenderItem): string {
+  if (i.pkg) return cut(clean(i.change.entity_key), 140); // a package alert shows our key, not a source's title
   return cut(clean(i.title) || clean(i.change.entity_key), 140);
 }
 
@@ -99,14 +128,27 @@ export function itemLink(i: RenderItem, appBase: string): string {
     : `${base}/e/${encodeURIComponent(i.change.entity_key)}`;
 }
 
+/**
+ * The subject of a one-item instant email. No text from any source: the entry ID (checked) or the package from
+ * the user's own watch row, never a title.
+ */
+function singleSubject(i: RenderItem): string {
+  if (i.pkg && i.change.kind === 'new_advisory')
+    return `${PRODUCT_SHORT}: new advisory for ${i.pkg.subjectLabel ?? 'a watched package'}`;
+  const key = i.change.entity_key;
+  const who = SUBJECT_KEY.test(key)
+    ? key
+    : i.pkg
+      ? (i.pkg.subjectLabel ?? 'a watched package')
+      : 'a watched entry';
+  return `${PRODUCT_SHORT}: ${who} ${shortChange(i.change)}`;
+}
+
 export function subjectFor(kind: EmailKind, items: RenderItem[]): string {
   const n = items.length;
   let s: string;
   if (kind === 'instant')
-    s =
-      n === 1 && items[0]
-        ? `${PRODUCT_SHORT}: ${itemTitle(items[0])} ${shortChange(items[0].change)}`
-        : `${PRODUCT_SHORT}: ${n} updates on your watchlist`;
+    s = n === 1 && items[0] ? singleSubject(items[0]) : `${PRODUCT_SHORT}: ${n} updates on your watchlist`;
   else s = `${PRODUCT_SHORT} ${kind} digest: ${n} updates`;
   return cut(clean(s), 150);
 }
@@ -123,8 +165,8 @@ function credits(items: RenderItem[]): string {
 
 function reasonFor(kind: EmailKind): string {
   return kind === 'instant'
-    ? 'You are getting this because you turned on instant alerts for entries you watch.'
-    : `You are getting this ${kind} digest because you turned on alerts for entries you watch or searches you saved.`;
+    ? 'You are getting this because you turned on instant alerts for entries and packages you watch.'
+    : `You are getting this ${kind} digest because you turned on alerts for entries or packages you watch or searches you saved.`;
 }
 
 interface Group {
@@ -157,7 +199,13 @@ export function renderEmail(input: RenderInput): Rendered {
   for (const g of groups) {
     if (g.heading) text.push(g.heading, '');
     for (const i of g.items)
-      text.push(`- ${itemTitle(i)}`, `  ${describeChange(i.change)}`, `  ${itemLink(i, appBase)}`, '');
+      text.push(
+        `- ${itemTitle(i)}`,
+        `  ${describeChange(i.change)}`,
+        ...(i.pkg ? [`  ${packageLine(i)}`] : []),
+        `  ${itemLink(i, appBase)}`,
+        '',
+      );
   }
   text.push(
     reason,
@@ -177,7 +225,9 @@ export function renderEmail(input: RenderInput): Rendered {
       rows.push(
         `<tr><td style="padding:12px 24px;border-top:1px solid #e6e4de;font:14px/1.4 ${FONT};color:#121212">` +
           `<a href="${escapeHtml(itemLink(i, appBase))}" style="color:#121212;font-weight:600;text-decoration:none">${escapeHtml(itemTitle(i))}</a><br>` +
-          `<span style="color:#ef7d45">${escapeHtml(describeChange(i.change))}</span></td></tr>`,
+          `<span style="color:#ef7d45">${escapeHtml(describeChange(i.change))}</span>` +
+          (i.pkg ? `<br><span style="color:#6b6a64">${escapeHtml(packageLine(i))}</span>` : '') +
+          `</td></tr>`,
       );
   }
   const foot = (s: string) => `<div style="margin:0 0 6px">${s}</div>`;
@@ -196,4 +246,61 @@ export function renderEmail(input: RenderInput): Rendered {
     `</td></tr></table></body></html>`;
 
   return { subject, text: text.join('\n'), html };
+}
+
+export interface NoticeEvent {
+  at: string;
+  action: string;
+  target: string;
+  clientHost: string | null;
+}
+
+const ACTION_TEXT: Record<string, string> = {
+  add: 'Added to your watchlist',
+  remove: 'Removed from your watchlist',
+  alerts_on: 'Alerts turned on for',
+  digest_on: 'Email digest turned on',
+};
+
+/** One change in words. Every value is plain text, cut to 100 characters, never a link. */
+export function noticeLine(e: NoticeEvent): string {
+  const what = ACTION_TEXT[e.action] ?? 'Changed';
+  const target = e.target === 'settings' ? '' : `: ${cut(clean(e.target.replace(/^(pkg|entry):/, '')), 100)}`;
+  const app = e.clientHost ? ` · app (self-reported): ${cut(clean(e.clientHost), 100)}` : '';
+  return `${what}${target}${app} · ${cut(clean(e.at), 100)}`;
+}
+
+export const NOTICE_SUBJECT = 'Your MTI watchlist was changed';
+
+/** "Your MTI watchlist was changed": sent when an app changed the watchlist for the user, even with alerts off. */
+export function renderWatchNotice(events: NoticeEvent[], appBase: string): Rendered {
+  const link = `${appBase.replace(/\/+$/, '')}/account`;
+  const lines = events.map(noticeLine);
+  const intro = 'An app connected to your account through MCP changed your watchlist or alert settings:';
+  const outro = 'If you did not expect this, review your watchlist and your connected apps now.';
+  const text = [
+    NOTICE_SUBJECT,
+    '',
+    intro,
+    '',
+    ...lines.map((l) => `- ${l}`),
+    '',
+    outro,
+    `Watchlist: ${link}`,
+    PRODUCT_INTRO,
+  ];
+  const html =
+    `<!doctype html><html><body style="margin:0;padding:0;background:#fafaf8">` +
+    `<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;margin:0 auto;background:#fafaf8">` +
+    `<tr><td style="padding:24px 24px 12px;font:600 18px ${FONT};color:#121212">${escapeHtml(NOTICE_SUBJECT)}</td></tr>` +
+    `<tr><td style="padding:0 24px 12px;font:14px/1.5 ${FONT};color:#121212">${escapeHtml(intro)}</td></tr>` +
+    lines
+      .map(
+        (l) =>
+          `<tr><td style="padding:8px 24px;border-top:1px solid #e6e4de;font:14px/1.4 ${FONT};color:#121212">${escapeHtml(l)}</td></tr>`,
+      )
+      .join('') +
+    `<tr><td style="padding:16px 24px 24px;font:12px/1.5 ${FONT};color:#6b6a64">${escapeHtml(outro)}<br>` +
+    `<a href="${escapeHtml(link)}" style="color:#6b6a64">Your watchlist</a><br>${escapeHtml(PRODUCT_INTRO)}</td></tr></table></body></html>`;
+  return { subject: NOTICE_SUBJECT, text: text.join('\n'), html };
 }

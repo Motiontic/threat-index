@@ -103,3 +103,17 @@ describe('plan', () => {
     expect(q.emails[1]?.userId).toBe('d00');
   });
 });
+
+describe('plan: package rows and the per-user instant cap', () => {
+  const c = changes(change('c1', '2026-11-23T01:00:00Z'));
+  it('a pkg: row is an instant item', () => {
+    const p = plan([row('u1', 'c1', { via: 'pkg:PyPI/langchain' })], c, MON_9);
+    expect(p.emails.map((e) => e.kind)).toEqual(['instant']);
+  });
+  it('a user with 5 instant emails today gets none; 4 still gets one; items go to the digest at 03:00', () => {
+    const r = [row('u1', 'c1', { via: 'pkg:npm/x', digest: 'daily' })];
+    expect(plan(r, c, MON_9, new Map([['u1', 5]])).emails).toEqual([]);
+    expect(plan(r, c, MON_9, new Map([['u1', 4]])).emails).toHaveLength(1);
+    expect(plan(r, c, MON_3, new Map([['u1', 9]])).emails.map((e) => e.kind)).toEqual(['daily']);
+  });
+});

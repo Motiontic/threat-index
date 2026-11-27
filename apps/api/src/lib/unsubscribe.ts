@@ -19,6 +19,18 @@ export async function applyUnsubscribe(db: D1Database, p: UnsubscribePayload): P
         .bind(p.userId, p.item ?? '')
         .run();
       return;
+    case 'package': {
+      // `ecosystem/name`: ecosystems have no "/", names (npm scopes) may.
+      const at = (p.item ?? '').indexOf('/');
+      if (at < 1) return;
+      await db
+        .prepare(
+          'UPDATE watch_packages SET alerts_on = 0 WHERE user_id = ?1 AND ecosystem = ?2 AND name = ?3',
+        )
+        .bind(p.userId, (p.item ?? '').slice(0, at), (p.item ?? '').slice(at + 1))
+        .run();
+      return;
+    }
     case 'search':
       await db
         .prepare('UPDATE saved_searches SET alerts_on = 0 WHERE user_id = ?1 AND id = ?2')
@@ -44,6 +56,8 @@ function what(p: UnsubscribePayload): string {
       return 'digest email';
     case 'watch':
       return `alerts for ${escapeHtml(p.item ?? '')}`;
+    case 'package':
+      return `alerts for the package ${escapeHtml(p.item ?? '')}`;
     case 'search':
       return 'alerts for this saved search';
   }

@@ -253,10 +253,10 @@ describe('matching', () => {
 });
 
 describe('cap and providers', () => {
-  it('7. the 95 a day cap holds, and the next day sends the rest', async () => {
+  it('7. the 80 a day alert cap holds, and the next day sends the rest', async () => {
     await seedEmailLog('2026-11-24', 0);
     await E.DB_USERS.prepare('DELETE FROM email_log').run();
-    await seedEmailLog('2026-11-23', 93);
+    await seedEmailLog('2026-11-23', 78);
     await seedUser('inst');
     await seedWatch('inst', 'CVE-A');
     for (const u of ['d1', 'd2', 'd3']) {
@@ -268,7 +268,7 @@ describe('cap and providers', () => {
     await runNotify(withKey(), MON_3, f.deps);
     expect(f.sent).toHaveLength(2);
     expect(f.sent[0]?.body.to[0]).toBe('inst@example.com'); // instant first
-    expect(await sentCount()).toBe(95);
+    expect(await sentCount()).toBe(80);
     const left = await rows<{ user_id: string }>('SELECT DISTINCT user_id FROM alert_queue ORDER BY user_id');
     expect(left).toHaveLength(2);
     await runNotify(withKey(), new Date('2026-11-24T03:00:00.000Z'), f.deps);

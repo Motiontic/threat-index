@@ -15,3 +15,17 @@ export const MAX_QUEUE_ROWS = 5000;
 export const MAX_SAVED_SEARCHES = 5000;
 export const HOUR_MS = 3_600_000;
 export const DAY_MS = 24 * HOUR_MS;
+/** Alert emails stop here each day; the rest of the 95 daily cap is kept for watchlist change notices. */
+export const ALERT_DAILY_CAP = 80;
+/** Instant emails per user per UTC day; beyond it items wait for the digest. */
+export const MAX_INSTANT_PER_USER_PER_DAY = 5;
+/** Package matching never uses more D1 queries than this in one run. */
+export const MAX_MATCH_QUERIES = 15;
+export const MAX_WATCHED_PACKAGES = 20_000;
+/** A watchlist change is mailed once it is this old, at most once an hour per user, up to this many at a time. */
+export const NOTICE_MIN_AGE_MS = 10 * 60_000;
+export const NOTICE_GAP_MS = HOUR_MS;
+export const MAX_NOTICE_EVENTS = 100;
+export const WATCH_EVENT_TTL_DAYS = 30;
+/** Most distinct fixed versions listed for one package in an alert. */
+export const MAX_FIXED_LISTED = 5;

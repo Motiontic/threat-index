@@ -46,7 +46,7 @@ describe('subjects', () => {
   });
 
   it('one item, many items, digests', () => {
-    expect(subjectFor('instant', [item()])).toBe('MTI: Acme Gateway RCE exploited in the wild');
+    expect(subjectFor('instant', [item()])).toBe('MTI: CVE-2026-0001 is exploited');
     expect(subjectFor('instant', [item(), item()])).toBe('MTI: 2 updates on your watchlist');
     expect(subjectFor('daily', [item(), item()])).toBe('MTI daily digest: 2 updates');
     expect(subjectFor('weekly', [item()])).toBe('MTI weekly digest: 1 updates');

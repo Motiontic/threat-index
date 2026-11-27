@@ -10,7 +10,10 @@ export interface Outgoing {
   planned: PlannedEmail;
   key: string;
   rendered: Rendered;
-  unsubscribeUrl: string;
+  /** Null for a watchlist change notice: it is a security notice, not an alert, and has no unsubscribe. */
+  unsubscribeUrl: string | null;
+  /** `watch_events` ids a change notice covers; marked notified once the email is sent. */
+  eventIds?: string[];
 }
 
 export type SendStatus = 'sent' | 'dry_run' | 'failed';
@@ -36,12 +39,12 @@ export async function remainingToday(env: Env, runAt: Date): Promise<number> {
 
 const iso = (deps: Deps) => new Date(deps.now()).toISOString();
 
-async function reserveSlot(env: Env, day: string): Promise<boolean> {
+async function reserveSlot(env: Env, day: string, cap: number): Promise<boolean> {
   await env.DB_USERS.prepare('INSERT INTO email_log (day, sent) VALUES (?1, 0) ON CONFLICT (day) DO NOTHING')
     .bind(day)
     .run();
   const res = await env.DB_USERS.prepare('UPDATE email_log SET sent = sent + 1 WHERE day = ?1 AND sent < ?2')
-    .bind(day, EMAIL_DAILY_CAP)
+    .bind(day, cap)
     .run();
   return (res.meta.changes ?? 0) > 0;
 }
@@ -73,6 +76,13 @@ async function finish(
         i.changeId,
       ),
     ),
+    ...(o.eventIds ?? []).map((id) =>
+      env.DB_USERS.prepare('UPDATE watch_events SET notified_at = ?2 WHERE id = ?1 AND user_id = ?3').bind(
+        id,
+        now,
+        userId,
+      ),
+    ),
   ]);
 }
 
@@ -91,6 +101,8 @@ export async function sendAll(
   runAt: Date,
   emails: Outgoing[],
   gapMs: number,
+  /** Sends allowed today across all kinds, counted in `email_log`. Alerts pass less than the hard cap. */
+  cap: number = EMAIL_DAILY_CAP,
 ): Promise<SendSummary> {
   const summary: SendSummary = { byKind: {}, capReached: false, stopped: false };
   const count = (kind: EmailKind, s: SendStatus) => {
@@ -107,7 +119,7 @@ export async function sendAll(
       `INSERT INTO email_sends (idem_key, kind, change_count, status, created_at, updated_at)
        VALUES (?1, ?2, ?3, 'pending', ?4, ?4) ON CONFLICT (idem_key) DO NOTHING`,
     )
-      .bind(o.key, o.planned.kind, o.planned.items.length, now)
+      .bind(o.key, o.planned.kind, o.eventIds?.length ?? o.planned.items.length, now)
       .run();
     const prior = await env.DB_USERS.prepare(
       'SELECT status, provider_id FROM email_sends WHERE idem_key = ?1',
@@ -120,7 +132,7 @@ export async function sendAll(
       continue;
     }
 
-    if (!(await reserveSlot(env, day))) {
+    if (!(await reserveSlot(env, day, cap))) {
       summary.capReached = true;
       break;
     }
@@ -156,7 +168,7 @@ export async function sendAll(
           subject: o.rendered.subject,
           text: o.rendered.text,
           html: o.rendered.html,
-          headers: unsubscribeHeaders(o.unsubscribeUrl),
+          ...(o.unsubscribeUrl ? { headers: unsubscribeHeaders(o.unsubscribeUrl) } : {}),
         }),
         signal: AbortSignal.timeout(10_000),
       });

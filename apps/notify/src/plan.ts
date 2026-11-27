@@ -1,11 +1,16 @@
 import type { EmailKind } from '@ti/core/email';
 import type { Change } from './collect';
-import { DIGEST_HOUR_UTC, MAX_EMAILS_PER_RUN, MAX_ITEMS_PER_EMAIL } from './limits';
+import {
+  DIGEST_HOUR_UTC,
+  MAX_EMAILS_PER_RUN,
+  MAX_INSTANT_PER_USER_PER_DAY,
+  MAX_ITEMS_PER_EMAIL,
+} from './limits';
 
 export interface QueueRow {
   userId: string;
   changeId: string;
-  via: string; // 'watch' | 'search:<id>'
+  via: string; // 'watch' | 'pkg:<ecosystem>/<name>' | 'search:<id>'
   createdAt: string;
   email: string;
   alertInstant: number;
@@ -46,8 +51,19 @@ export function digestDue(row: Pick<QueueRow, 'digest' | 'digestWeekday'>, runAt
 const newestFirst = (a: PlanItem, b: PlanItem) =>
   a.change.at === b.change.at ? (a.changeId < b.changeId ? 1 : -1) : a.change.at < b.change.at ? 1 : -1;
 
-/** Pure: decides which emails go out this run. A user never gets two in one run. */
-export function plan(rows: QueueRow[], changes: ReadonlyMap<string, Change>, runAt: Date): Plan {
+/** An entry watch or a package watch: the rows instant alerts are for. */
+export const isWatchVia = (via: string): boolean => via === 'watch' || via.startsWith('pkg:');
+
+/**
+ * Pure: decides which emails go out this run. A user never gets two in one run.
+ * `instantToday` is how many instant emails each user already got today (UTC); at 5 their items wait for the digest.
+ */
+export function plan(
+  rows: QueueRow[],
+  changes: ReadonlyMap<string, Change>,
+  runAt: Date,
+  instantToday: ReadonlyMap<string, number> = new Map(),
+): Plan {
   const drop: Plan['drop'] = [];
   const byUser = new Map<string, { head: QueueRow; items: PlanItem[]; oldest: string }>();
   for (const r of rows) {
@@ -68,7 +84,9 @@ export function plan(rows: QueueRow[], changes: ReadonlyMap<string, Change>, run
 
   const emails: PlannedEmail[] = [];
   for (const [userId, u] of byUser) {
-    const instant = u.head.alertInstant === 1 ? u.items.filter((i) => i.via === 'watch') : [];
+    const instantOk =
+      u.head.alertInstant === 1 && (instantToday.get(userId) ?? 0) < MAX_INSTANT_PER_USER_PER_DAY;
+    const instant = instantOk ? u.items.filter((i) => isWatchVia(i.via)) : [];
     let kind: EmailKind;
     let items: PlanItem[];
     if (digestDue(u.head, runAt)) {

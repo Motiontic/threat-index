@@ -42,6 +42,7 @@ describe('unsubscribe tokens', () => {
     { userId: 'user_1', scope: 'digest', issuedAt: 0 },
     { userId: 'user_2', scope: 'watch', item: 'CVE-2025-0001', issuedAt: 1700000001 },
     { userId: 'user_3', scope: 'search', item: 'ss_9', issuedAt: 1700000002 },
+    { userId: 'user_4', scope: 'package', item: 'npm/@types/node', issuedAt: 1700000003 },
   ])('round trips scope $scope', async (p) => {
     expect(await verifyUnsubscribeToken(SECRET, await signUnsubscribeToken(SECRET, p))).toEqual(p);
   });
@@ -93,6 +94,7 @@ describe('unsubscribe tokens', () => {
       ['unknown scope', SECRET, { ...base, scope: 'nope' as never }],
       ['watch without item', SECRET, { ...base, scope: 'watch' }],
       ['search without item', SECRET, { ...base, scope: 'search' }],
+      ['package without item', SECRET, { ...base, scope: 'package' }],
       ['item on all', SECRET, { ...base, item: 'x' }],
       ['item on digest', SECRET, { ...base, scope: 'digest', item: 'x' }],
       ['fractional issuedAt', SECRET, { ...base, issuedAt: 1.5 }],

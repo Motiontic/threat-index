@@ -21,9 +21,12 @@ export async function reset(): Promise<void> {
       'email_log',
       'email_sends',
       'notify_state',
+      'watch_packages',
+      'watch_events',
     ].map((t) => E.DB_USERS.prepare(`DELETE FROM ${t}`)),
   );
   await E.DB_SIGNALS.prepare('DELETE FROM changes').run();
+  await E.DB_ADVISORIES.prepare('DELETE FROM affected').run();
   await E.DB_VULNS.prepare('DELETE FROM vulns').run();
   await E.DB_WORLD.prepare('DELETE FROM companies').run();
 }
@@ -161,3 +164,39 @@ export function captureLogs() {
     .mockImplementation((...a: unknown[]) => void lines.push(a.map(String).join(' ')));
   return { lines, restore: () => spy.mockRestore() };
 }
+
+export const seedPkgWatch = (user: string, ecosystem: string, name: string, alertsOn = 1) =>
+  E.DB_USERS.prepare(
+    "INSERT INTO watch_packages (user_id, ecosystem, name, created_at, alerts_on) VALUES (?1, ?2, ?3, '2026-01-01T00:00:00.000Z', ?4)",
+  )
+    .bind(user, ecosystem, name, alertsOn)
+    .run();
+export const seedAffected = (
+  ecosystem: string,
+  name: string,
+  source: string,
+  sourceId: string,
+  vulnKey: string,
+  fixed: string | null,
+  rangeNo = 0,
+) =>
+  E.DB_ADVISORIES.prepare(
+    `INSERT INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type, introduced, fixed)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'ECOSYSTEM', '0', ?7)`,
+  )
+    .bind(ecosystem, name, source, sourceId, rangeNo, vulnKey, fixed)
+    .run();
+export const seedEvent = (
+  user: string,
+  id: string,
+  at: string,
+  action: string,
+  target: string,
+  clientHost: string | null = 'agent.example.test',
+  notifiedAt: string | null = null,
+) =>
+  E.DB_USERS.prepare(
+    "INSERT INTO watch_events (id, user_id, at, action, target, via, client_host, notified_at) VALUES (?1, ?2, ?3, ?4, ?5, 'mcp', ?6, ?7)",
+  )
+    .bind(id, user, at, action, target, clientHost, notifiedAt)
+    .run();

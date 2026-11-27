@@ -126,6 +126,28 @@ describe('POST /unsubscribe', () => {
     expect(s.watch.every((r) => r.alerts_on === 1)).toBe(true);
   });
 
+  it('package: switches off one package watch of that user, scoped names included', async () => {
+    await E.DB_USERS.batch([
+      E.DB_USERS.prepare(
+        "INSERT INTO watch_packages (user_id, ecosystem, name, created_at) VALUES ('u1', 'npm', '@types/node', 'x'), ('u1', 'PyPI', 'langchain', 'x'), ('u2', 'npm', '@types/node', 'x')",
+      ),
+    ]);
+    expect((await post(await tok({ userId: 'u1', scope: 'package', item: 'npm/@types/node' }))).status).toBe(
+      200,
+    );
+    const rows = (
+      await E.DB_USERS.prepare(
+        'SELECT user_id, name, alerts_on FROM watch_packages ORDER BY user_id, name',
+      ).all()
+    ).results;
+    expect(rows).toEqual([
+      { user_id: 'u1', name: '@types/node', alerts_on: 0 },
+      { user_id: 'u1', name: 'langchain', alerts_on: 1 },
+      { user_id: 'u2', name: '@types/node', alerts_on: 1 },
+    ]);
+    await E.DB_USERS.exec('DELETE FROM watch_packages');
+  });
+
   it('is idempotent and tolerates missing users and items', async () => {
     const t = await tok({ userId: 'u1', scope: 'all' });
     expect((await post(t)).status).toBe(200);

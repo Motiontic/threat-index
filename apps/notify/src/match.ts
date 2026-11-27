@@ -2,7 +2,7 @@ import type { SavedSearchParams } from '@ti/core/account';
 import { searchTerms } from '@ti/core/search';
 import type { Change, Cursor } from './collect';
 import type { Env } from './env';
-import { D1_CHUNK, MAX_SAVED_SEARCHES } from './limits';
+import { D1_CHUNK, MAX_MATCH_QUERIES, MAX_SAVED_SEARCHES, MAX_WATCHED_PACKAGES } from './limits';
 
 export const DEFAULT_TRIGGERS = [
   'newly_exploited',
@@ -109,6 +109,154 @@ async function matchWatch(env: Env, byEntity: Map<string, Change[]>): Promise<Qu
   return out;
 }
 
+/** The change kinds a package watch hears about. */
+const PACKAGE_KINDS = new Set([
+  'new_advisory',
+  'newly_exploited',
+  'public_exploit',
+  'epss_band',
+  'fix_released',
+  'cvss_change',
+]);
+const SEP = '\u0000';
+
+/** `new` of a `new_advisory` change is `<source>:<source_id>`. */
+function recordOf(c: Change): { source: string; sourceId: string } | null {
+  const at = c.new?.indexOf(':') ?? -1;
+  return c.new && at > 0 && at < c.new.length - 1
+    ? { source: c.new.slice(0, at), sourceId: c.new.slice(at + 1) }
+    : null;
+}
+
+/**
+ * Package watches. At most MAX_MATCH_QUERIES D1 queries per run, however many changes there are:
+ * (1) the distinct watched set, (2) `affected` for the run's vuln keys and records, intersected in memory,
+ * (3) the users of the hits. Eligibility is the same as `matchWatch`. An OS watch (`Debian`) also matches rows
+ * stored with a release (`Debian:12`). A user's triggers are their own plus `new_advisory`.
+ */
+export async function matchPackages(env: Env, changes: Change[]): Promise<QueueInsert[]> {
+  const wanted = changes.filter((c) => PACKAGE_KINDS.has(c.kind));
+  if (wanted.length === 0) return [];
+  let queries = 0;
+  const watchedRows = (
+    await env.DB_USERS.prepare(
+      'SELECT DISTINCT ecosystem, name FROM watch_packages WHERE alerts_on = 1 LIMIT ?1',
+    )
+      .bind(MAX_WATCHED_PACKAGES + 1)
+      .all<{ ecosystem: string; name: string }>()
+  ).results;
+  queries++;
+  if (watchedRows.length === 0) return [];
+  if (watchedRows.length > MAX_WATCHED_PACKAGES)
+    console.log(JSON.stringify({ event: 'notify.watch_set_large', limit: MAX_WATCHED_PACKAGES }));
+  const watched = new Set(watchedRows.slice(0, MAX_WATCHED_PACKAGES).map((r) => r.ecosystem + SEP + r.name));
+
+  const vulnChanges = new Map<string, Change[]>(); // vuln_key → changes
+  const recordChanges = new Map<string, Change[]>(); // source SEP source_id → changes
+  for (const c of wanted) {
+    if (c.kind === 'new_advisory') {
+      const rec = recordOf(c);
+      if (!rec) continue;
+      const k = rec.source + SEP + rec.sourceId;
+      recordChanges.set(k, [...(recordChanges.get(k) ?? []), c]);
+    } else vulnChanges.set(c.entity_key, [...(vulnChanges.get(c.entity_key) ?? []), c]);
+  }
+
+  // Watched package → the changes that touch it.
+  const hits = new Map<string, Change[]>();
+  const hit = (eco: string, name: string, cs: Change[]) => {
+    const base = eco.split(':')[0] as string;
+    for (const k of new Set([eco + SEP + name, base + SEP + name])) {
+      if (!watched.has(k)) continue;
+      const list = hits.get(k) ?? [];
+      for (const c of cs) if (!list.includes(c)) list.push(c);
+      hits.set(k, list);
+    }
+  };
+  // Keep a reserve of queries for the users read below.
+  const USER_QUERIES = 3;
+  const affectedBudget = MAX_MATCH_QUERIES - queries - USER_QUERIES;
+  let used = 0;
+  let truncated = false;
+  const run = async <T>(
+    parts: T[][],
+    query: (
+      part: T[],
+    ) => Promise<{ ecosystem: string; name: string; source: string; source_id: string; vuln_key: string }[]>,
+    on: (r: Awaited<ReturnType<typeof query>>[number]) => void,
+  ) => {
+    for (const part of parts) {
+      if (used >= affectedBudget) {
+        truncated = true;
+        return;
+      }
+      used++;
+      for (const r of await query(part)) on(r);
+    }
+  };
+  type AffectedRow = { ecosystem: string; name: string; source: string; source_id: string; vuln_key: string };
+  const vulnKeys = [...vulnChanges.keys()];
+  await run(
+    chunks(vulnKeys, D1_CHUNK),
+    async (part) =>
+      (
+        await env.DB_ADVISORIES.prepare(
+          `SELECT DISTINCT ecosystem, name, source, source_id, vuln_key FROM affected WHERE vuln_key IN (${marks(part.length)})`,
+        )
+          .bind(...part)
+          .all<AffectedRow>()
+      ).results,
+    (r) => hit(r.ecosystem, r.name, vulnChanges.get(r.vuln_key) ?? []),
+  );
+  const records = [...recordChanges.keys()].map((k) => k.split(SEP) as [string, string]);
+  await run(
+    chunks(records, D1_CHUNK / 2),
+    async (part) =>
+      (
+        await env.DB_ADVISORIES.prepare(
+          `SELECT DISTINCT ecosystem, name, source, source_id, vuln_key FROM affected
+           WHERE (source, source_id) IN (VALUES ${part.map((_, i) => `(?${i * 2 + 1}, ?${i * 2 + 2})`).join(',')})`,
+        )
+          .bind(...part.flat())
+          .all<AffectedRow>()
+      ).results,
+    (r) => hit(r.ecosystem, r.name, recordChanges.get(r.source + SEP + r.source_id) ?? []),
+  );
+  queries += used;
+  if (truncated) console.log(JSON.stringify({ event: 'notify.package_match_truncated', queries }));
+  if (hits.size === 0) return [];
+
+  const out: QueueInsert[] = [];
+  const pairs = [...hits.keys()].sort().map((k) => k.split(SEP) as [string, string]);
+  const userParts = chunks(pairs, D1_CHUNK / 2);
+  if (userParts.length > USER_QUERIES)
+    console.log(JSON.stringify({ event: 'notify.package_match_truncated', queries }));
+  const seen = new Set<string>(); // userId SEP changeId: a change is queued once per user
+  for (const part of userParts.slice(0, USER_QUERIES)) {
+    const rows = (
+      await env.DB_USERS.prepare(
+        `SELECT w.user_id, w.ecosystem, w.name, u.alert_triggers FROM watch_packages w JOIN users u ON u.id = w.user_id
+         WHERE w.alerts_on = 1 AND ${ELIGIBLE} AND (u.alert_instant = 1 OR u.digest != 'off')
+         AND (w.ecosystem, w.name) IN (VALUES ${part.map((_, i) => `(?${i * 2 + 1}, ?${i * 2 + 2})`).join(',')})
+         ORDER BY w.user_id, w.ecosystem, w.name`,
+      )
+        .bind(...part.flat())
+        .all<{ user_id: string; ecosystem: string; name: string; alert_triggers: string }>()
+    ).results;
+    for (const r of rows) {
+      const triggers = parseTriggers(r.alert_triggers);
+      triggers.add('new_advisory'); // a package watch exists to hear about new advisories
+      for (const c of hits.get(r.ecosystem + SEP + r.name) ?? []) {
+        const k = r.user_id + SEP + c.id;
+        if (!triggers.has(c.kind) || seen.has(k)) continue;
+        seen.add(k);
+        out.push({ userId: r.user_id, changeId: c.id, via: `pkg:${r.ecosystem}/${r.name}` });
+      }
+    }
+  }
+  return out;
+}
+
 /** The changed entities, for search matching and titles. Key → doc. */
 export async function loadDocs(env: Env, changes: Change[]): Promise<Map<string, EntityDoc>> {
   const docs = new Map<string, EntityDoc>();
@@ -210,7 +358,9 @@ export async function matchAndQueue(
     const watch = await matchWatch(env, byEntity);
     const docs = await loadDocs(env, changes);
     const searches = await matchSearches(env, changes, docs);
-    inserts = [...watch, ...searches]; // watch first: a change matched both ways stays 'watch'
+    const packages = await matchPackages(env, changes);
+    // Entry watch first, then package watch, then saved search: a change is queued once per user (first wins).
+    inserts = [...watch, ...packages, ...searches];
   }
   const stmts = inserts.map((r) =>
     env.DB_USERS.prepare(
