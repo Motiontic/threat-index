@@ -355,3 +355,21 @@ An independent review of the first build found the items below. Fix all of them 
 11. **Small fixes from the loop's own review.**
     - The `remove` event names the entry key actually deleted. Write one event per removed key.
     - The rest of that review is covered by item 9.
+
+## Round 3: bring the branch up to date
+
+`main` has moved: the skills change (#61) and the Tasks change (#62) have merged. Rebase `feat/mcp-watch` onto
+the latest `origin/main` and resolve the conflicts:
+
+- `SPEC.md`: take this branch's version.
+- `apps/mcp/src/tools/shared.ts`:
+  - `ToolDef` already has optional `scope` and `hints` from the Tasks change. Keep one definition.
+    `scope: 'mti:watch'` must still mean `requireScopes('mti:read', 'mti:watch')`.
+  - Keep both sets of `ToolErrorCode` members.
+- `apps/mcp/src/mcp.ts`, `server.ts`, `env.ts`, `config.ts`, `.dev.vars.example`, `wrangler.jsonc`: keep both
+  sides.
+- Tests:
+  - remove the watch-tool skips in the "INSTRUCTIONS names every enabled tool" test (the lines exist now);
+  - regenerate the tool-list and tools-hash snapshots.
+
+Then run the full build and Workers tests again, and confirm that the watch tools still never become tasks.
