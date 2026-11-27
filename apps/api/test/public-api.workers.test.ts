@@ -280,6 +280,12 @@ describe('5a. cvss visibility follows the delivering source', () => {
     const vis = await json(await get('/v1/entries/CVE-2030-0060', { user: true }));
     expect(vis.entry.cvss).toBe(9.1);
   });
+  it('an old row whose score euvd could have delivered (CNA scorer name, enisa in sources) is hidden', async () => {
+    await vuln('CVE-2030-0061', { cvss: 8.8, cvss_source: 'GitHub_M', sources: '["enisa"]' });
+    const res = await json(await get('/v1/entries/CVE-2030-0061', { user: true }));
+    expect(res.entry).not.toHaveProperty('cvss');
+    expect(res.entry).not.toHaveProperty('cvssSource');
+  });
 });
 
 describe('5. credits', () => {

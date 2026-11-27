@@ -175,7 +175,10 @@ export function buildAnswer(input: BuildInput): { response: CheckResponse; stats
 
       const full = g.records.filter((r) => mode(r.source) === 'full');
       const firstRows = full.map((r) => r.rows[0] as AffectedRecordRow);
-      const cvssVisible = vuln && vuln.cvss !== null && visible(cvssDeliveredBy(vuln)) ? vuln.cvss : null;
+      const cvssOrigin = vuln ? cvssDeliveredBy(vuln) : null;
+      // An unknown delivering source (ambiguous old row) hides the score, like a hidden source.
+      const cvssVisible =
+        vuln && vuln.cvss !== null && cvssOrigin !== null && visible(cvssOrigin) ? vuln.cvss : null;
       const nums = firstRows.map((r) => numericSeverity(r.severity)).filter((n): n is number => n !== null);
       const rankCvss = cvssVisible ?? (nums.length ? Math.max(...nums) : null);
       const labels = firstRows
@@ -213,7 +216,7 @@ export function buildAnswer(input: BuildInput): { response: CheckResponse; stats
         cmp,
       );
       for (const s of sources) usedSources.add(s);
-      const cvssFrom = vuln ? cvssDeliveredBy(vuln) : null;
+      const cvssFrom = cvssOrigin;
       if (cvssFrom && cvssVisible !== null) usedSources.add(cvssFrom);
 
       const match: CheckMatch = {

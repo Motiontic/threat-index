@@ -153,7 +153,7 @@ route.get('/v1/techniques/:id', (c) =>
         const found =
           (
             await env.DB_VULNS.prepare(
-              `SELECT key, title, cvss, cvss_source, cvss_from, kev_added FROM vulns WHERE key IN (${placeholders(1, keys.length)})`,
+              `SELECT key, title, cvss, cvss_source, cvss_from, sources, kev_added FROM vulns WHERE key IN (${placeholders(1, keys.length)})`,
             )
               .bind(...keys)
               .all<{
@@ -162,6 +162,7 @@ route.get('/v1/techniques/:id', (c) =>
                 cvss: number | null;
                 cvss_source: string | null;
                 cvss_from: string | null;
+                sources: string | null;
                 kev_added: string | null;
               }>()
           ).results ?? [];
@@ -182,7 +183,7 @@ route.get('/v1/techniques/:id', (c) =>
             exploited: f.kev_added !== null,
           };
           const from = cvssDeliveredBy(f);
-          const hidden = from ? (vd.get(from) ?? 'hidden') === 'hidden' : false;
+          const hidden = !from || (vd.get(from) ?? 'hidden') === 'hidden';
           if (typeof f.cvss === 'number' && !hidden) item.cvss = f.cvss;
           vulns.push(item);
         }

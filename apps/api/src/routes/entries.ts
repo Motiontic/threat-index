@@ -133,7 +133,8 @@ async function loadEntry(env: ReadEnv, key: string, full: boolean) {
   const exploited =
     Boolean(row.kev_added) || row.ransomware === 1 || visibleSignals.some((s) => s.kind === 'exploited_wild');
 
-  const cvssHidden = cvssFrom ? !visible(cvssFrom) : false;
+  // An unknown delivering source (ambiguous old row) is hidden, like a hidden one.
+  const cvssHidden = !visible(cvssFrom);
   const base: VulnRow = cvssHidden ? { ...row, cvss: null, cvss_version: null, cvss_source: null } : row;
 
   const advisories: EntryAdvisory[] = realAdvs
