@@ -384,3 +384,51 @@ The `tasks-polish` change (#63) has merged since round 3, and it changes `mti_de
 - then run the full build and Workers tests.
 
 No other code changes.
+
+## Round 5: fixes from the re-review
+
+An independent re-review confirmed that most of round 2 is fixed. It found the items below; fix all of them.
+MTI runs on Workers Paid, so the D1 limit is 1,000 queries per invocation. Still keep notify's query count small
+and bounded.
+
+1. **The "known package" check must not scan** (blocker).
+   - Today `PUT /v1/me/watch/packages/...` runs a query that scans every row of an OS ecosystem (`Ubuntu:*`)
+     before answering. One account could run up reads and cost.
+   - Add a new advisories migration, `0003_affected_by_name.sql`: `CREATE INDEX affected_by_name ON affected
+     (name, ecosystem);`.
+   - The check becomes one indexed seek: `WHERE name = ?2 AND (ecosystem = ?1 OR (ecosystem > ?1 || ':' AND
+     ecosystem < ?1 || ';')) LIMIT 1`.
+   - Test with `EXPLAIN QUERY PLAN` that it uses `affected_by_name` with `name=?`, never a range scan of the
+     primary key.
+2. **The queue window and cap respect item class.**
+   - The per-user window orders by class first (entry watch, then package watch, then saved search), then
+     newest first. The "and N more" cut and the delete of covered rows use the same order.
+   - At the 200-row cap, a new watch or package row evicts the user's oldest saved-search row. Only saved-search
+     rows are dropped at the cap, never watch rows; if a user has 200 watch rows, the oldest watch row goes.
+3. **Package matching without chunk caps.**
+   - Use one statement for the `affected` lookup and one for the watcher lookup per run, each with
+     `IN (SELECT value FROM json_each(?1))` (or a json_each join), so the bound-parameter limit no longer forces
+     chunks or a 135-package cap.
+   - Look up watchers from the hit packages only. Remove the global watched-set read and its 50,000 cap.
+   - Match forward rows in `(at, id)` order, so the matched set is always a prefix. Store a lower bound for the
+     late read with the cursor, so late rows can't age out unmatched.
+   - If any cap remains, log `package_match_truncated` with counts, never names.
+4. **No redundant reads.** Remove `queueable`'s pre-reads. The INSERT already enforces the cap and the
+   `alerts_sent` check with `OR IGNORE`. Read notice events in one query.
+5. **Every dot is defanged.**
+   - In shown package names and IDs, every dot followed by a letter becomes `[.]` (`/\.(?=[A-Za-z])/g`).
+   - In client hosts, every dot does.
+6. **Notice priority.** Pick notice users in this order:
+   - users with a pending `remove` or `digest_on` event first;
+   - then users with the fewest notices in the last 24 hours;
+   - then the oldest pending event.
+
+   So a burst of other accounts can't delay the notice for a removal.
+
+Tests:
+- the index plan test;
+- class order in the window and at the cap;
+- one change touching 500 watched packages queues them all;
+- a late row survives a busy run;
+- `Go/verify-mti.com/reset.v2` and `mti.com.evil.io` are fully defanged;
+- a removal notice goes ahead of 30 other pending notices.
