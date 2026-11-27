@@ -19,6 +19,8 @@ export function jobCompleted(job) {
  *  - a source with a completed run or job: `{ until }`, the finish time of the earliest one;
  *  - a source with runs but none completed: `{ all: true }`;
  *  - a source with no runs (for example one read from CVE List records): absent, so none of its rows are.
+ * `skipped` runs don't count: they fetched and wrote nothing (ingest off, not configured, or read from another
+ * source's records).
  * @param {{source_id: string, status: string, error?: string|null, finished_at?: string|null, started_at?: string|null}[]} runs
  * @param {{source_id: string|null, kind: string, status: string, finished_at?: string|null, created_at?: string|null}[]} jobs
  * @returns {Map<string, {until: string} | {all: true}>}
@@ -32,6 +34,7 @@ export function firstLoadBoundaries(runs, jobs) {
     if (have === undefined || end < have) ends.set(source, end);
   };
   for (const r of runs) {
+    if (r.status === 'skipped') continue;
     seenRuns.add(r.source_id);
     if (runCompleted(r)) note(r.source_id, r.finished_at ?? r.started_at ?? '');
   }
@@ -60,6 +63,13 @@ export function eventAtOf(c, ctx) {
 }
 
 /**
+ * Kinds that are never `first_load`. `epss_band` rows come from the epss-diff job, which compares today's scores
+ * with yesterday's: a day's diff, never a first load. The live pipeline never marks them either. The source's
+ * runs only hand off to that job, so they never count as a completed pass.
+ */
+const NEVER_FIRST_LOAD = new Set(['epss_band']);
+
+/**
  * Plans the updates for rows with `quiet IS NULL`. Rows already quiet are never passed in, and any that are
  * are skipped. An update is planned only when it changes `event_at` or `quiet`, so a second run plans none.
  * Never plans `held`.
@@ -73,7 +83,7 @@ export function planQuiet(changes, ctx) {
     if (c.quiet !== null && c.quiet !== undefined) continue;
     const eventAt = eventAtOf(c, ctx) ?? c.event_at ?? null;
     let quiet = ageQuiet(eventAt, c.at);
-    if (quiet === null && c.source) {
+    if (quiet === null && c.source && !NEVER_FIRST_LOAD.has(c.kind)) {
       const b = ctx.boundaries.get(c.source);
       if (b && ('all' in b || c.at <= b.until)) quiet = 'first_load';
     }
