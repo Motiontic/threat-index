@@ -347,6 +347,7 @@ describe('deleteUserData', () => {
       db.prepare(
         `INSERT INTO watch_events (id, user_id, at, action, target, via) VALUES ('ev_del', 'user_del', '2026-11-25', 'add', 'pkg:npm/a', 'mcp')`,
       ),
+      db.prepare(`INSERT INTO instant_counts (user_id, day, n) VALUES ('user_del', '2026-11-26', 2)`),
       db.prepare(
         `INSERT INTO watch_events (id, user_id, at, action, target, via) VALUES ('ev_keep', 'user_keep', '2026-11-25', 'add', 'pkg:npm/a', 'mcp')`,
       ),
@@ -358,6 +359,7 @@ describe('deleteUserData', () => {
       'watch_packages WHERE user_id',
       'package_usage WHERE user_id',
       'watch_events WHERE user_id',
+      'instant_counts WHERE user_id',
     ]) {
       const row = await db.prepare(`SELECT count(*) AS n FROM ${t} = 'user_del'`).first<{ n: number }>();
       expect(row?.n, t).toBe(0);

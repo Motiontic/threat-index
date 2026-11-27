@@ -23,6 +23,7 @@ export async function reset(): Promise<void> {
       'notify_state',
       'watch_packages',
       'watch_events',
+      'instant_counts',
     ].map((t) => E.DB_USERS.prepare(`DELETE FROM ${t}`)),
   );
   await E.DB_SIGNALS.prepare('DELETE FROM changes').run();

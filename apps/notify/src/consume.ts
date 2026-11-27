@@ -10,18 +10,22 @@ import {
   D1_CHUNK,
   DAY_MS,
   DIGEST_HOUR_UTC,
+  INSTANT_COUNT_TTL_DAYS,
   MAX_FIXED_LISTED,
   MAX_NOTICE_EVENTS,
+  MAX_QUEUE_READ_PER_USER,
   MAX_QUEUE_ROWS,
+  NOTICE_DAILY_CAP,
   NOTICE_GAP_MS,
   NOTICE_MIN_AGE_MS,
+  NOTICE_PER_USER_PER_DAY,
   QUEUE_TTL_DAYS,
   SEND_GAP_MS,
   SENT_TTL_DAYS,
   WATCH_EVENT_TTL_DAYS,
 } from './limits';
 import { loadDocs, matchAndQueue } from './match';
-import { type PlannedEmail, plan, type QueueRow } from './plan';
+import { type Backlog, type PlannedEmail, plan, type QueueRow } from './plan';
 import { type PackageInfo, renderEmail, renderWatchNotice, subjectPackage } from './render';
 import { type Outgoing, remainingToday, sendAll } from './send';
 
@@ -40,19 +44,32 @@ function chunks<T>(xs: T[]): T[][] {
   return out;
 }
 
-async function loadQueue(env: Env): Promise<QueueRow[]> {
+/**
+ * The queue, per user: at most each user's MAX_QUEUE_READ_PER_USER newest rows (a window function), so one user's
+ * backlog can't fill the read for everyone. `backlog` has each user's full counts for the "and N more" line.
+ */
+async function loadQueue(env: Env): Promise<{ rows: QueueRow[]; backlog: Map<string, Backlog> }> {
   const rows = (
     await env.DB_USERS.prepare(
-      `SELECT q.user_id, q.change_id, q.via, q.created_at, u.email, u.alert_instant, u.digest, u.digest_weekday,
-              u.email_suppressed, u.deleted_at
-       FROM alert_queue q JOIN users u ON u.id = q.user_id ORDER BY q.created_at, q.user_id, q.change_id LIMIT ?1`,
+      `SELECT r.user_id, r.change_id, r.via, r.created_at, r.total, r.total_watch,
+              u.email, u.alert_instant, u.digest, u.digest_weekday, u.email_suppressed, u.deleted_at
+       FROM (
+         SELECT q.user_id, q.change_id, q.via, q.created_at,
+                ROW_NUMBER() OVER (PARTITION BY q.user_id ORDER BY q.created_at DESC, q.change_id DESC) AS rn,
+                COUNT(*) OVER (PARTITION BY q.user_id) AS total,
+                SUM(CASE WHEN q.via = 'watch' OR q.via LIKE 'pkg:%' THEN 1 ELSE 0 END) OVER (PARTITION BY q.user_id) AS total_watch
+         FROM alert_queue q
+       ) r JOIN users u ON u.id = r.user_id
+       WHERE r.rn <= ?2 ORDER BY r.created_at, r.user_id, r.change_id LIMIT ?1`,
     )
-      .bind(MAX_QUEUE_ROWS)
+      .bind(MAX_QUEUE_ROWS, MAX_QUEUE_READ_PER_USER)
       .all<{
         user_id: string;
         change_id: string;
         via: string;
         created_at: string;
+        total: number;
+        total_watch: number;
         email: string | null;
         alert_instant: number;
         digest: string;
@@ -61,18 +78,23 @@ async function loadQueue(env: Env): Promise<QueueRow[]> {
         deleted_at: string | null;
       }>()
   ).results;
-  return rows.map((r) => ({
-    userId: r.user_id,
-    changeId: r.change_id,
-    via: r.via,
-    createdAt: r.created_at,
-    email: r.email ?? '',
-    alertInstant: r.alert_instant,
-    digest: r.digest,
-    digestWeekday: r.digest_weekday,
-    suppressed: r.email_suppressed,
-    deleted: r.deleted_at,
-  }));
+  const backlog = new Map<string, Backlog>();
+  for (const r of rows) backlog.set(r.user_id, { total: r.total, watch: r.total_watch });
+  return {
+    backlog,
+    rows: rows.map((r) => ({
+      userId: r.user_id,
+      changeId: r.change_id,
+      via: r.via,
+      createdAt: r.created_at,
+      email: r.email ?? '',
+      alertInstant: r.alert_instant,
+      digest: r.digest,
+      digestWeekday: r.digest_weekday,
+      suppressed: r.email_suppressed,
+      deleted: r.deleted_at,
+    })),
+  };
 }
 
 async function loadChanges(env: Env, ids: string[]): Promise<Map<string, Change>> {
@@ -119,14 +141,11 @@ function scopeFor(e: PlannedEmail): { scope: UnsubscribeScope; item?: string } {
   return only ? { scope: 'watch', item: only } : { scope: 'all' };
 }
 
-/** Instant emails each user got since 00:00 UTC: distinct `alerts_sent.sent_at` values (one per email). */
+/** Instant emails each user already got today (UTC), from `instant_counts`. */
 async function loadInstantCounts(env: Env, runAt: Date): Promise<Map<string, number>> {
-  const since = `${utcDay(runAt)}T00:00:00.000Z`;
   const rows = (
-    await env.DB_USERS.prepare(
-      'SELECT user_id, COUNT(DISTINCT sent_at) AS n FROM alerts_sent WHERE sent_at >= ?1 GROUP BY user_id',
-    )
-      .bind(since)
+    await env.DB_USERS.prepare('SELECT user_id, n FROM instant_counts WHERE day = ?1')
+      .bind(utcDay(runAt))
       .all<{ user_id: string; n: number }>()
   ).results;
   return new Map(rows.map((r) => [r.user_id, r.n]));
@@ -140,28 +159,27 @@ async function loadPackageInfo(
   const out = new Map<string, PackageInfo>();
   const wanted = items.filter((i) => i.via.startsWith('pkg:'));
   if (wanted.length === 0) return out;
+  // Query `affected` by vuln_key only (the indexed column) and pick names in memory: one pass, no nested chunks.
   const keys = [...new Set(wanted.map((i) => i.key))];
-  const names = [...new Set(wanted.map((i) => i.via.slice(4).split('/').slice(1).join('/')))];
-  const rows: { ecosystem: string; name: string; vuln_key: string; fixed: string | null }[] = [];
-  for (const kPart of chunksOf(keys, D1_CHUNK / 2))
-    for (const nPart of chunksOf(names, D1_CHUNK / 2))
-      rows.push(
-        ...(
-          await env.DB_ADVISORIES.prepare(
-            `SELECT ecosystem, name, vuln_key, fixed FROM affected
-             WHERE vuln_key IN (${marks(kPart.length)}) AND name IN (${Array.from({ length: nPart.length }, (_, i) => `?${kPart.length + i + 1}`).join(',')})`,
-          )
-            .bind(...kPart, ...nPart)
-            .all<{ ecosystem: string; name: string; vuln_key: string; fixed: string | null }>()
-        ).results,
-      );
+  const byKey = new Map<string, { ecosystem: string; name: string; fixed: string | null }[]>();
+  for (const kPart of chunksOf(keys, D1_CHUNK))
+    for (const r of (
+      await env.DB_ADVISORIES.prepare(
+        `SELECT ecosystem, name, vuln_key, fixed FROM affected WHERE vuln_key IN (${marks(kPart.length)})`,
+      )
+        .bind(...kPart)
+        .all<{ ecosystem: string; name: string; vuln_key: string; fixed: string | null }>()
+    ).results) {
+      const list = byKey.get(r.vuln_key) ?? [];
+      list.push(r);
+      byKey.set(r.vuln_key, list);
+    }
   for (const w of wanted) {
     const slash = w.via.indexOf('/');
     const eco = w.via.slice(4, slash);
     const name = w.via.slice(slash + 1);
-    const mine = rows.filter(
-      (r) =>
-        r.vuln_key === w.key && r.name === name && (r.ecosystem === eco || r.ecosystem.startsWith(`${eco}:`)),
+    const mine = (byKey.get(w.key) ?? []).filter(
+      (r) => r.name === name && (r.ecosystem === eco || r.ecosystem.startsWith(`${eco}:`)),
     );
     const first = mine[0];
     const stored = [...new Set(mine.map((r) => r.fixed).filter((f): f is string => f !== null && f !== ''))];
@@ -183,22 +201,40 @@ const chunksOf = <T>(xs: T[], n: number): T[][] => {
   return out;
 };
 
+/** Watchlist change notices sent or dry-run today (UTC), from `email_sends`. */
+async function noticesToday(env: Env, runAt: Date): Promise<number> {
+  const row = await env.DB_USERS.prepare(
+    "SELECT COUNT(*) AS n FROM email_sends WHERE kind = 'watch_notice' AND status IN ('sent','dry_run') AND created_at >= ?1",
+  )
+    .bind(`${utcDay(runAt)}T00:00:00.000Z`)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
 /**
  * "Your MTI watchlist was changed": one email per user with pending MCP changes whose oldest is at least 10
- * minutes old, at most one an hour. Sent even when alerts are off, to the account's own address only.
+ * minutes old, at most one an hour and two a day per user, and NOTICE_DAILY_CAP a day in all. Users are picked by
+ * their oldest pending event, driven from the `watch_events_pending` index. Events not mailed carry over to the
+ * next run. Sent even when alerts are off, to the account's own address only.
  */
 async function sendWatchNotices(env: Env, d: Deps, runAt: Date): Promise<void> {
+  const room = NOTICE_DAILY_CAP - (await noticesToday(env, runAt));
+  if (room <= 0) return;
   const oldEnough = new Date(runAt.getTime() - NOTICE_MIN_AGE_MS).toISOString();
   const gap = new Date(runAt.getTime() - NOTICE_GAP_MS).toISOString();
+  const dayStart = `${utcDay(runAt)}T00:00:00.000Z`;
   const users = (
     await env.DB_USERS.prepare(
-      `SELECT u.id, u.email FROM users u
+      `SELECT p.user_id AS id, u.email FROM (
+         SELECT user_id, MIN(at) AS oldest FROM watch_events WHERE notified_at IS NULL
+         GROUP BY user_id HAVING MIN(at) <= ?1
+       ) p JOIN users u ON u.id = p.user_id
        WHERE u.email_suppressed = 0 AND u.deleted_at IS NULL AND u.email != ''
-         AND (SELECT MIN(at) FROM watch_events e WHERE e.user_id = u.id AND e.notified_at IS NULL) <= ?1
-         AND NOT EXISTS (SELECT 1 FROM watch_events e WHERE e.user_id = u.id AND e.notified_at > ?2)
-       ORDER BY u.id LIMIT ?3`,
+         AND NOT EXISTS (SELECT 1 FROM watch_events e WHERE e.user_id = p.user_id AND e.notified_at > ?2)
+         AND (SELECT COUNT(DISTINCT e.notified_at) FROM watch_events e WHERE e.user_id = p.user_id AND e.notified_at >= ?3) < ?4
+       ORDER BY p.oldest, p.user_id LIMIT ?5`,
     )
-      .bind(oldEnough, gap, MAX_EMAILS_FOR_NOTICES)
+      .bind(oldEnough, gap, dayStart, NOTICE_PER_USER_PER_DAY, room)
       .all<{ id: string; email: string }>()
   ).results;
   if (users.length === 0) return;
@@ -222,6 +258,8 @@ async function sendWatchNotices(env: Env, d: Deps, runAt: Date): Promise<void> {
         priority: 0,
         oldestQueued: events[0]?.at ?? '',
         items: [],
+        hidden: [],
+        more: 0,
       },
       key: await emailIdempotencyKey(u.id, 'watch_notice', ids),
       rendered: renderWatchNotice(
@@ -235,7 +273,6 @@ async function sendWatchNotices(env: Env, d: Deps, runAt: Date): Promise<void> {
   const summary = await sendAll(env, d, runAt, out, SEND_GAP_MS, EMAIL_DAILY_CAP);
   console.log(JSON.stringify({ event: 'notify.notices', users: out.length, ...summary }));
 }
-const MAX_EMAILS_FOR_NOTICES = 20;
 
 async function prune(env: Env, runAt: Date): Promise<void> {
   const ago = (days: number) => new Date(runAt.getTime() - days * DAY_MS);
@@ -247,6 +284,9 @@ async function prune(env: Env, runAt: Date): Promise<void> {
     env.DB_USERS.prepare('DELETE FROM alerts_sent WHERE sent_at < ?1').bind(sentCut.toISOString()),
     env.DB_USERS.prepare('DELETE FROM email_sends WHERE created_at < ?1').bind(sentCut.toISOString()),
     env.DB_USERS.prepare('DELETE FROM email_log WHERE day < ?1').bind(utcDay(sentCut)),
+    env.DB_USERS.prepare('DELETE FROM instant_counts WHERE day < ?1').bind(
+      utcDay(ago(INSTANT_COUNT_TTL_DAYS)),
+    ),
     env.DB_USERS.prepare('DELETE FROM watch_events WHERE at < ?1').bind(
       ago(WATCH_EVENT_TTL_DAYS).toISOString(),
     ),
@@ -269,12 +309,15 @@ export async function runNotify(env: Env, runAt: Date, deps: Partial<Deps> = {})
   // 1–2. Collect and match.
   const got = await collect(env, runAt);
   if (got.backlog) console.log(JSON.stringify({ event: 'notify.backlog', read: got.forwardCount }));
-  const queued = await matchAndQueue(env, got.changes, got.cursor, runAt);
+  const queued = await matchAndQueue(env, got.changes, got.cursor, runAt, {
+    forwardCount: got.forwardCount,
+    start: got.start,
+  });
 
   // 3. Plan.
-  const rows = await loadQueue(env);
+  const { rows, backlog } = await loadQueue(env);
   const changes = await loadChanges(env, [...new Set(rows.map((r) => r.changeId))]);
-  const { emails, drop } = plan(rows, changes, runAt, await loadInstantCounts(env, runAt));
+  const { emails, drop } = plan(rows, changes, runAt, await loadInstantCounts(env, runAt), backlog);
   for (let i = 0; i < drop.length; i += D1_CHUNK)
     await env.DB_USERS.batch(
       drop
@@ -318,6 +361,7 @@ export async function runNotify(env: Env, runAt: Date, deps: Partial<Deps> = {})
         const unsubscribeUrl = `${env.API_BASE.replace(/\/+$/, '')}${UNSUBSCRIBE_PATH}?t=${token}`;
         const rendered = renderEmail({
           kind: e.kind,
+          more: e.more,
           appBase: env.APP_BASE,
           unsubscribeUrl,
           items: e.items.map((i) => {
@@ -340,7 +384,15 @@ export async function runNotify(env: Env, runAt: Date, deps: Partial<Deps> = {})
         );
         out.push({ planned: e, key, rendered, unsubscribeUrl });
       }
-      summary = await sendAll(env, d, runAt, out, SEND_GAP_MS, ALERT_DAILY_CAP);
+      // Alerts get ALERT_DAILY_CAP of the day's sends; the notices sent today sit on top, so the total stays under 95.
+      summary = await sendAll(
+        env,
+        d,
+        runAt,
+        out,
+        SEND_GAP_MS,
+        Math.min(EMAIL_DAILY_CAP, ALERT_DAILY_CAP + (await noticesToday(env, runAt))),
+      );
     }
   }
 

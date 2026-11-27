@@ -59,7 +59,8 @@ async function handle(db: D1Database, evt: Awaited<ReturnType<typeof verifySvix>
           .prepare('SELECT email FROM users WHERE id = ?1')
           .bind(d.id)
           .first<{ email: string }>();
-        if (stored && stored.email !== '') console.warn(JSON.stringify({ event: 'email_cleared', userId: d.id }));
+        if (stored && stored.email !== '')
+          console.warn(JSON.stringify({ event: 'email_cleared', userId: d.id }));
       }
       await db
         .prepare(

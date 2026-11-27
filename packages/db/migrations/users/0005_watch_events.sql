@@ -11,6 +11,12 @@ CREATE TABLE watch_events (
 CREATE INDEX watch_events_by_user ON watch_events (user_id, at);
 CREATE INDEX watch_events_pending ON watch_events (notified_at, user_id);
 
+-- Instant emails sent per user per UTC day, for the daily cap per user. Rows older than 2 days are deleted by notify.
+CREATE TABLE instant_counts (
+  user_id TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, day)
+) WITHOUT ROWID;
+
 -- SQLite can't alter a CHECK: rebuild email_sends with 'watch_notice' allowed.
 CREATE TABLE email_sends_new (
   idem_key TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('instant','daily','weekly','watch_notice')),

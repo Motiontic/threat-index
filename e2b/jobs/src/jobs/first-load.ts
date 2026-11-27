@@ -444,7 +444,8 @@ export async function runLoad(
 
     if (packageDropped > 0)
       ctx.log('package rows left to the backfill', { rows: packageDropped + announceDropped, reason });
-    if (announceDropped > 0 && packageDropped === 0) ctx.log('new_advisory changes dropped', { rows: announceDropped });
+    if (announceDropped > 0 && packageDropped === 0)
+      ctx.log('new_advisory changes dropped', { rows: announceDropped });
     ctx.log('linked', { rows: rows.length, docs: docsLinked, skipped });
     if (!hasRecords()) ctx.log('no records: no lake part');
 

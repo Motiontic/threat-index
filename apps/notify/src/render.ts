@@ -23,16 +23,17 @@ export interface PackageInfo {
   fixed: string[];
 }
 
-const SUBJECT_NAME = /^[A-Za-z0-9@/._:-]{1,100}$/;
 /** The `ecosystem/name` of a watch row for a subject, or null when the name could carry anything else. */
 export function subjectPackage(ecosystem: string, name: string): string | null {
-  return SUBJECT_NAME.test(name) ? `${ecosystem}/${name}` : null;
+  const label = clean(`${ecosystem}/${name}`);
+  return SHOWN_NAME.test(label) ? defang(label) : null;
 }
-const SUBJECT_KEY = /^[A-Za-z0-9._:-]{1,100}$/;
 
 export interface RenderInput {
   kind: EmailKind;
   items: RenderItem[];
+  /** Queued updates this email covers but does not list: "and N more updates on your watchlist". */
+  more?: number;
   appBase: string;
   unsubscribeUrl: string;
 }
@@ -44,13 +45,39 @@ export interface Rendered {
 }
 
 /** Replaces control and line-separator characters (incl. CR/LF) with a space, so a value stays on one line. */
-function clean(s: string): string {
+export function clean(s: string): string {
   let out = '';
   for (const ch of s) {
     const c = ch.codePointAt(0) as number;
     out += c < 0x20 || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029 ? ' ' : ch;
   }
-  return out.replace(/ {2,}/g, ' ').trim();
+  // Format characters (bidi controls, zero-width characters, ...) are removed: they can make text read as something else.
+  return out
+    .replace(/\p{Cf}/gu, '')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
+/** A package name or entry ID is shown only if it is made of these characters. */
+const SHOWN_NAME = /^[A-Za-z0-9@/._:-]{1,100}$/;
+/** A fixed version is shown only if it is made of these characters. */
+const SHOWN_VERSION = /^[A-Za-z0-9.+~:_-]{1,40}$/;
+export const UNSHOWN_NAME = 'a package (see your watchlist)';
+
+/**
+ * Writes the last dot as `[.]` when 2 or more letters follow it (`verify-mti[.]com`), so a mail client does not
+ * turn the value into a link. `always` does it whatever follows (client hosts).
+ */
+export function defang(v: string, always = false): string {
+  const at = v.lastIndexOf('.');
+  if (at < 0) return v;
+  return always || /^[A-Za-z]{2,}/.test(v.slice(at + 1)) ? `${v.slice(0, at)}[.]${v.slice(at + 1)}` : v;
+}
+
+/** A package name or entry ID as it may be shown: checked, then defanged. */
+export function shownName(v: string): string {
+  const t = clean(v);
+  return SHOWN_NAME.test(t) ? defang(t) : UNSHOWN_NAME;
 }
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -66,11 +93,10 @@ function pct(v: string | null): string {
 /** "Package: PyPI/langchain. Fixed in 1.2.3" for a package alert; empty for anything else. */
 export function packageLine(i: RenderItem): string {
   if (!i.pkg) return '';
+  const versions = i.pkg.fixed.map(clean).filter((v) => SHOWN_VERSION.test(v));
   const fixed =
-    i.pkg.fixed.length > 0
-      ? `Fixed in ${i.pkg.fixed.map((v) => cut(clean(v), 60)).join(', ')}`
-      : 'no fixed version yet';
-  return `Package: ${cut(clean(i.pkg.label), 100)}. ${fixed}`;
+    versions.length > 0 ? `Fixed in ${versions.map((v) => defang(v)).join(', ')}` : 'no fixed version yet';
+  return `Package: ${shownName(i.pkg.label)}. ${fixed}`;
 }
 
 /** The change in words. */
@@ -117,7 +143,7 @@ function shortChange(c: Change): string {
 }
 
 export function itemTitle(i: RenderItem): string {
-  if (i.pkg) return cut(clean(i.change.entity_key), 140); // a package alert shows our key, not a source's title
+  if (i.pkg) return shownName(i.change.entity_key); // a package alert shows our key, not a source's title
   return cut(clean(i.title) || clean(i.change.entity_key), 140);
 }
 
@@ -135,17 +161,18 @@ export function itemLink(i: RenderItem, appBase: string): string {
 function singleSubject(i: RenderItem): string {
   if (i.pkg && i.change.kind === 'new_advisory')
     return `${PRODUCT_SHORT}: new advisory for ${i.pkg.subjectLabel ?? 'a watched package'}`;
-  const key = i.change.entity_key;
-  const who = SUBJECT_KEY.test(key)
-    ? key
-    : i.pkg
-      ? (i.pkg.subjectLabel ?? 'a watched package')
-      : 'a watched entry';
+  const key = clean(i.change.entity_key);
+  const who =
+    SHOWN_NAME.test(key) && !key.includes('/')
+      ? defang(key)
+      : i.pkg
+        ? (i.pkg.subjectLabel ?? 'a watched package')
+        : 'a watched entry';
   return `${PRODUCT_SHORT}: ${who} ${shortChange(i.change)}`;
 }
 
-export function subjectFor(kind: EmailKind, items: RenderItem[]): string {
-  const n = items.length;
+export function subjectFor(kind: EmailKind, items: RenderItem[], more = 0): string {
+  const n = items.length + more;
   let s: string;
   if (kind === 'instant')
     s = n === 1 && items[0] ? singleSubject(items[0]) : `${PRODUCT_SHORT}: ${n} updates on your watchlist`;
@@ -189,7 +216,8 @@ const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-s
 
 export function renderEmail(input: RenderInput): Rendered {
   const { kind, items, appBase, unsubscribeUrl } = input;
-  const subject = subjectFor(kind, items);
+  const more = Math.max(0, input.more ?? 0);
+  const subject = subjectFor(kind, items, more);
   const groups = grouped(items);
   const reason = reasonFor(kind);
   const manage = `${appBase.replace(/\/+$/, '')}/account`;
@@ -207,6 +235,8 @@ export function renderEmail(input: RenderInput): Rendered {
         '',
       );
   }
+  const watchlist = `${appBase.replace(/\/+$/, '')}/account`;
+  if (more > 0) text.push(`and ${more} more updates on your watchlist: ${watchlist}`, '');
   text.push(
     reason,
     `Manage alerts: ${manage}`,
@@ -230,6 +260,11 @@ export function renderEmail(input: RenderInput): Rendered {
           `</td></tr>`,
       );
   }
+  if (more > 0)
+    rows.push(
+      `<tr><td style="padding:12px 24px;border-top:1px solid #e6e4de;font:14px/1.4 ${FONT};color:#121212">` +
+        `<a href="${escapeHtml(watchlist)}" style="color:#121212">and ${more} more updates on your watchlist</a></td></tr>`,
+    );
   const foot = (s: string) => `<div style="margin:0 0 6px">${s}</div>`;
   const html =
     `<!doctype html><html><body style="margin:0;padding:0;background:#fafaf8">` +
@@ -265,9 +300,9 @@ const ACTION_TEXT: Record<string, string> = {
 /** One change in words. Every value is plain text, cut to 100 characters, never a link. */
 export function noticeLine(e: NoticeEvent): string {
   const what = ACTION_TEXT[e.action] ?? 'Changed';
-  const target = e.target === 'settings' ? '' : `: ${cut(clean(e.target.replace(/^(pkg|entry):/, '')), 100)}`;
-  const app = e.clientHost ? ` · app (self-reported): ${cut(clean(e.clientHost), 100)}` : '';
-  return `${what}${target}${app} · ${cut(clean(e.at), 100)}`;
+  const target = e.target === 'settings' ? '' : `: ${shownName(e.target.replace(/^(pkg|entry):/, ''))}`;
+  const app = e.clientHost ? ` · app (self-reported): ${defang(cut(clean(e.clientHost), 100), true)}` : '';
+  return `${what}${target}${app} · ${defang(cut(clean(e.at), 100))}`;
 }
 
 export const NOTICE_SUBJECT = 'Your MTI watchlist was changed';

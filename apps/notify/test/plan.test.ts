@@ -116,4 +116,47 @@ describe('plan: package rows and the per-user instant cap', () => {
     expect(plan(r, c, MON_9, new Map([['u1', 4]])).emails).toHaveLength(1);
     expect(plan(r, c, MON_3, new Map([['u1', 9]])).emails.map((e) => e.kind)).toEqual(['daily']);
   });
+
+  it('orders entry watches, then packages, then saved searches, newest first within each', () => {
+    const cs = changes(
+      change('s1', '2026-11-23T05:00:00Z'),
+      change('p1', '2026-11-23T03:00:00Z'),
+      change('p2', '2026-11-23T04:00:00Z'),
+      change('w1', '2026-11-23T01:00:00Z'),
+    );
+    const p = plan(
+      [
+        row('u1', 's1', { via: 'search:x', digest: 'daily' }),
+        row('u1', 'p1', { via: 'pkg:npm/a', digest: 'daily' }),
+        row('u1', 'p2', { via: 'pkg:npm/a', digest: 'daily' }),
+        row('u1', 'w1', { digest: 'daily' }),
+      ],
+      cs,
+      MON_3,
+    );
+    expect(p.emails[0]?.items.map((i) => i.changeId)).toEqual(['w1', 'p2', 'p1', 's1']);
+  });
+  it('counts queued rows it did not read as "more", and says which rows it covers', () => {
+    const rows = Array.from({ length: 50 }, (_, i) =>
+      row('u1', `c${i}`, { createdAt: `2026-11-23T01:${String(i).padStart(2, '0')}:00.000Z` }),
+    );
+    const cs = changes(...rows.map((r) => change(r.changeId, '2026-11-23T01:00:00Z')));
+    const p = plan(rows, cs, MON_9, new Map(), new Map([['u1', { total: 130, watch: 120 }]]));
+    expect(p.emails[0]?.items).toHaveLength(50);
+    expect(p.emails[0]?.more).toBe(70); // an instant email counts the watch rows it did not read
+    expect(p.emails[0]?.coversBefore).toEqual({
+      createdAt: '2026-11-23T01:00:00.000Z',
+      changeId: 'c0',
+      watchOnly: true,
+    });
+    const digest = plan(
+      rows.map((r) => ({ ...r, alertInstant: 0, digest: 'daily' })),
+      cs,
+      MON_3,
+      new Map(),
+      new Map([['u1', { total: 130, watch: 120 }]]),
+    );
+    expect(digest.emails[0]?.more).toBe(80);
+    expect(digest.emails[0]?.coversBefore?.watchOnly).toBe(false);
+  });
 });

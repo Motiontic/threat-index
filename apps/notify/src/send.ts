@@ -58,24 +58,55 @@ async function finish(
   o: Outgoing,
   status: 'sent' | 'dry_run',
   providerId: string | null,
+  /** False when this replays an email an earlier run already sent: it must not count towards the cap again. */
+  fresh: boolean,
+  day: string,
 ): Promise<void> {
   const now = iso(deps);
-  const { userId, items } = o.planned;
+  const { userId, items, hidden, coversBefore } = o.planned;
+  const covered = [...items, ...hidden];
   await env.DB_USERS.batch([
     env.DB_USERS.prepare(
       'UPDATE email_sends SET status = ?2, provider_id = COALESCE(?3, provider_id), error = NULL, updated_at = ?4 WHERE idem_key = ?1',
     ).bind(o.key, status, providerId, now),
-    ...items.map((i) =>
+    ...covered.map((i) =>
       env.DB_USERS.prepare(
         'INSERT OR IGNORE INTO alerts_sent (user_id, change_id, sent_at) VALUES (?1, ?2, ?3)',
       ).bind(userId, i.changeId, now),
     ),
-    ...items.map((i) =>
+    ...covered.map((i) =>
       env.DB_USERS.prepare('DELETE FROM alert_queue WHERE user_id = ?1 AND change_id = ?2').bind(
         userId,
         i.changeId,
       ),
     ),
+    // Queued rows the email counted ("and N more") but did not list: older than the oldest row it read.
+    ...(coversBefore
+      ? (() => {
+          const where = `user_id = ?1 AND (created_at < ?2 OR (created_at = ?2 AND change_id < ?3))${
+            coversBefore.watchOnly ? " AND (via = 'watch' OR via LIKE 'pkg:%')" : ''
+          }`;
+          return [
+            env.DB_USERS.prepare(
+              `INSERT OR IGNORE INTO alerts_sent (user_id, change_id, sent_at)
+               SELECT user_id, change_id, ?4 FROM alert_queue WHERE ${where}`,
+            ).bind(userId, coversBefore.createdAt, coversBefore.changeId, now),
+            env.DB_USERS.prepare(`DELETE FROM alert_queue WHERE ${where}`).bind(
+              userId,
+              coversBefore.createdAt,
+              coversBefore.changeId,
+            ),
+          ];
+        })()
+      : []),
+    ...(fresh && o.planned.kind === 'instant'
+      ? [
+          env.DB_USERS.prepare(
+            `INSERT INTO instant_counts (user_id, day, n) VALUES (?1, ?2, 1)
+             ON CONFLICT (user_id, day) DO UPDATE SET n = n + 1`,
+          ).bind(userId, day),
+        ]
+      : []),
     ...(o.eventIds ?? []).map((id) =>
       env.DB_USERS.prepare('UPDATE watch_events SET notified_at = ?2 WHERE id = ?1 AND user_id = ?3').bind(
         id,
@@ -127,7 +158,7 @@ export async function sendAll(
       .bind(o.key)
       .first<{ status: string; provider_id: string | null }>();
     if (prior?.status === 'sent' || prior?.status === 'dry_run') {
-      await finish(env, deps, o, prior.status, null);
+      await finish(env, deps, o, prior.status, null, false, day);
       count(o.planned.kind, prior.status);
       continue;
     }
@@ -146,7 +177,7 @@ export async function sendAll(
           key: o.key,
         }),
       );
-      await finish(env, deps, o, 'dry_run', null);
+      await finish(env, deps, o, 'dry_run', null, true, day);
       count(o.planned.kind, 'dry_run');
       continue;
     }
@@ -187,7 +218,7 @@ export async function sendAll(
         const j = (await res.json()) as { id?: unknown };
         if (typeof j.id === 'string') providerId = j.id;
       } catch {}
-      await finish(env, deps, o, 'sent', providerId);
+      await finish(env, deps, o, 'sent', providerId, true, day);
       count(o.planned.kind, 'sent');
       continue;
     }

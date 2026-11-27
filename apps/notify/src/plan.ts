@@ -20,6 +20,14 @@ export interface QueueRow {
   deleted: string | null;
 }
 
+/** What a user has queued in all, read next to their (at most 50) newest rows. */
+export interface Backlog {
+  /** All the user's queued rows. */
+  total: number;
+  /** Those that are entry or package watches (the rows an instant email covers). */
+  watch: number;
+}
+
 export interface PlanItem {
   changeId: string;
   via: string;
@@ -34,6 +42,12 @@ export interface PlannedEmail {
   priority: number;
   oldestQueued: string;
   items: PlanItem[];
+  /** Loaded rows past the item cap: counted in `more`, deleted with the email. */
+  hidden: PlanItem[];
+  /** Queued rows this email covers but does not list: "and N more updates on your watchlist". */
+  more: number;
+  /** When `more > 0`: the queued rows older than this (created_at, change_id) are covered too, and deleted with it. */
+  coversBefore?: { createdAt: string; changeId: string; watchOnly: boolean };
 }
 
 export interface Plan {
@@ -48,8 +62,13 @@ export function digestDue(row: Pick<QueueRow, 'digest' | 'digestWeekday'>, runAt
   return row.digest === 'weekly' && runAt.getUTCDay() === row.digestWeekday;
 }
 
-const newestFirst = (a: PlanItem, b: PlanItem) =>
-  a.change.at === b.change.at ? (a.changeId < b.changeId ? 1 : -1) : a.change.at < b.change.at ? 1 : -1;
+/** Entry watches, then package watches, then saved searches. */
+const classOf = (via: string): number => (via === 'watch' ? 0 : via.startsWith('pkg:') ? 1 : 2);
+
+/** Entry-watch items, then package items, then saved-search items; newest first within each. */
+const emailOrder = (a: PlanItem, b: PlanItem) =>
+  classOf(a.via) - classOf(b.via) ||
+  (a.change.at === b.change.at ? (a.changeId < b.changeId ? 1 : -1) : a.change.at < b.change.at ? 1 : -1);
 
 /** An entry watch or a package watch: the rows instant alerts are for. */
 export const isWatchVia = (via: string): boolean => via === 'watch' || via.startsWith('pkg:');
@@ -63,10 +82,28 @@ export function plan(
   changes: ReadonlyMap<string, Change>,
   runAt: Date,
   instantToday: ReadonlyMap<string, number> = new Map(),
+  backlog: ReadonlyMap<string, Backlog> = new Map(),
 ): Plan {
   const drop: Plan['drop'] = [];
-  const byUser = new Map<string, { head: QueueRow; items: PlanItem[]; oldest: string }>();
+  const byUser = new Map<
+    string,
+    { head: QueueRow; items: PlanItem[]; oldest: string; loaded: number; loadedWatch: number; edge: QueueRow }
+  >();
   for (const r of rows) {
+    const u = byUser.get(r.userId) ?? {
+      head: r,
+      items: [],
+      oldest: r.createdAt,
+      loaded: 0,
+      loadedWatch: 0,
+      edge: r,
+    };
+    byUser.set(r.userId, u);
+    u.loaded++;
+    if (classOf(r.via) < 2) u.loadedWatch++;
+    // The oldest loaded row: queued rows older than it were not read.
+    if (r.createdAt < u.edge.createdAt || (r.createdAt === u.edge.createdAt && r.changeId < u.edge.changeId))
+      u.edge = r;
     if (r.suppressed !== 0 || r.deleted !== null || r.email === '') {
       drop.push({ userId: r.userId, changeId: r.changeId });
       continue;
@@ -76,14 +113,13 @@ export function plan(
       drop.push({ userId: r.userId, changeId: r.changeId });
       continue;
     }
-    const u = byUser.get(r.userId) ?? { head: r, items: [], oldest: r.createdAt };
     u.items.push({ changeId: r.changeId, via: r.via, change });
     if (r.createdAt < u.oldest) u.oldest = r.createdAt;
-    byUser.set(r.userId, u);
   }
 
   const emails: PlannedEmail[] = [];
   for (const [userId, u] of byUser) {
+    if (u.items.length === 0) continue;
     const instantOk =
       u.head.alertInstant === 1 && (instantToday.get(userId) ?? 0) < MAX_INSTANT_PER_USER_PER_DAY;
     const instant = instantOk ? u.items.filter((i) => isWatchVia(i.via)) : [];
@@ -96,13 +132,25 @@ export function plan(
       kind = 'instant';
       items = instant;
     } else continue;
+    const sorted = [...items].sort(emailOrder);
+    const shown = sorted.slice(0, MAX_ITEMS_PER_EMAIL);
+    const b = backlog.get(userId);
+    const watchOnly = kind === 'instant';
+    // Rows the email covers without listing: loaded ones past the 50, and queued ones that were not read at all.
+    const unread = b ? Math.max(0, watchOnly ? b.watch - u.loadedWatch : b.total - u.loaded) : 0;
+    const more = sorted.length - shown.length + unread;
     emails.push({
       userId,
       email: u.head.email,
       kind,
       priority: instant.length > 0 ? 0 : kind === 'daily' ? 1 : 2,
       oldestQueued: u.oldest,
-      items: [...items].sort(newestFirst).slice(0, MAX_ITEMS_PER_EMAIL),
+      items: shown,
+      hidden: sorted.slice(MAX_ITEMS_PER_EMAIL),
+      more,
+      ...(unread > 0
+        ? { coversBefore: { createdAt: u.edge.createdAt, changeId: u.edge.changeId, watchOnly } }
+        : {}),
     });
   }
   emails.sort(

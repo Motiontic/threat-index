@@ -155,3 +155,14 @@ export const watchEvents = sqliteTable(
     index('watch_events_pending').on(t.notifiedAt, t.userId),
   ],
 );
+
+/** Instant emails sent to a user on a UTC day: the per-user daily cap. Rows older than 2 days are deleted. */
+export const instantCounts = sqliteTable(
+  'instant_counts',
+  {
+    userId: text('user_id').notNull(),
+    day: text('day').notNull(),
+    n: integer('n').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.day] })],
+);

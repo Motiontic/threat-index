@@ -253,10 +253,10 @@ describe('matching', () => {
 });
 
 describe('cap and providers', () => {
-  it('7. the 80 a day alert cap holds, and the next day sends the rest', async () => {
+  it('7. the 75 a day alert cap holds, and the next day sends the rest', async () => {
     await seedEmailLog('2026-11-24', 0);
     await E.DB_USERS.prepare('DELETE FROM email_log').run();
-    await seedEmailLog('2026-11-23', 78);
+    await seedEmailLog('2026-11-23', 73);
     await seedUser('inst');
     await seedWatch('inst', 'CVE-A');
     for (const u of ['d1', 'd2', 'd3']) {
@@ -268,7 +268,7 @@ describe('cap and providers', () => {
     await runNotify(withKey(), MON_3, f.deps);
     expect(f.sent).toHaveLength(2);
     expect(f.sent[0]?.body.to[0]).toBe('inst@example.com'); // instant first
-    expect(await sentCount()).toBe(80);
+    expect(await sentCount()).toBe(75);
     const left = await rows<{ user_id: string }>('SELECT DISTINCT user_id FROM alert_queue ORDER BY user_id');
     expect(left).toHaveLength(2);
     await runNotify(withKey(), new Date('2026-11-24T03:00:00.000Z'), f.deps);
@@ -367,7 +367,7 @@ describe('cursor and messages', () => {
     expect(await queueOf('u1')).toEqual([]);
   });
 
-  it('10b. a full forward read logs a backlog and the rest waits', async () => {
+  it('10b. a full forward read logs a backlog; one user is capped at 200 queued rows, the cursor still moves', async () => {
     await seedUser('u1', { instant: 0, digest: 'daily' });
     await seedWatch('u1', 'CVE-A');
     const stmts = Array.from({ length: 501 }, (_, i) =>
@@ -378,9 +378,12 @@ describe('cursor and messages', () => {
     await E.DB_SIGNALS.batch(stmts);
     await runNotify(withKey(), MON_9, fakeFetch().deps);
     expect(logs.lines.some((l) => l.includes('notify.backlog'))).toBe(true);
-    expect((await queueOf('u1')).length).toBe(500);
+    expect(logs.lines.some((l) => l.includes('notify.queue_capped'))).toBe(true);
+    expect((await queueOf('u1')).length).toBe(200);
     await runNotify(withKey(), new Date('2026-11-23T12:00:00.000Z'), fakeFetch().deps);
-    expect((await queueOf('u1')).length).toBe(501);
+    expect((await queueOf('u1')).length).toBe(200);
+    const cursor = await rows<{ value: string }>("SELECT value FROM notify_state WHERE name = 'cursor'");
+    expect(JSON.parse(cursor[0]?.value ?? '{}').id).toBe('c0500'); // all 501 were read across two runs
   });
 
   it('11. a bad message is acked and writes nothing; a D1 failure retries', async () => {

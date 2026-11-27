@@ -23,6 +23,8 @@ export interface Collected {
   forwardCount: number;
   /** Where to continue next run. */
   cursor: Cursor;
+  /** The cursor this run started from. */
+  start: Cursor;
   /** True when there is no stored cursor row and this is a first run. */
   first: boolean;
   backlog: boolean;
@@ -78,6 +80,7 @@ export async function collect(env: Env, runAt: Date): Promise<Collected> {
     changes,
     forwardCount: forward.length,
     cursor: last ? { at: last.at, id: last.id, ...(start.since ? { since: start.since } : {}) } : start,
+    start,
     first,
     backlog: forward.length >= MAX_CHANGES_PER_RUN,
   };
