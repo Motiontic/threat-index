@@ -521,3 +521,30 @@ Tests:
 - Re-running the same window doesn't send duplicates (the `alert_queue` key and `alerts_sent`).
 
 Don't run `git fetch` or `git push`.
+
+## Round 8: last fixes from the round-7 review
+
+The round-7 design is sound. Fix these and change nothing else.
+
+1. **`loadPackageInfo` uses the vuln index** (`consume.ts`, around line 194).
+   - Today SQLite picks `affected_by_name` for OS ecosystems and reads every row of that package in that OS.
+   - Write the name filter as `+name = ?3` (or use `INDEXED BY affected_by_vuln`), so the plan is
+     `affected_by_vuln (vuln_key=? AND ecosystem…)`.
+   - Order fixed versions, so the five shown are deterministic: `ORDER BY fixed`.
+   - Add "and more" when there are more than five.
+   - Add a plan test that asserts `affected_by_vuln` for both an npm item and an `Ubuntu` item.
+2. **`new_advisory` records first.** In `matchPackages`, read the record chunks (from `new_advisory` changes)
+   before the vuln-key chunks, so at the pair cap the new advisories are kept. Delete `matchOrder` if nothing
+   else needs it.
+3. **Bounded queue inserts.**
+   - While building inserts, keep at most `MAX_QUEUED_PER_USER` rows per user in memory, in class order: entry
+     watch, then package, then saved search.
+   - Split the inserts into batches of at most 500 statements.
+   - Save the cursor in the last batch, after every insert, so a failure before it simply retries the window.
+     Inserts are idempotent through the `alert_queue` key.
+4. **Tests.**
+   - Run the kernel test with `maxPairs: 3`, and assert no truncation (DISTINCT collapses the releases).
+   - Add a test that a round-6 cursor JSON with a `late` field parses and is saved without it.
+   - Add a test that 1,000 watchers × 500 changes stays within the per-user cap and inserts in bounded batches.
+
+Don't run `git fetch` or `git push`.
