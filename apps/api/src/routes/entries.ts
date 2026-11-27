@@ -1,5 +1,5 @@
 import type { Credit, EntryAdvisory, EntryChange, EntryFull, EntryResponse, EntrySignal } from '@ti/core/api';
-import { cvssDeliveredBy } from '@ti/core/cvss';
+import { cvssCandidates, cvssShown } from '@ti/core/cvss';
 import { rawReceiptKey } from '@ti/core/r2-keys';
 import { Hono } from 'hono';
 import { requireUser } from '../lib/auth';
@@ -107,12 +107,12 @@ async function loadEntry(env: ReadEnv, key: string, full: boolean) {
     : [];
 
   const sources = parseStringArray(row.sources);
-  const cvssFrom = cvssDeliveredBy(row);
+  const cvssFrom = cvssCandidates(row);
   const realAdvs = advRows.filter((a) => a.source !== 'alias');
   const aliasRows = advRows.filter((a) => a.source === 'alias');
   const display: DisplayMap = await displayFor(env.SETTINGS, [
     ...sources,
-    ...(cvssFrom ? [cvssFrom] : []),
+    ...cvssFrom,
     ...realAdvs.map((a) => a.source),
     ...signalRows.map((s) => s.source),
     ...changeRows.flatMap((c) => (c.source ? [c.source] : [])),
@@ -134,7 +134,7 @@ async function loadEntry(env: ReadEnv, key: string, full: boolean) {
     Boolean(row.kev_added) || row.ransomware === 1 || visibleSignals.some((s) => s.kind === 'exploited_wild');
 
   // An unknown delivering source (ambiguous old row) is hidden, like a hidden one.
-  const cvssHidden = !visible(cvssFrom);
+  const cvssHidden = !cvssShown(row, (id) => visible(id));
   const base: VulnRow = cvssHidden ? { ...row, cvss: null, cvss_version: null, cvss_source: null } : row;
 
   const advisories: EntryAdvisory[] = realAdvs
@@ -159,7 +159,7 @@ async function loadEntry(env: ReadEnv, key: string, full: boolean) {
       return out;
     });
 
-  const baseIds = [...sources, ...(cvssFrom && !cvssHidden && row.cvss !== null ? [cvssFrom] : [])];
+  const baseIds = [...sources, ...(!cvssHidden && row.cvss !== null ? cvssFrom : [])];
   const creditIds = full
     ? [
         ...baseIds,

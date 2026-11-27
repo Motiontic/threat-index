@@ -4,7 +4,7 @@
  * sources show id, source and URL only.
  */
 
-import { cvssDeliveredBy } from '@ti/core/cvss';
+import { cvssCandidates, cvssShown } from '@ti/core/cvss';
 import type {
   CheckMatch,
   CheckResponse,
@@ -175,10 +175,8 @@ export function buildAnswer(input: BuildInput): { response: CheckResponse; stats
 
       const full = g.records.filter((r) => mode(r.source) === 'full');
       const firstRows = full.map((r) => r.rows[0] as AffectedRecordRow);
-      const cvssOrigin = vuln ? cvssDeliveredBy(vuln) : null;
-      // An unknown delivering source (ambiguous old row) hides the score, like a hidden source.
-      const cvssVisible =
-        vuln && vuln.cvss !== null && cvssOrigin !== null && visible(cvssOrigin) ? vuln.cvss : null;
+      // Shown only when every source that may have delivered the score is visible (an empty list hides it).
+      const cvssVisible = vuln && vuln.cvss !== null && cvssShown(vuln, visible) ? vuln.cvss : null;
       const nums = firstRows.map((r) => numericSeverity(r.severity)).filter((n): n is number => n !== null);
       const rankCvss = cvssVisible ?? (nums.length ? Math.max(...nums) : null);
       const labels = firstRows
@@ -216,8 +214,7 @@ export function buildAnswer(input: BuildInput): { response: CheckResponse; stats
         cmp,
       );
       for (const s of sources) usedSources.add(s);
-      const cvssFrom = cvssOrigin;
-      if (cvssFrom && cvssVisible !== null) usedSources.add(cvssFrom);
+      if (vuln && cvssVisible !== null) for (const id of cvssCandidates(vuln)) usedSources.add(id);
 
       const match: CheckMatch = {
         id: key,

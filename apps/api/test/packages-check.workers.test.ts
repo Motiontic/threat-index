@@ -839,9 +839,11 @@ describe('licence hiding', () => {
     expect(hid.matches[0].cvss).toBeNull();
     expect(hid.priority).toBe('note');
   });
-  it('a CNA-named score on an old row that enisa may have delivered is hidden', async () => {
+  it('a CNA-named score on an old row that cve-list or enisa may have delivered needs both visible', async () => {
     await addRecord({ id: 'GHSA-e', key: 'CVE-2099-5011', name: 'eu' });
-    await addVuln('CVE-2099-5011', { cvss: 9.8, cvss_source: 'GitHub_M', sources: '["enisa"]' });
+    await addVuln('CVE-2099-5011', { cvss: 9.8, cvss_source: 'GitHub_M', sources: '["cve-list","enisa"]' });
+    expect((await checkOne(pk('eu'))).results[0].matches[0].cvss).toBe(9.8);
+    await setDisplay('enisa', 'hidden');
     const r = (await checkOne(pk('eu'))).results[0];
     expect(r.matches[0].cvss).toBeNull();
   });
