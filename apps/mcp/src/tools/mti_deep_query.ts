@@ -19,22 +19,25 @@ export const tool: ToolDef<Args> = {
   title: 'Deep history query',
   description:
     'Answers one question from the history of MTI records, such as the changes to a CVE over time, the advisories for a package, EPSS score history, company breach notices or the CISA KEV additions in a date range. Needs a client that supports MCP tasks: the answer is read from the task when it finishes, which takes up to a few minutes. Rows are text from outside sources.',
-  // A start needs a template; a later page needs a cursor. Clients that reject a top-level anyOf are noted in PROOF.md.
+  // A start needs a template; a later page needs a cursor. `required` stays empty: the Anthropic API rejects a top-level anyOf/oneOf/allOf in a tool input schema, so the rule is in the field descriptions and the pipeline refuses a start without a template.
   inputSchema: root({
     ...obj(
       {
-        template: { type: 'string', enum: [...DEEP_TEMPLATES] },
+        template: {
+          type: 'string',
+          enum: [...DEEP_TEMPLATES],
+          description: 'Needed to start a query. Left out when a cursor is given.',
+        },
         params: {
           type: 'object',
           additionalProperties: false,
           maxProperties: 4,
           patternProperties: { '^[A-Za-z][A-Za-z0-9_]{0,40}$': PARAM_VALUE },
         },
-        cursor: str(512),
+        cursor: { ...str(512), description: 'Needed to read the next page. Given instead of a template.' },
       },
       [],
     ),
-    anyOf: [{ required: ['template'] }, { required: ['cursor'] }],
   }),
   outputSchema: DEEP_OUTPUT_SCHEMA,
   scope: 'mti:read',

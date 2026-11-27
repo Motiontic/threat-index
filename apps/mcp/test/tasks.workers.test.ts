@@ -1362,9 +1362,12 @@ describe('retry, charge and cancel rules', () => {
     expect(done.status).toBe('completed');
     expect(done.result.structuredContent.checked).toBe(1500);
   });
-  it('mti_deep_query asks for a template or a cursor', async () => {
+  it('mti_deep_query has no top-level combinator and describes template or cursor', async () => {
     const { tool } = await import('../src/tools/mti_deep_query');
-    expect((tool.inputSchema as any).anyOf).toEqual([{ required: ['template'] }, { required: ['cursor'] }]);
+    const sch = tool.inputSchema as any;
+    for (const k of ['anyOf', 'oneOf', 'allOf']) expect(sch[k]).toBeUndefined();
+    expect(sch.properties.template.description).toMatch(/start/);
+    expect(sch.properties.cursor.description).toMatch(/next page/);
   });
 });
 
