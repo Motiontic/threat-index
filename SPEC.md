@@ -373,3 +373,14 @@ the latest `origin/main` and resolve the conflicts:
   - regenerate the tool-list and tools-hash snapshots.
 
 Then run the full build and Workers tests again, and confirm that the watch tools still never become tasks.
+
+## Round 4: up to date again
+
+The `tasks-polish` change (#63) has merged since round 3, and it changes `mti_deep_query`'s input schema. Rebase
+`feat/mcp-watch` onto the latest `origin/main`:
+- take this branch's `SPEC.md`;
+- regenerate the tool-list snapshot by running only that test with `-u`, so that the list has all twelve tools
+  in `TOOL_ORDER`, and rename the test to say twelve;
+- then run the full build and Workers tests.
+
+No other code changes.
