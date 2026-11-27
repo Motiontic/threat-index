@@ -3,6 +3,7 @@ import { gzipSync } from 'node:zlib';
 import { parseKev } from '@ti/parsers/kev';
 import { describe, expect, it } from 'vitest';
 import type { DeepQuery } from '../../../../apps/api/src/lib/deep-templates.ts';
+import { deepRows } from '../../../../apps/mcp/src/tools/deep-format.ts';
 import { fakeApi, fakeCtx, gz, job } from '../test-support.ts';
 import type { JobDeps } from '../types.ts';
 import { buildSql, finish, MAX_SCAN_OBJECTS, matches, planScan, run } from './deep-query.ts';
@@ -183,6 +184,20 @@ describe('finish', () => {
     expect(f.sources).toEqual(['cisa-kev']);
     expect(finish(kev, rows, 1)).toMatchObject({ truncated: true });
   });
+  it('what finish writes is what the MCP tool reads: rows flatten, jobId is dropped', () => {
+    const f = finish(kev, [lakeRow('cisa-kev', '01A', 0, sig)]);
+    expect(f.rows[0]).toMatchObject({ source: 'cisa-kev', jobId: '01A', record: { ref: 'CVE-2025-1' } });
+    const rows = deepRows(f.rows, 'kev-additions');
+    expect(rows).toEqual([
+      {
+        source: 'cisa-kev',
+        vuln_key: 'CVE-2025-1',
+        kind: 'exploited_wild',
+        ref: 'CVE-2025-1',
+        first_seen: '2025-05-05',
+      },
+    ]);
+  });
   it('cve-history keeps each distinct version', () => {
     const v = (modified: string) => ({ key: 'CVE-2024-1', modified, source: 'nvd', aliases: [] });
     const f = finish(q('cve-history', { cve: 'CVE-2024-1' }), [
@@ -201,7 +216,15 @@ describe('finish', () => {
 describe('run', () => {
   const request = (template: string, params: Record<string, string>) =>
     JSON.stringify({ kind: 'deep-query', template, params, createdAt: NOW.toISOString() });
-  const deps = (over: Partial<JobDeps> = {}): JobDeps => ({ now: () => NOW, duckdb: () => null, ...over });
+  const blocked = (async () => {
+    throw new Error('blocked');
+  }) as unknown as typeof fetch;
+  const deps = (over: Partial<JobDeps> = {}): JobDeps => ({
+    now: () => NOW,
+    duckdb: () => null,
+    fetch: blocked,
+    ...over,
+  });
   const kevRecords = parseKev(JSON.parse(readFileSync(at('fixtures/cisa-kev/sample.json'), 'utf8'))).records;
 
   function seeded() {
@@ -386,6 +409,18 @@ describe('run', () => {
     const { ctx, logs } = fakeCtx(api);
     await expect(run(job({ kind: 'deep-query' }), ctx, deps())).rejects.toThrow('deep-query: query_failed');
     expect(logs.some((l) => l.msg === 'duckdb missing')).toBe(true);
+  });
+  it('fails when 1.1.1.1 answers, before reading anything', async () => {
+    const api = seeded();
+    const { ctx } = fakeCtx(api);
+    const reached = (async (url: unknown) => {
+      expect(String(url)).toBe('https://1.1.1.1/');
+      return new Response('hello');
+    }) as unknown as typeof fetch;
+    await expect(run(job({ kind: 'deep-query' }), ctx, deps({ fetch: reached }))).rejects.toThrow(
+      'deep-query: egress not restricted',
+    );
+    expect(api.store.has(`jobs/${job().id}/result.json`)).toBe(false);
   });
   it('a missing or invalid request.json fails invalid_params', async () => {
     const api = seeded();

@@ -31,6 +31,7 @@ import { affectedRows, packageCost, packageWrites, type SkipReason } from '@ti/l
 import { isAdvisoryRecord } from '@ti/linker/kinds';
 import { loadParser, type ParserModule } from '@ti/parsers/load';
 import { SOURCES, type SourceConfig } from '@ti/sources/registry';
+import { checkEgress } from '../lib/egress.ts';
 import { writeInboxChunks } from '../lib/inbox.ts';
 import { type LakeFormat, readLakePart } from '../lib/lake.ts';
 import { lakeDeps } from '../lib/work.ts';
@@ -49,8 +50,6 @@ export const RUN_BUDGET_MS = 40 * 60 * 1000;
 export const MAX_SOURCE_BYTES = 8 * 1024 ** 3;
 export const MAX_COPIES = 2_000_000;
 export const STATE_KEY = 'lake/state/affected-backfill/state.json';
-const EGRESS_PROBE = 'https://1.1.1.1/';
-const EGRESS_TIMEOUT_MS = 5000;
 
 export interface SourceState {
   after: string | null;
@@ -276,19 +275,6 @@ async function loadHistory(
   return h;
 }
 
-/** Fetches `https://1.1.1.1/`. An answer of any kind means the sandbox is not restricted to the API. */
-async function checkEgress(jobDeps: JobDeps): Promise<void> {
-  const doFetch = jobDeps.fetch ?? fetch;
-  let reached = false;
-  try {
-    await doFetch(EGRESS_PROBE, { signal: AbortSignal.timeout(EGRESS_TIMEOUT_MS) });
-    reached = true;
-  } catch {
-    /* blocked, as it should be */
-  }
-  if (reached) throw new Error('affected-backfill: egress not restricted');
-}
-
 const emptyCounts = (): BackfillCounts['sources'][string] => ({
   copies: 0,
   latest: 0,
@@ -314,7 +300,7 @@ export async function backfill(
 ): Promise<void> {
   const now = jobDeps.now ?? (() => new Date());
   // 1. Egress check.
-  await checkEgress(jobDeps);
+  await checkEgress('affected-backfill', jobDeps);
 
   // 2. State, and the clock.
   const started = now().getTime();

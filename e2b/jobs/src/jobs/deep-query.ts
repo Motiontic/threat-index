@@ -15,6 +15,7 @@ import {
   MAX_RESULT_ROWS,
   validateDeepQuery,
 } from '../../../../apps/api/src/lib/deep-templates.ts';
+import { checkEgress } from '../lib/egress.ts';
 import { writeInbox } from '../lib/inbox.ts';
 import { findDuckdb } from '../lib/lake.ts';
 import { withScratch } from '../lib/work.ts';
@@ -268,6 +269,7 @@ const parseLines = (text: string): Rec[] =>
 
 export const run: RunJob = async (job: Job, ctx: JobContext, deps: JobDeps = {}) => {
   const now = deps.now ?? (() => new Date());
+  await checkEgress('deep-query', deps);
   const t0 = Date.now();
   const req = await ctx.api.getObject(`jobs/${job.id}/request.json`);
   let stored: Record<string, unknown> | null = null;
