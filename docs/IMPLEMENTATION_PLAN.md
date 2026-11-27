@@ -155,7 +155,7 @@ This table doubles as the alias map. Any ID (GHSA, RHSA, USN, JVNDB, EUVD…) re
 | Table     | Key                                   | Main columns                                                                                                                                 |
 | --------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `signals` | (`vuln_key`, `kind`, `source`, `ref`) | kind (exploited_wild / public_exploit / detection / poc / ransomware), first_seen, evidence_date, url                                        |
-| `changes` | `id` (ULID)                           | entity_key, kind (newly_exploited / public_exploit / epss_band / fix_released / cvss_change / breach_notice), old, new, at (indexed), source |
+| `changes` | `id` (ULID)                           | entity_key, kind (newly_exploited / public_exploit / epss_band / fix_released / cvss_change / breach_notice), old, new, at (indexed), source, event_at (when it happened at the source), quiet (null = may alert; else `old`, `first_load` or `held`; partial index `changes_alerts`) |
 
 ### `ti_world`
 
@@ -479,6 +479,20 @@ Cloudflare AI Search can replace this later.
    - a link to each entry.
 6. **Bounces and complaints:** the Resend webhook marks the address `email_suppressed`, and nothing more is sent to it.
 7. **Domain:** send from `alerts@<domain>` with the SPF, DKIM and DMARC records Resend gives.
+
+**Which changes may alert (`changes.quiet`).** A quiet row is stored and shown on its entry page, but notify and the home page skip it (`quiet IS NULL`).
+
+- `old`: the event (`event_at`) is more than 14 days before the row was written (`ALERT_WINDOW_DAYS`, `packages/linker/src/age.ts`).
+- `first_load`: the row came from a source's first pass (a first-load job, or collector steps until the source has a completed run or job).
+- `held`: the run (or `big-file` job) already wrote `MAX_ALERTS_PER_RUN` (2,000) alertable rows. The logs say so: `changes.held` and `changes.quiet`.
+
+Release held rows by hand once you have looked at them:
+
+```sql
+UPDATE changes SET quiet = NULL WHERE quiet = 'held' AND source = ? AND at BETWEEN ? AND ?;
+```
+
+Backlog: `node scripts/quiet-old-changes.mjs --env staging|production` is a dry run; add `--apply` to write. It only sets `event_at` and `quiet` on rows with `quiet IS NULL`, and a second run changes nothing.
 
 **Defaults:** `alert_frequency = 'daily'`; all five triggers on; `digest_weekday` = the weekday the user signed up.
 
