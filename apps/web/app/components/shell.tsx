@@ -361,6 +361,7 @@ export function Footer({ sourceCount }: { sourceCount: number | null }) {
         <Link to="/index">Index A–Z</Link>
         <Link to="/search">Search everything</Link>
         <Link to="/sources">Sources</Link>
+        <Link to="/privacy">Privacy</Link>
         <FooterAccountLink />
         <a href={REPO}>Code on GitHub</a>
       </nav>

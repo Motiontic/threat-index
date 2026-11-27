@@ -13,6 +13,7 @@ export default [
   route('techniques', 'routes/techniques.tsx'),
   route('technique/:id', 'routes/technique.tsx'),
   route('sources', 'routes/sources.tsx'),
+  route('privacy', 'routes/privacy.tsx'),
   route('sign-in/*', 'routes/sign-in.tsx'),
   route('sign-up/*', 'routes/sign-up.tsx'),
   route('account', 'routes/account.tsx'),
