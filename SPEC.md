@@ -1,73 +1,51 @@
-# privacy-page: a privacy page for MTI that says exactly what the code stores
+# cvss-visibility: show CVSS scores when the MTI source that delivered them is visible
 
 ## Why
 
-MTI has accounts, email alerts, watchlists, saved searches, an MCP server with sign-in, long-running Tasks and
-deep queries, but no privacy page. People signing up, and the Claude connector directory, need one. It must be
-accurate: every statement on it has to match what the code actually does today.
+`vulns.cvss_source` holds who scored the vulnerability: a CNA or ADP name such as `CISA-ADP`, `GitHub_M`,
+`Patchstack`, `VulDB` or `NVD` (`packages/core/src/types.ts`: "who gave the score"). Both `GET /v1/entries/:id`
+(`apps/api/src/routes/entries.ts`, around lines 113–160) and the package check
+(`apps/api/src/lib/packages-answer.ts`, around line 176) pass that name to the source-display check, which knows
+only MTI source IDs (`cve-list`, `nvd`, `github-advisory-db`…). An unknown ID counts as `hidden`, so every score
+is hidden.
 
-## Current state (on main)
-
-- `apps/web/app/routes/` has no privacy route. The site menu links "Terms" (check whether a terms page exists, and
-  link the privacy page next to it).
-- Data the code stores, to be verified and completed from the code itself:
-  - D1 `ti_users`: `users` (Clerk user ID, email, display name, alert settings), `watch`, `watch_packages`,
-    `saved_searches`, `alert_queue`, `alerts_sent`, `email_log`, `email_sends`, `webhook_events`, `package_usage`,
-    `mcp_blocks`, `watch_events`, `instant_counts`, `notify_state`;
-  - D1 `ti_control.jobs` (deep queries: owner, template, parameters, status) and the R2 results under the job prefix;
-  - MCP Tasks: per-user Durable Object storage, deleted 90 minutes after creation (70 for deep queries);
-  - request logs (ti-api, ti-mcp, ti-web, notify) and what each logs (ti-mcp never logs `sub` or client ID; check
-    ti-api);
-  - `deleteUserData` (`apps/api/src/lib/delete-user.ts`): what account deletion removes, and what stays.
-- Third parties that process data: Clerk (sign-in), Resend (email), Cloudflare (hosting, logs, D1, R2), E2B (deep
-  query sandboxes: query parameters only), Google (only if the user signs in with Google). Check for any analytics,
-  error tracking or fonts loaded from third parties, and list them too.
+Result on production: 183,606 vulnerabilities have a CVSS score in D1, and none is shown on entry pages or in
+package checks. Log4Shell (CVE-2021-44228, CVSS 10) shows no score. The "plan" priority (CVSS 7.0 or more) then
+rests only on advisory severity labels.
 
 ## What to build
 
-1. A route `/privacy` in `apps/web` using the site's normal page layout, linked from the footer and from wherever
-   "Terms" is linked. It is served on staging and production like other pages, with no sign-in.
-2. Plain-English sections:
-   - Who runs MTI and how to reach us;
-   - What we collect, and why;
-   - What we don't collect: MTI never asks for source code, files or secrets; the MCP tools take package names and
-     versions only;
-   - How long we keep each thing;
-   - Who processes data for us;
-   - Email alerts and how to stop them;
-   - The MCP server and AI clients: what an AI client sends, Tasks results kept 90 minutes, nothing used for
-     training;
-   - Deleting your account, and what remains;
-   - Cookies (Clerk session cookies; anything else found);
-   - Changes to this page.
-3. Every factual statement must match the code. PROOF.md has a table: one row per statement, with the file and line
-   that proves it. If the code and a statement disagree, change the statement, never the code.
-4. Placeholders for decisions only the owner can make, written exactly as `[[OWNER: …]]`:
-   - legal name of the operator;
-   - postal or contact address;
-   - governing law;
-   - the privacy contact email (use `TI_CONTACT_EMAIL` if that is the intended address, and still mark it for
-     confirmation);
-   - minimum age;
-   - how long account data is kept after deletion, if the code doesn't already settle it.
-
-   A test fails if any `[[OWNER:` placeholder is still present when `TI_ENV` is `production`, so the page can't
-   ship to production unfinished. On staging, placeholders render visibly highlighted.
-5. A "Last updated" date. No tracking scripts, no third-party assets on the page.
+1. **Visibility follows the delivering source.** Decide whether a score may be shown by the MTI source that
+   delivered it, never by the scorer's name.
+   - Find where the score is written: the linker merge in `packages/linker/src/draft.ts`, and the parsers that set
+     `cvssSource`. Record which MTI source supplied it.
+   - Prefer no schema change. If `vulns` already keeps the delivering source for the score, or it can be derived
+     without ambiguity (for example the score always comes from the `cve-list` record), use that. If a column is
+     needed, add `cvss_from TEXT` in a new vulns migration, filled by the linker on new writes. Treat existing rows
+     with a CVSS but no `cvss_from` as delivered by the source the derivation rule names, and say in PROOF.md how
+     that was decided.
+   - Keep every licence rule as it is. A score delivered by a `hidden` source stays hidden.
+2. **The scorer's name is attribution.** Show it as text, for example "CVSS 10.0 (scored by CISA-ADP)". Don't use it
+   for visibility, and don't add it to the source-credit list unless it is an MTI source.
+3. **Same rule everywhere.** Apply it to entry pages, the package check (`cvss` and the ranking), search previews
+   (`apps/api/src/lib/preview.ts`) and any other reader of `cvss_source` (`grep -rn cvss_source apps packages`).
+4. **MCP output.** The MCP check tool passes `cvss` through already; no MCP change is expected. Confirm it with a
+   test.
 
 ## Tests
 
-- The route renders on the web smoke with the footer link.
-- The placeholder guard fails in production mode while any `[[OWNER:` remains.
-- The PROOF.md table covers every section.
+- An entry with `cvss_source = 'CISA-ADP'`, delivered by a visible source, shows its score and the attribution.
+- A score delivered by a source in `hidden` display mode stays hidden.
+- The package check ranks a CVSS 9.8 match as `plan` or higher when nothing else applies.
+- Regression: Log4Shell-shaped fixture data shows CVSS 10.
 
 ## Not in scope
 
-- Terms of service text, cookie banners, consent management, a data export feature.
+- EPSS. The EPSS source isn't wired yet and waits on a licence decision.
+- Changing any source's display mode.
 
 ## Acceptance criteria
 
 1. `pnpm build` and the Workers tests pass; the lockfile is unchanged.
-2. `/privacy` is linked from the footer and renders on staging.
-3. Every statement has a code reference in PROOF.md, and owner-only decisions are clearly marked placeholders.
-4. The page can't go to production with placeholders left.
+2. Scores delivered by visible sources are shown everywhere a score is read, with the scorer named as attribution.
+3. No score from a hidden source becomes visible.
