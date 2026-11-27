@@ -40,11 +40,21 @@ function parseCursor(raw: string | undefined): Cursor | null {
   return null;
 }
 
-export async function collect(env: Env, runAt: Date): Promise<Collected> {
-  const row = await env.DB_USERS.prepare("SELECT value FROM notify_state WHERE name = 'cursor'").first<{
-    value: string;
-  }>();
-  const stored = parseCursor(row?.value);
+export interface PageFrom {
+  /** The cursor the previous page saved. Later pages are forward only: no late read. */
+  cursor: Cursor;
+}
+
+/** One page: the stored cursor (or `from.cursor`, for pages after the first) forward, plus the late window on the first page only. */
+export async function collect(env: Env, runAt: Date, from?: PageFrom): Promise<Collected> {
+  let stored: Cursor | null;
+  if (from) stored = from.cursor;
+  else {
+    const row = await env.DB_USERS.prepare("SELECT value FROM notify_state WHERE name = 'cursor'").first<{
+      value: string;
+    }>();
+    stored = parseCursor(row?.value);
+  }
   const first = stored === null;
   const firstAt = new Date(runAt.getTime() - FIRST_RUN_WINDOW_HOURS * HOUR_MS).toISOString();
   const start: Cursor = stored ?? { at: firstAt, id: '', since: firstAt };
@@ -59,7 +69,7 @@ export async function collect(env: Env, runAt: Date): Promise<Collected> {
 
   // Rows the loader wrote after the cursor passed their time. Not on a first run: that would mail history.
   let late: Change[] = [];
-  if (!first) {
+  if (!first && !from) {
     const back = new Date(Date.parse(start.at) - LATE_WINDOW_HOURS * HOUR_MS).toISOString();
     const from = start.since && start.since > back ? start.since : back;
     late = (

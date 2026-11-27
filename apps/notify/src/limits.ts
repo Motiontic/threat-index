@@ -1,4 +1,8 @@
 export const MAX_CHANGES_PER_RUN = 500;
+/** Forward pages one run reads; measured in test 'D1 calls per run'. */
+export const MAX_PAGES_PER_RUN = 8;
+/** No new page starts once a run has used this long. */
+export const RUN_TIME_BUDGET_MS = 4 * 60_000;
 export const LATE_WINDOW_HOURS = 6;
 export const FIRST_RUN_WINDOW_HOURS = 3;
 export const MAX_ITEMS_PER_EMAIL = 50;

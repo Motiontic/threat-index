@@ -3,16 +3,19 @@ import { emailIdempotencyKey } from '@ti/core/email';
 import type { Ecosystem } from '@ti/core/packages';
 import { signUnsubscribeToken, UNSUBSCRIBE_PATH, type UnsubscribeScope } from '@ti/core/unsubscribe';
 import { comparerFor } from '@ti/core/versions';
-import { type Change, collect } from './collect';
+import { type Change, type Collected, type Cursor, collect } from './collect';
 import type { Deps, Env, NotifyMessage } from './env';
 import {
   ALERT_DAILY_CAP,
   D1_CHUNK,
   DAY_MS,
   DIGEST_HOUR_UTC,
+  HOUR_MS,
   INSTANT_COUNT_TTL_DAYS,
+  MAX_CHANGES_PER_RUN,
   MAX_FIXED_LISTED,
   MAX_NOTICE_EVENTS,
+  MAX_PAGES_PER_RUN,
   MAX_QUEUE_READ_PER_USER,
   MAX_QUEUE_ROWS,
   NOTICE_DAILY_CAP,
@@ -20,6 +23,7 @@ import {
   NOTICE_MIN_AGE_MS,
   NOTICE_PER_USER_PER_DAY,
   QUEUE_TTL_DAYS,
+  RUN_TIME_BUDGET_MS,
   SEND_GAP_MS,
   SENT_TTL_DAYS,
   WATCH_EVENT_TTL_DAYS,
@@ -355,10 +359,33 @@ export async function runNotify(env: Env, runAt: Date, deps: Partial<Deps> = {})
     );
   }
 
-  // 1–2. Collect and match.
-  const got = await collect(env, runAt);
-  if (got.backlog) console.log(JSON.stringify({ event: 'notify.backlog', read: got.forwardCount }));
-  const queued = await matchAndQueue(env, got.changes, got.cursor, runAt);
+  // 1–2. Collect and match, a page at a time. Each page saves its cursor with its queue rows, so a later
+  // failure keeps the earlier pages. Only the first page reads the late window.
+  const startedAt = d.now();
+  let pages = 0;
+  let read = 0;
+  let readAll = 0;
+  let queued = 0;
+  let cursor: Cursor | null = null;
+  let more = false;
+  for (;;) {
+    const got: Collected = await collect(env, runAt, cursor ? { cursor } : undefined);
+    pages++;
+    read += got.forwardCount;
+    readAll += got.changes.length;
+    cursor = got.cursor;
+    if (got.backlog) console.log(JSON.stringify({ event: 'notify.backlog', read: got.forwardCount }));
+    queued += await matchAndQueue(env, got.changes, got.cursor, runAt);
+    if (got.forwardCount < MAX_CHANGES_PER_RUN) break;
+    if (pages >= MAX_PAGES_PER_RUN || d.now() - startedAt >= RUN_TIME_BUDGET_MS) {
+      more = true;
+      break;
+    }
+  }
+  if (more && cursor) {
+    const lagHours = Math.round(((runAt.getTime() - Date.parse(cursor.at)) / HOUR_MS) * 10) / 10;
+    console.log(JSON.stringify({ event: 'notify.behind', pages, read, lagHours }));
+  }
 
   // 3. Plan.
   const { rows, backlog } = await loadQueue(env);
@@ -450,7 +477,8 @@ export async function runNotify(env: Env, runAt: Date, deps: Partial<Deps> = {})
   console.log(
     JSON.stringify({
       event: 'notify.run',
-      changes: got.changes.length,
+      pages,
+      changes: readAll,
       queued,
       emails: summary.byKind,
       capReached: summary.capReached,
