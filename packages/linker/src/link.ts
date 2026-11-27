@@ -11,6 +11,7 @@ import type {
   VulnRecord,
 } from '@ti/core/types';
 import { affectedRows, type PackagePlan, packageWrites } from './affected';
+import { ALERT_WINDOW_DAYS, ageQuiet, DAY_MS } from './age';
 import { linkNotices, noticeOut } from './breach';
 import { noticeChange, vulnChanges } from './changes';
 import { differs, isoDate, text } from './clean';
@@ -288,8 +289,10 @@ export async function link(records: ParsedRecord[], deps: LinkDeps): Promise<Lin
           d.fixSource === null &&
           a.source !== 'cve-list' &&
           a.affected?.some((x) => text(x?.fixed))
-        )
+        ) {
           d.fixSource = a.source;
+          d.fixAt = text(a.published) ?? text(a.modified);
+        }
         attach(d, a.source);
       }
     for (const it of items)
@@ -464,7 +467,7 @@ async function packageRowsOf(hubItems: HubItem[], deps: LinkDeps, at: string): P
   return out;
 }
 
-const NEW_ADVISORY_WINDOW_MS = 14 * 86_400_000;
+const NEW_ADVISORY_WINDOW_MS = ALERT_WINDOW_DAYS * DAY_MS;
 
 /** The `new_advisory` change for an advisory row being written for the first time, or null. */
 function newAdvisoryChange(plan: PackagePlan, at: string): Row | null {
@@ -480,5 +483,7 @@ function newAdvisoryChange(plan: PackagePlan, at: string): Row | null {
     new: `${a.source}:${a.source_id}`,
     at,
     source: a.source,
+    event_at: a.published,
+    quiet: ageQuiet(a.published, at),
   };
 }

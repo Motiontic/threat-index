@@ -262,3 +262,49 @@ describe('D1 calls per run', () => {
     expect(full.calls).toBeLessThan(500);
   });
 });
+
+describe('quiet rows', () => {
+  const quietise = (ids: string[], why = 'first_load') =>
+    E.DB_SIGNALS.batch(
+      ids.map((id) => E.DB_SIGNALS.prepare('UPDATE changes SET quiet = ?1 WHERE id = ?2').bind(why, id)),
+    );
+
+  it('the forward read never queues a quiet row, and quiet rows before an alertable one do not hide it', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    await seedWatch('u1', 'CVE-A');
+    await seedCursor(T('06:00'), '');
+    // 1,100 quiet rows fill more than a page ahead of the one alertable row.
+    await seedChanges(1100, T('07:00'));
+    await quietise(
+      Array.from({ length: 1100 }, (_, i) => `c${String(i).padStart(5, '0')}`),
+      'old',
+    );
+    await seedChanges(1, T('07:30'), ['CVE-A'], 5000);
+    await runNotify(withKey(), MON_9, quiet);
+    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['c05000']);
+    expect(await cursor()).toMatchObject({ id: 'c05000' });
+  });
+
+  it('the late read never queues a quiet row', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    await seedWatch('u1', 'CVE-A');
+    await seedCursor(T('08:00'), 'z');
+    // Written after the cursor passed their time: one alertable, one held, one old.
+    await seedChanges(3, T('07:00'));
+    await quietise(['c00001'], 'held');
+    await quietise(['c00002'], 'old');
+    await runNotify(withKey(), MON_9, quiet);
+    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['c00000']);
+  });
+
+  it('a run of only quiet rows queues nothing and leaves the cursor alone', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    await seedWatch('u1', 'CVE-A');
+    await seedCursor(T('06:00'), '');
+    await seedChanges(5, T('07:00'));
+    await quietise(['c00000', 'c00001', 'c00002', 'c00003', 'c00004']);
+    await runNotify(withKey(), MON_9, quiet);
+    expect(await queueOf('u1')).toEqual([]);
+    expect(await cursor()).toMatchObject({ at: T('06:00'), id: '' });
+  });
+});

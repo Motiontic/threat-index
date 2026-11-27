@@ -155,7 +155,7 @@ async function changeItems(env: HomeEnv, ids: string[]): Promise<HomeChange[]> {
   const rows =
     (
       await env.DB_SIGNALS.prepare(
-        `SELECT entity_key, kind, at, source FROM changes ORDER BY at DESC LIMIT ?1`,
+        `SELECT entity_key, kind, at, source FROM changes WHERE quiet IS NULL ORDER BY at DESC LIMIT ?1`,
       )
         .bind(HOME_LIMIT * 3)
         .all<ChangeRow>()

@@ -30,6 +30,8 @@ export const changes = sqliteTable(
     new: text('new'),
     at: text('at').notNull(),
     source: text('source'),
+    eventAt: text('event_at'),
+    quiet: text('quiet'),
   },
   (t) => [index('changes_by_time').on(t.at)],
 );

@@ -6,6 +6,7 @@ import type { InboxRow } from '@ti/core/inbox';
 import { jobPrefix, lookupVulnKey } from '@ti/core/r2-keys';
 import type { ParsedRecord } from '@ti/core/types';
 import { ROW_COST } from '@ti/linker/affected';
+import { countQuiet, firstLoadQuiet, holdOver } from '@ti/linker/age';
 import { candidateIds, type HubRecord } from '@ti/linker/hubs';
 import { isAdvisoryRecord, isSignalRecord, isVulnRecord } from '@ti/linker/kinds';
 import { type LinkDeps, link } from '@ti/linker/link';
@@ -283,6 +284,9 @@ export async function runLoad(
   let packageDropped = 0;
   let announceDropped = 0;
   let packageOver = false;
+  /** Alertable change rows kept so far (an update holds the rest past MAX_ALERTS_PER_RUN), and the quiet counts. */
+  let alertable = 0;
+  const quietTotals = { old: 0, firstLoad: 0, held: 0 };
   const reason = mode === 'first-load' ? 'first-load' : shape === 'archive' ? 'archive' : 'over cap';
 
   /** Links one batch, keeps its hot rows and writes its records as one lake part, so none are held after. */
@@ -291,6 +295,7 @@ export async function runLoad(
     await prime(batch);
     const result = await link(batch, deps);
     merge(result.rows);
+    const batchChanges: Record<string, unknown>[] = [];
     for (const r of result.rows) {
       if (isNewAdvisory(r)) {
         announceDropped++;
@@ -315,7 +320,26 @@ export async function runLoad(
         }
       }
       rows.push(r);
+      if (r.table === 'changes') batchChanges.push(r.row);
     }
+    // Quiet rows are stored like any other. The linker set `old`; a first load makes the rest `first_load`,
+    // and an update holds what passes the per-job limit.
+    if (mode === 'first-load') firstLoadQuiet(batchChanges);
+    else {
+      const hold = holdOver(batchChanges, alertable);
+      alertable += hold.alerts;
+      if (hold.held > 0)
+        ctx.log('changes.held', {
+          event: 'changes.held',
+          jobId: job.id,
+          sourceId: source.id,
+          held: hold.held,
+        });
+    }
+    const counts = countQuiet(batchChanges);
+    quietTotals.old += counts.old;
+    quietTotals.firstLoad += counts.firstLoad;
+    quietTotals.held += counts.held;
     docsLinked += result.docs.length;
     skipped += result.skipped;
     const lakeRows = batch.map((record, i) => ({
@@ -447,6 +471,13 @@ export async function runLoad(
     if (announceDropped > 0 && packageDropped === 0)
       ctx.log('new_advisory changes dropped', { rows: announceDropped });
     ctx.log('linked', { rows: rows.length, docs: docsLinked, skipped });
+    if (quietTotals.old + quietTotals.firstLoad + quietTotals.held > 0)
+      ctx.log('changes.quiet', {
+        event: 'changes.quiet',
+        jobId: job.id,
+        sourceId: source.id,
+        ...quietTotals,
+      });
     if (!hasRecords()) ctx.log('no records: no lake part');
 
     const { chunks } = await writeInbox(ctx.api, job.id, rows, now);

@@ -60,6 +60,10 @@ export interface VulnDraft {
   fromD1: boolean;
   /** Source of the first new advisory that lists a fix. */
   fixSource: string | null;
+  /** When that advisory was published (else modified): the `fix_released` event date. */
+  fixAt: string | null;
+  /** Earliest `firstSeen` among this batch's `public_exploit` signals. */
+  exploitAt: string | null;
   /** Source of the record behind each change kind. */
   changeSource: Partial<Record<ChangeKind, string>>;
   attached: number;
@@ -120,6 +124,8 @@ export function newDraft(key: string, base: Row | null): VulnDraft {
     promoted: false,
     fromD1: false,
     fixSource: null,
+    fixAt: null,
+    exploitAt: null,
     changeSource: {},
     attached: 0,
   };

@@ -39,6 +39,7 @@ export const runs = sqliteTable(
     written: integer('written').notNull().default(0),
     bytes: integer('bytes').notNull().default(0),
     error: text('error'),
+    alerts: integer('alerts').notNull().default(0),
   },
   (t) => [index('runs_by_source').on(t.sourceId, t.startedAt)],
 );

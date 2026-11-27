@@ -26,5 +26,6 @@ export function applySignal(d: VulnDraft, r: SignalRecord): void {
   } else if (r.kind === 'public_exploit') {
     row.exploit_public = 1;
     d.changeSource.public_exploit ??= r.source;
+    d.exploitAt = earliest(d.exploitAt, r.firstSeen);
   }
 }

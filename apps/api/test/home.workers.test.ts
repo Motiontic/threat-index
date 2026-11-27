@@ -130,6 +130,19 @@ describe('GET /v1/home', () => {
     expect(changes[0].title).toBe('Flaw 12');
   });
 
+  it('skips quiet change rows', async () => {
+    const before = (await json(await get())).changes as { key: string }[];
+    expect(before[0]?.key).toBe('CVE-2025-1012');
+    await E.DB_SIGNALS.prepare("UPDATE changes SET quiet = 'old' WHERE entity_key = 'CVE-2025-1012'").run();
+    try {
+      const after = (await json(await get())).changes as { key: string }[];
+      expect(after.map((c) => c.key)).not.toContain('CVE-2025-1012');
+      expect(after[0]?.key).toBe('CVE-2025-1011');
+    } finally {
+      await E.DB_SIGNALS.prepare('UPDATE changes SET quiet = NULL').run();
+    }
+  });
+
   it('lists only visible, ungated incidents and breaches', async () => {
     const { lists } = await json(await get());
     expect(lists.aiIncidents.map((i: { key: string }) => i.key)).toEqual(['AVID-1', 'AIAAIC-1']);
