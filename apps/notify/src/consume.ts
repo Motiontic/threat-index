@@ -158,46 +158,65 @@ async function loadInstantCounts(env: Env, runAt: Date): Promise<Map<string, num
   return new Map(rows.map((r) => [r.user_id, r.n]));
 }
 
-/** Package, fixed versions and our own name for each package-watch item: `${vulnKey}\0${ecosystem}/${name}` → info. */
+/** The package named by a `pkg:<ecosystem>/<name>` queue row. */
+function viaPackage(via: string): { eco: string; name: string } {
+  const slash = via.indexOf('/');
+  return { eco: via.slice(4, slash), name: via.slice(slash + 1) };
+}
+
+/** What an alert says about a package when its fixed versions can't be read. */
+function unknownInfo(via: string): PackageInfo {
+  const { eco, name } = viaPackage(via);
+  return { label: `${eco}/${name}`, subjectLabel: subjectPackage(eco, name), fixed: [], unknownFixed: true };
+}
+
+/**
+ * Package and up to MAX_FIXED_LISTED distinct fixed versions for each package-watch item:
+ * `${vulnKey}\0${ecosystem}/${name}` → info. One bounded statement per item (`SELECT DISTINCT fixed … LIMIT 5`
+ * for that vuln, base ecosystem and name), batched. Never reads every `affected` row of a vuln. A failure gives an
+ * empty map: the caller falls back to `unknownInfo`, so nothing stops a send.
+ */
 async function loadPackageInfo(
   env: Env,
   items: { key: string; via: string }[],
 ): Promise<Map<string, PackageInfo>> {
   const out = new Map<string, PackageInfo>();
-  const wanted = items.filter((i) => i.via.startsWith('pkg:'));
-  if (wanted.length === 0) return out;
-  // Query `affected` by vuln_key only (the indexed column) and pick names in memory: one pass, no nested chunks.
-  const keys = [...new Set(wanted.map((i) => i.key))];
-  const byKey = new Map<string, { ecosystem: string; name: string; fixed: string | null }[]>();
-  for (const kPart of chunksOf(keys, D1_CHUNK))
-    for (const r of (
-      await env.DB_ADVISORIES.prepare(
-        `SELECT ecosystem, name, vuln_key, fixed FROM affected WHERE vuln_key IN (${marks(kPart.length)})`,
-      )
-        .bind(...kPart)
-        .all<{ ecosystem: string; name: string; vuln_key: string; fixed: string | null }>()
-    ).results) {
-      const list = byKey.get(r.vuln_key) ?? [];
-      list.push(r);
-      byKey.set(r.vuln_key, list);
+  try {
+    const wanted = [
+      ...new Map(
+        items.filter((i) => i.via.startsWith('pkg:')).map((i) => [`${i.key}\0${i.via}`, i] as const),
+      ).values(),
+    ];
+    for (const part of chunksOf(wanted, D1_CHUNK)) {
+      const results = await env.DB_ADVISORIES.batch<{ fixed: string | null }>(
+        part.map((w) => {
+          const { eco, name } = viaPackage(w.via);
+          return env.DB_ADVISORIES.prepare(
+            `SELECT DISTINCT fixed FROM affected
+             WHERE vuln_key = ?1 AND name = ?3
+               AND (ecosystem = ?2 OR (ecosystem > ?2 || ':' AND ecosystem < ?2 || ';'))
+               AND fixed IS NOT NULL AND fixed != '' LIMIT ?4`,
+          ).bind(w.key, eco, name, MAX_FIXED_LISTED);
+        }),
+      );
+      part.forEach((w, n) => {
+        const { eco, name } = viaPackage(w.via);
+        const stored = (results[n]?.results ?? []).map((r) => r.fixed).filter((f): f is string => !!f);
+        const cmp = comparerFor(eco as Ecosystem);
+        const ordered =
+          cmp && stored.every((v) => cmp.valid(v)) ? [...stored].sort((a, b) => cmp.compare(a, b)) : stored;
+        out.set(`${w.key}\0${w.via}`, {
+          label: `${eco}/${name}`,
+          subjectLabel: subjectPackage(eco, name),
+          fixed: ordered.slice(0, MAX_FIXED_LISTED),
+        });
+      });
     }
-  for (const w of wanted) {
-    const slash = w.via.indexOf('/');
-    const eco = w.via.slice(4, slash);
-    const name = w.via.slice(slash + 1);
-    const mine = (byKey.get(w.key) ?? []).filter(
-      (r) => r.name === name && (r.ecosystem === eco || r.ecosystem.startsWith(`${eco}:`)),
+  } catch (e) {
+    console.log(
+      JSON.stringify({ event: 'notify.package_info_failed', error: e instanceof Error ? e.name : 'error' }),
     );
-    const first = mine[0];
-    const stored = [...new Set(mine.map((r) => r.fixed).filter((f): f is string => f !== null && f !== ''))];
-    const cmp = first ? comparerFor(first.ecosystem as Ecosystem) : null;
-    const ordered =
-      cmp && stored.every((v) => cmp.valid(v)) ? [...stored].sort((a, b) => cmp.compare(a, b)) : stored;
-    out.set(`${w.key}\0${w.via}`, {
-      label: first ? `${first.ecosystem}/${first.name}` : `${eco}/${name}`,
-      subjectLabel: subjectPackage(eco, name),
-      fixed: ordered.slice(0, MAX_FIXED_LISTED),
-    });
+    return new Map();
   }
   return out;
 }
@@ -337,11 +356,7 @@ export async function runNotify(env: Env, runAt: Date, deps: Partial<Deps> = {})
   // 1–2. Collect and match.
   const got = await collect(env, runAt);
   if (got.backlog) console.log(JSON.stringify({ event: 'notify.backlog', read: got.forwardCount }));
-  const queued = await matchAndQueue(env, got.changes, got.cursor, runAt, {
-    forwardCount: got.forwardCount,
-    start: got.start,
-    lateFull: got.lateFull,
-  });
+  const queued = await matchAndQueue(env, got.changes, got.cursor, runAt);
 
   // 3. Plan.
   const { rows, backlog } = await loadQueue(env);
@@ -399,7 +414,9 @@ export async function runNotify(env: Env, runAt: Date, deps: Partial<Deps> = {})
               change: i.change,
               title: doc?.title ?? i.change.entity_key,
               company: i.change.kind === 'breach_notice',
-              ...(i.via.startsWith('pkg:') ? { pkg: pkgInfo.get(`${i.change.entity_key}\0${i.via}`) } : {}),
+              ...(i.via.startsWith('pkg:')
+                ? { pkg: pkgInfo.get(`${i.change.entity_key}\0${i.via}`) ?? unknownInfo(i.via) }
+                : {}),
               group: i.via.startsWith('search:')
                 ? (labels.get(`${e.userId}:${i.via.slice(7)}`) ?? 'a saved search')
                 : null,

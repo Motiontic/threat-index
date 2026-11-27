@@ -421,7 +421,7 @@ const cursorRow = async () =>
   );
 
 describe('package matching', () => {
-  it('uses two D1 reads for the packages, however many changes there are, and one change touching 500 watched packages queues them all', async () => {
+  it('one change touching 500 watched packages queues them all', async () => {
     await E.DB_USERS.batch(
       Array.from({ length: 500 }, (_, i) =>
         E.DB_USERS.prepare(
@@ -460,110 +460,69 @@ describe('package matching', () => {
     expect(logs.lines.some((l) => l.includes('notify.package_match_truncated'))).toBe(false);
   });
 
-  it('holds the cursor after the last change whose matching finished: the matched set is a prefix, and the rest is matched next run', async () => {
+  it('100 kernel CVEs x 300 Ubuntu/Debian rows plus one npm CVE in one run: the npm watcher is queued, kernel CVEs give one pair per base ecosystem', async () => {
     await seedUser('u1', { instant: 0, digest: 'daily' });
-    for (let i = 0; i < 5; i++) {
+    await seedUser('u2', { instant: 0, digest: 'daily' });
+    await seedPkgWatch('u1', 'npm', 'left-pad');
+    await seedPkgWatch('u2', 'Ubuntu', 'linux');
+    const adv: D1PreparedStatement[] = [];
+    const sig: D1PreparedStatement[] = [];
+    for (let k = 0; k < 100; k++) {
+      for (let r = 0; r < 300; r++)
+        adv.push(
+          E.DB_ADVISORIES.prepare(
+            "INSERT INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES (?1, 'linux', 'osv', ?2, ?3, ?4, 'ECOSYSTEM')",
+          ).bind(
+            r % 2 ? `Ubuntu:${r}.04` : `Debian:${r}`,
+            `K${k}`,
+            r,
+            `CVE-2026-9${String(k).padStart(3, '0')}`,
+          ),
+        );
+      sig.push(
+        E.DB_SIGNALS.prepare(
+          "INSERT INTO changes (id, entity_key, kind, at, source) VALUES (?1, ?2, 'public_exploit', ?3, 'osv')",
+        ).bind(`kern${k}`, `CVE-2026-9${String(k).padStart(3, '0')}`, T('07:00')),
+      );
+    }
+    for (let i = 0; i < adv.length; i += 90) await E.DB_ADVISORIES.batch(adv.slice(i, i + 90));
+    await E.DB_SIGNALS.batch(sig);
+    await E.DB_ADVISORIES.prepare(
+      "INSERT INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES ('npm', 'left-pad', 'osv', 'NPM1', 0, 'CVE-2026-7777', 'SEMVER')",
+    ).run();
+    await seedChange('npm1', 'CVE-2026-7777', 'public_exploit', T('07:00'));
+    await runNotify(withKey(), MON_9, fakeFetch().deps);
+    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['npm1']);
+    // u2 watches the base ecosystem `Ubuntu`: every kernel CVE (its Ubuntu:* rows) matches.
+    expect(await queueOf('u2')).toHaveLength(100);
+    expect(logs.lines.some((l) => l.includes('notify.package_match_truncated'))).toBe(false);
+  });
+
+  it('an OS watch on Ubuntu matches Ubuntu:22.04 rows', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    await seedPkgWatch('u1', 'Ubuntu', 'openssl');
+    await seedAffected('Ubuntu:22.04', 'openssl', 'osv', 'U1', 'CVE-2026-4444', '3.0.2');
+    await seedChange('o1', 'CVE-2026-4444', 'public_exploit', T('07:00'));
+    await runNotify(withKey(), MON_9, fakeFetch().deps);
+    expect((await queueOf('u1')).map((r) => [r.change_id, r.via])).toEqual([['o1', 'pkg:Ubuntu/openssl']]);
+  });
+
+  it('a run past the pair cap logs (counts only) and advances the cursor', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    for (let i = 0; i < 4; i++) {
       await seedPkgWatch('u1', 'PyPI', `pkg-${i}`);
       await seedAffected('PyPI', `pkg-${i}`, 'osv', `R${i}`, `CVE-2026-${i}`, '1.0');
       await seedChange(`k${i}`, `CVE-2026-${i}`, 'public_exploit', T(`07:0${i}`));
     }
     const got = await collect(E, MON_9);
-    await matchAndQueue(E, got.changes, got.cursor, MON_9, {
-      forwardCount: got.forwardCount,
-      start: got.start,
-      lateFull: got.lateFull,
-      pairBytes: 45, // room for the first two changes
-    });
-    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['k0', 'k1']);
-    expect((await cursorRow()).id).toBe('k1');
+    await matchAndQueue(E, got.changes, got.cursor, MON_9, { maxPairs: 2 });
+    expect((await queueOf('u1')).length).toBeLessThan(4);
     expect(logs.lines.some((l) => l.includes('notify.package_match_truncated'))).toBe(true);
     expect(logs.lines.join('\n')).not.toContain('pkg-');
-    await runNotify(withKey(), MON_9, fakeFetch().deps);
-    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['k0', 'k1', 'k2', 'k3', 'k4']);
-    expect((await cursorRow()).id).toBe('k4');
+    expect((await cursorRow()).id).toBe('k3');
   });
 
-  it('a late row survives a busy run: its bound is kept with the cursor, past the 6-hour window', async () => {
-    await seedUser('u1', { instant: 0, digest: 'daily' });
-    const ats = { f: T('08:30'), l1: T('07:00'), l2: T('07:01'), l3: T('07:02') };
-    for (const [i, [id, at]] of Object.entries(ats).entries()) {
-      await seedPkgWatch('u1', 'PyPI', `pkg-${i}`);
-      await seedAffected('PyPI', `pkg-${i}`, 'osv', `R${i}`, `CVE-2026-${i}`, '1.0');
-      await seedChange(id, `CVE-2026-${i}`, 'public_exploit', at);
-    }
-    await E.DB_USERS.prepare("INSERT INTO notify_state (name, value, updated_at) VALUES ('cursor', ?1, ?2)")
-      .bind(JSON.stringify({ at: T('08:00'), id: 'z', since: T('01:00') }), T('08:00'))
-      .run();
-    const got = await collect(E, MON_9);
-    expect(got.changes.map((c) => c.id)).toEqual(['f', 'l1', 'l2', 'l3']);
-    await matchAndQueue(E, got.changes, got.cursor, MON_9, {
-      forwardCount: got.forwardCount,
-      start: got.start,
-      lateFull: got.lateFull,
-      pairBytes: 45, // the forward change and one late row
-    });
-    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['f', 'l1']);
-    expect((await cursorRow()).late).toEqual({ at: ats.l2, id: 'l2' });
-    // Hours pass and the cursor moves far ahead: the waiting rows are still read.
-    await E.DB_USERS.prepare(
-      "UPDATE notify_state SET value = json_set(value, '$.at', ?1) WHERE name = 'cursor'",
-    )
-      .bind(T('20:00'))
-      .run();
-    await runNotify(withKey(), MON_9, fakeFetch().deps);
-    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['f', 'l1', 'l2', 'l3']);
-    expect((await cursorRow()).late).toBeUndefined();
-  });
-});
-
-describe('round 6: late bound floor, bounded affected reads, failure isolation', () => {
-  it('a change committed late with an `at` between the floor and the stored bound is matched next run', async () => {
-    await seedUser('u1', { instant: 0, digest: 'daily' });
-    await seedPkgWatch('u1', 'PyPI', 'pkg-a');
-    await seedAffected('PyPI', 'pkg-a', 'osv', 'RA', 'CVE-2026-1', '1.0');
-    await seedChange('between', 'CVE-2026-1', 'public_exploit', T('16:00')); // floor 14:00 < 16:00 < bound 19:50
-    await E.DB_USERS.prepare("INSERT INTO notify_state (name, value, updated_at) VALUES ('cursor', ?1, ?2)")
-      .bind(
-        JSON.stringify({ at: T('20:00'), id: 'z', since: T('01:00'), late: { at: T('19:50'), id: 'x' } }),
-        T('20:00'),
-      )
-      .run();
-    await runNotify(withKey(), MON_9, fakeFetch().deps);
-    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['between']);
-  });
-
-  it('a run whose affected rows exceed the budget defers the rest, and the next run picks them up', async () => {
-    await seedUser('u1', { instant: 0, digest: 'daily' });
-    const stmts: D1PreparedStatement[] = [];
-    for (let i = 0; i < 180; i++) {
-      stmts.push(
-        E.DB_ADVISORIES.prepare(
-          "INSERT INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES ('npm', ?1, 'osv', ?2, 0, ?3, 'SEMVER')",
-        ).bind(`pkg-${i}`, `R${i}`, `CVE-2026-${i}`),
-        E.DB_SIGNALS.prepare(
-          "INSERT INTO changes (id, entity_key, kind, at, source) VALUES (?1, ?2, 'public_exploit', ?3, 'osv')",
-        ).bind(`c${String(i).padStart(3, '0')}`, `CVE-2026-${i}`, T('07:00')),
-      );
-    }
-    await E.DB_ADVISORIES.batch(stmts.filter((_, i) => i % 2 === 0));
-    await E.DB_SIGNALS.batch(stmts.filter((_, i) => i % 2 === 1));
-    for (let i = 0; i < 180; i++) await seedPkgWatch('u1', 'npm', `pkg-${i}`);
-    const got = await collect(E, MON_9);
-    await matchAndQueue(E, got.changes, got.cursor, MON_9, {
-      forwardCount: got.forwardCount,
-      start: got.start,
-      lateFull: got.lateFull,
-      pairBytes: 2700, // about 150 changes: the budget runs out part-way through the second group of 100
-    });
-    const first = (await queueOf('u1')).length;
-    expect(first).toBeGreaterThan(0);
-    expect(first).toBeLessThan(180);
-    expect((await cursorRow()).id).toBe(`c${String(first - 1).padStart(3, '0')}`);
-    for (let i = 0; i < 6; i++) await runNotify(withKey(), MON_9, fakeFetch().deps);
-    expect(await queueOf('u1')).toHaveLength(180);
-  });
-
-  it('a thrown affected query still sends entry-watch alerts and holds the package cursor', async () => {
+  it('an affected read that throws still sends entry-watch alerts and the cursor advances', async () => {
     await seedUser('u1');
     await seedWatch('u1', 'CVE-2026-1');
     await seedChange('e1', 'CVE-2026-1', 'public_exploit', T('07:00'));
@@ -579,7 +538,48 @@ describe('round 6: late bound floor, bounded affected reads, failure isolation',
     await runNotify(broken, MON_9, f.deps);
     expect(f.sent).toHaveLength(1);
     expect(logs.lines.some((l) => l.includes('notify.package_match_failed'))).toBe(true);
-    expect((await cursorRow()).id).not.toBe('e1');
+    expect((await cursorRow()).id).toBe('e1');
+  });
+
+  it('a loadPackageInfo that throws still sends every planned email, with a "fixed version: see MTI" line', async () => {
+    await seedLangchain();
+    await seedUser('u1');
+    await seedPkgWatch('u1', 'PyPI', 'langchain');
+    await seedUser('u2');
+    await seedWatch('u2', 'CVE-2026-1');
+    await seedChange('e1', 'CVE-2026-1', 'public_exploit', T('07:00'));
+    await advisoryChange();
+    const real = E.DB_ADVISORIES;
+    const env = {
+      ...withKey(),
+      DB_ADVISORIES: new Proxy(real, {
+        get: (t, p) =>
+          p === 'batch'
+            ? () => {
+                throw new Error('d1 down');
+              }
+            : (Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p)),
+      }),
+    } as never;
+    const f = fakeFetch();
+    await runNotify(env, MON_9, f.deps);
+    expect(f.sent).toHaveLength(2);
+    const pkgMail = f.sent.find((m) => m.body.subject.includes('PyPI/langchain'));
+    expect(pkgMail?.body.text).toContain('Package: PyPI/langchain. fixed version: see MTI');
+    expect(logs.lines.some((l) => l.includes('notify.package_info_failed'))).toBe(true);
+  });
+
+  it('re-running the same window does not queue or send duplicates', async () => {
+    await seedLangchain();
+    await seedUser('u1');
+    await seedPkgWatch('u1', 'PyPI', 'langchain');
+    await advisoryChange();
+    const f = fakeFetch();
+    await runNotify(withKey(), MON_9, f.deps);
+    await E.DB_USERS.prepare("DELETE FROM notify_state WHERE name = 'cursor'").run();
+    await runNotify(withKey(), MON_9, f.deps);
+    expect(f.sent).toHaveLength(1);
+    expect(await queueOf('u1')).toEqual([]);
   });
 });
 

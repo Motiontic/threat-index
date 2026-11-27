@@ -3,12 +3,12 @@ import { searchTerms } from '@ti/core/search';
 import type { Change, Cursor } from './collect';
 import type { Env } from './env';
 import {
-  AFFECTED_KEYS_PER_QUERY,
-  AFFECTED_ROWS_PER_QUERY,
   D1_CHUNK,
-  MAX_PAIR_BYTES,
+  MAX_PACKAGE_PAIRS,
   MAX_QUEUED_PER_USER,
   MAX_SAVED_SEARCHES,
+  PACKAGE_KEYS_PER_CHUNK,
+  WATCHER_PAIRS_PER_QUERY,
 } from './limits';
 
 export const DEFAULT_TRIGGERS = [
@@ -135,190 +135,141 @@ function recordOf(c: Change): { source: string; sourceId: string } | null {
     : null;
 }
 
-type AffectedRow = { ecosystem: string; name: string; source: string; source_id: string; vuln_key: string };
-
-export interface PackageMatch {
-  inserts: QueueInsert[];
-  /** Package-kind changes whose matching did not finish: matched again next run, never skipped. */
-  unmatched: Set<string>;
-}
+/** The base ecosystem (`Debian:12` → `Debian`) in SQL. */
+const BASE_ECO =
+  "CASE WHEN instr(ecosystem, ':') > 0 THEN substr(ecosystem, 1, instr(ecosystem, ':') - 1) ELSE ecosystem END";
 
 /**
- * Package watches: two D1 queries per run, however many changes there are.
- * (1) `affected` for the run's vuln keys and records (`json_each`, one statement);
- * (2) the watchers of the hit packages only (`json_each` joined to `watch_packages`, indexed by package).
- * Eligibility is the same as `matchWatch`. An OS watch (`Debian`) also matches rows stored with a release
- * (`Debian:12`). A user's triggers are their own plus `new_advisory`.
- *
- * `changes` is in the order to match. The matched set is always a prefix of it: if the watcher lookup would be
- * too large (`pairBytes`), the changes not reached come back in `unmatched` and the caller holds the cursor
- * before them. The first change always fits, so a run always makes progress. Hits are taken in change order.
+ * Package watches. No budget, prefix or hold: a run always finishes.
+ * (1) `SELECT DISTINCT` base ecosystem and name from `affected` for the run's vuln keys and records, in chunks of
+ *     PACKAGE_KEYS_PER_CHUNK (all chunks, every run). DISTINCT collapses distro releases, so a kernel CVE gives a
+ *     few rows. At most MAX_PACKAGE_PAIRS distinct pairs are kept; past that no more chunks are read and
+ *     `package_match_truncated` is logged (counts only).
+ * (2) The watchers of those pairs through `watch_packages_by_package` (`json_each`, in chunks).
+ * Eligibility is the same as `matchWatch`. A watch on `Debian` matches `Debian:12` because pairs use the base
+ * ecosystem. A user's triggers are their own plus `new_advisory`. Hits are taken in change order.
+ * The caller treats any error as "no package alerts this run".
  */
 export async function matchPackages(
   env: Env,
   changes: Change[],
-  pairBytes = MAX_PAIR_BYTES,
-): Promise<PackageMatch> {
-  const ordered = changes.filter((c) => PACKAGE_KINDS.has(c.kind));
-  const none: PackageMatch = { inserts: [], unmatched: new Set() };
-  if (ordered.length === 0) return none;
+  maxPairs = MAX_PACKAGE_PAIRS,
+): Promise<QueueInsert[]> {
+  const relevant = changes.filter((c) => PACKAGE_KINDS.has(c.kind));
+  if (relevant.length === 0) return [];
 
-  const changePkgs = new Map<string, string[]>();
-  const readSet = new Set<string>();
-  let bytes = 2;
-  const unmatched = new Set<string>();
-  let cut = false;
-  let matched = 0;
-  let truncatedRows = 0;
-  const matchedList: Change[] = [];
-  let next = 0;
-  // `affected` is read in ordered groups of about AFFECTED_KEYS_PER_QUERY keys or records, one group at a time, and
-  // only while the pair budget lasts: a group's rows are dropped once its changes are matched.
-  while (next < ordered.length && !cut) {
-    const group: Change[] = [];
-    const vulnKeys = new Set<string>();
-    const records = new Map<string, [string, string]>();
-    while (next < ordered.length) {
-      const c = ordered[next] as Change;
-      const r = c.kind === 'new_advisory' ? recordOf(c) : null;
-      const isNew =
-        c.kind !== 'new_advisory'
-          ? !vulnKeys.has(c.entity_key)
-          : !!r && !records.has(r.source + SEP + r.sourceId);
-      if (group.length > 0 && isNew && vulnKeys.size + records.size >= AFFECTED_KEYS_PER_QUERY) break;
-      if (c.kind !== 'new_advisory') vulnKeys.add(c.entity_key);
-      else if (r) records.set(r.source + SEP + r.sourceId, [r.source, r.sourceId]);
-      group.push(c);
-      next++;
+  const vulnKeys = [...new Set(relevant.filter((c) => c.kind !== 'new_advisory').map((c) => c.entity_key))];
+  const recMap = new Map<string, [string, string]>();
+  for (const c of relevant) {
+    const r = c.kind === 'new_advisory' ? recordOf(c) : null;
+    if (r) recMap.set(r.source + SEP + r.sourceId, [r.source, r.sourceId]);
+  }
+  const records = [...recMap.values()];
+
+  const pairs = new Set<string>(); // base ecosystem SEP name
+  const byVuln = new Map<string, Set<string>>();
+  const byRecord = new Map<string, Set<string>>();
+  let full = false;
+  let seenRows = 0;
+  const add = (m: Map<string, Set<string>>, k: string, p: string) => {
+    const set = m.get(k);
+    if (set) set.add(p);
+    else m.set(k, new Set([p]));
+  };
+  const take = (eco: string, name: string): string | null => {
+    const p = eco + SEP + name;
+    if (!pairs.has(p)) {
+      if (pairs.size >= maxPairs) {
+        full = true;
+        return null;
+      }
+      pairs.add(p);
     }
-    const rows =
-      vulnKeys.size + records.size === 0
-        ? []
-        : (
-            await env.DB_ADVISORIES.prepare(
-              `SELECT ecosystem, name, source, source_id, vuln_key FROM affected
-                 WHERE vuln_key IN (SELECT value FROM json_each(?1))
-               UNION
-               SELECT ecosystem, name, source, source_id, vuln_key FROM affected
-                 WHERE (source, source_id) IN (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?2))
-               LIMIT ?3`,
-            )
-              .bind(
-                JSON.stringify([...vulnKeys]),
-                JSON.stringify([...records.values()]),
-                AFFECTED_ROWS_PER_QUERY,
-              )
-              .all<AffectedRow>()
-          ).results;
-    if (rows.length >= AFFECTED_ROWS_PER_QUERY) truncatedRows += rows.length;
-    const byVuln = new Map<string, AffectedRow[]>();
-    const byRecord = new Map<string, AffectedRow[]>();
-    const push = (m: Map<string, AffectedRow[]>, k: string, r: AffectedRow) => {
-      const list = m.get(k);
-      if (list) list.push(r);
-      else m.set(k, [r]);
-    };
+    return p;
+  };
+  for (const keys of chunks(vulnKeys, PACKAGE_KEYS_PER_CHUNK)) {
+    if (full) break;
+    const rows = (
+      await env.DB_ADVISORIES.prepare(
+        `SELECT DISTINCT vuln_key, ${BASE_ECO} AS eco, name FROM affected
+         WHERE vuln_key IN (SELECT value FROM json_each(?1))`,
+      )
+        .bind(JSON.stringify(keys))
+        .all<{ vuln_key: string; eco: string; name: string }>()
+    ).results;
     for (const r of rows) {
-      push(byVuln, r.vuln_key, r);
-      push(byRecord, r.source + SEP + r.source_id, r);
-    }
-
-    // Candidate watch keys per change, in change order: the exact ecosystem and the part before the first `:`.
-    const keysOf = (c: Change): string[] => {
-      let hits: AffectedRow[] = [];
-      if (c.kind !== 'new_advisory') hits = byVuln.get(c.entity_key) ?? [];
-      else {
-        const r = recordOf(c);
-        hits = r ? (byRecord.get(r.source + SEP + r.sourceId) ?? []) : [];
-      }
-      const out = new Set<string>();
-      for (const h of hits) {
-        out.add(h.ecosystem + SEP + h.name);
-        out.add((h.ecosystem.split(':')[0] as string) + SEP + h.name);
-      }
-      return [...out];
-    };
-    for (const c of group) {
-      if (cut) {
-        unmatched.add(c.id);
-        continue;
-      }
-      const keys = keysOf(c);
-      const fresh = keys.filter((k) => !readSet.has(k));
-      const size = fresh.reduce((n, k) => n + k.length + 8, 0);
-      if (matched > 0 && bytes + size > pairBytes) {
-        cut = true;
-        unmatched.add(c.id);
-        continue;
-      }
-      let take = fresh;
-      if (matched === 0 && size > pairBytes) {
-        // The first change alone is over the budget: match what fits, so the run still makes progress.
-        let n = 2;
-        take = [];
-        for (const k of fresh) {
-          n += k.length + 8;
-          if (n > pairBytes) break;
-          take.push(k);
-        }
-        console.log(
-          JSON.stringify({
-            event: 'notify.package_match_truncated',
-            packages: fresh.length,
-            kept: take.length,
-          }),
-        );
-      }
-      for (const k of take) readSet.add(k);
-      bytes += take.reduce((n, k) => n + k.length + 8, 0);
-      const mine = keys.filter((k) => readSet.has(k));
-      if (mine.length > 0) changePkgs.set(c.id, mine);
-      matched++;
-      matchedList.push(c);
+      seenRows++;
+      const p = take(r.eco, r.name);
+      if (p) add(byVuln, r.vuln_key, p);
     }
   }
-  for (let i = next; i < ordered.length; i++) unmatched.add((ordered[i] as Change).id);
-  if (truncatedRows > 0)
-    console.log(JSON.stringify({ event: 'notify.package_match_truncated', affectedRows: truncatedRows }));
-  if (cut)
+  for (const recs of chunks(records, PACKAGE_KEYS_PER_CHUNK)) {
+    if (full) break;
+    const rows = (
+      await env.DB_ADVISORIES.prepare(
+        `SELECT DISTINCT source, source_id, ${BASE_ECO} AS eco, name FROM affected
+         WHERE (source, source_id) IN (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?1))`,
+      )
+        .bind(JSON.stringify(recs))
+        .all<{ source: string; source_id: string; eco: string; name: string }>()
+    ).results;
+    for (const r of rows) {
+      seenRows++;
+      const p = take(r.eco, r.name);
+      if (p) add(byRecord, r.source + SEP + r.source_id, p);
+    }
+  }
+  if (full)
     console.log(
       JSON.stringify({
         event: 'notify.package_match_truncated',
-        changes: ordered.length,
-        unmatched: unmatched.size,
+        pairs: pairs.size,
+        rows: seenRows,
+        changes: relevant.length,
       }),
     );
-  if (readSet.size === 0) return { inserts: [], unmatched };
+  if (pairs.size === 0) return [];
 
   type Watcher = { userId: string; ecosystem: string; name: string; triggers: Set<string> };
   const watchers = new Map<string, Watcher[]>(); // package key → watching users
-  const pairs = [...readSet].map((k) => k.split(SEP));
-  const found = (
-    await env.DB_USERS.prepare(
-      `SELECT w.user_id, w.ecosystem, w.name, u.alert_triggers
-       FROM json_each(?1) j
-       JOIN watch_packages w ON w.ecosystem = json_extract(j.value, '$[0]') AND w.name = json_extract(j.value, '$[1]')
-       JOIN users u ON u.id = w.user_id
-       WHERE w.alerts_on = 1 AND ${ELIGIBLE} AND (u.alert_instant = 1 OR u.digest != 'off')
-       ORDER BY w.user_id`,
-    )
-      .bind(JSON.stringify(pairs))
-      .all<{ user_id: string; ecosystem: string; name: string; alert_triggers: string }>()
-  ).results;
-  for (const r of found) {
-    const triggers = parseTriggers(r.alert_triggers);
-    triggers.add('new_advisory'); // a package watch exists to hear about new advisories
-    const k = r.ecosystem + SEP + r.name;
-    const w = { userId: r.user_id, ecosystem: r.ecosystem, name: r.name, triggers };
-    const list = watchers.get(k);
-    if (list) list.push(w);
-    else watchers.set(k, [w]);
+  for (const part of chunks(
+    [...pairs].map((k) => k.split(SEP)),
+    WATCHER_PAIRS_PER_QUERY,
+  )) {
+    const found = (
+      await env.DB_USERS.prepare(
+        `SELECT w.user_id, w.ecosystem, w.name, u.alert_triggers
+         FROM json_each(?1) j
+         JOIN watch_packages w ON w.ecosystem = json_extract(j.value, '$[0]') AND w.name = json_extract(j.value, '$[1]')
+         JOIN users u ON u.id = w.user_id
+         WHERE w.alerts_on = 1 AND ${ELIGIBLE} AND (u.alert_instant = 1 OR u.digest != 'off')
+         ORDER BY w.user_id`,
+      )
+        .bind(JSON.stringify(part))
+        .all<{ user_id: string; ecosystem: string; name: string; alert_triggers: string }>()
+    ).results;
+    for (const r of found) {
+      const triggers = parseTriggers(r.alert_triggers);
+      triggers.add('new_advisory'); // a package watch exists to hear about new advisories
+      const k = r.ecosystem + SEP + r.name;
+      const w = { userId: r.user_id, ecosystem: r.ecosystem, name: r.name, triggers };
+      const list = watchers.get(k);
+      if (list) list.push(w);
+      else watchers.set(k, [w]);
+    }
   }
+  if (watchers.size === 0) return [];
 
   const inserts: QueueInsert[] = [];
   const seen = new Set<string>(); // userId SEP changeId: a change is queued once per user
-  for (const c of matchedList) {
-    for (const k of changePkgs.get(c.id) ?? []) {
+  for (const c of relevant) {
+    let hit: Set<string> | undefined;
+    if (c.kind !== 'new_advisory') hit = byVuln.get(c.entity_key);
+    else {
+      const r = recordOf(c);
+      hit = r ? byRecord.get(r.source + SEP + r.sourceId) : undefined;
+    }
+    for (const k of hit ?? []) {
       for (const w of watchers.get(k) ?? []) {
         const key = w.userId + SEP + c.id;
         if (!w.triggers.has(c.kind) || seen.has(key)) continue;
@@ -327,7 +278,7 @@ export async function matchPackages(
       }
     }
   }
-  return { inserts, unmatched };
+  return inserts;
 }
 
 /** The changed entities, for search matching and titles. Key → doc. */
@@ -413,29 +364,17 @@ async function matchSearches(
   return out;
 }
 
-/** What `collect` read, for `matchAndQueue`: the cursor to save and where the forward rows end. */
+/** Test hook for `matchAndQueue`. */
 export interface MatchContext {
-  /** Changes before this index are forward rows, the rest late rows. Default: all forward. */
-  forwardCount?: number;
-  /** The cursor the run started from: kept when no forward change finished matching. */
-  start?: Cursor;
-  /** The late read hit its row limit: more late rows may be waiting. */
-  lateFull?: boolean;
-  /** Test hook: the size budget of the package watcher lookup. */
-  pairBytes?: number;
+  /** Test hook: the distinct-pair cap of package matching. */
+  maxPairs?: number;
 }
 
-/**
- * Orders changes for package matching: forward rows in `(at, id)` order (so the matched set is a prefix and the
- * cursor can stop after it), then late rows, `new_advisory` before other kinds.
- */
-export function matchOrder(changes: Change[], forwardCount: number): Change[] {
-  const forward = changes.slice(0, forwardCount);
-  const late = changes.slice(forwardCount);
+/** Package matching order: `new_advisory` records first, then other kinds. */
+export function matchOrder(changes: Change[]): Change[] {
   return [
-    ...forward,
-    ...late.filter((c) => c.kind === 'new_advisory'),
-    ...late.filter((c) => c.kind !== 'new_advisory'),
+    ...changes.filter((c) => c.kind === 'new_advisory'),
+    ...changes.filter((c) => c.kind !== 'new_advisory'),
   ];
 }
 
@@ -450,8 +389,7 @@ const CLASS_SQL = "CASE WHEN via = 'watch' THEN 0 WHEN via LIKE 'pkg:%' THEN 1 E
  * cut back to MAX_QUEUED_PER_USER: watch rows are kept before saved-search rows; among saved-search rows the
  * ones queued by this run go first, then the oldest. The oldest watch row goes only when the user has more
  * watch rows than the cap.
- * If package matching ran out of budget the cursor stops after the last forward change whose matching finished,
- * and the late-read lower bound stays at the first late change not matched. Returns the rows newly queued.
+ * The cursor always advances past every change read. Returns the rows newly queued.
  */
 export async function matchAndQueue(
   env: Env,
@@ -461,9 +399,7 @@ export async function matchAndQueue(
   ctx: MatchContext = {},
 ): Promise<number> {
   const at = runAt.toISOString();
-  const forwardCount = ctx.forwardCount ?? changes.length;
   const inserts: QueueInsert[] = [];
-  let saved: Cursor = cursor;
   if (changes.length > 0) {
     const byEntity = new Map<string, Change[]>();
     for (const c of changes) {
@@ -474,50 +410,27 @@ export async function matchAndQueue(
     const watch = await matchWatch(env, byEntity);
     const docs = await loadDocs(env, changes);
     const searches = await matchSearches(env, changes, docs);
-    const ordered = matchOrder(changes, forwardCount);
-    let packages: PackageMatch;
+    let packages: QueueInsert[] = [];
     try {
-      packages = await matchPackages(env, ordered, ctx.pairBytes);
+      packages = await matchPackages(env, matchOrder(changes), ctx.maxPairs);
     } catch (err) {
-      // Package matching alone is held back: entry-watch and saved-search alerts still go out, and the cursor
-      // stops before the first package-kind change so the next run matches it again.
+      // Package alerts are skipped for this run; entry-watch and saved-search alerts go out and the cursor advances.
       console.log(
         JSON.stringify({
           event: 'notify.package_match_failed',
-          changes: ordered.length,
+          changes: changes.length,
           error: err instanceof Error ? err.name : 'error',
         }),
       );
-      packages = {
-        inserts: [],
-        unmatched: new Set(ordered.filter((c) => PACKAGE_KINDS.has(c.kind)).map((c) => c.id)),
-      };
     }
     // Entry watch first, then package watch, then saved search: a change is queued once per user (first wins).
     const seen = new Set<string>();
-    for (const r of [...watch, ...packages.inserts, ...searches]) {
+    for (const r of [...watch, ...packages, ...searches]) {
       const k = r.userId + SEP + r.changeId;
       if (seen.has(k)) continue;
       seen.add(k);
       inserts.push(r);
     }
-    const keep = ctx.start ?? cursor;
-    const firstWaiting = changes.slice(0, forwardCount).findIndex((c) => packages.unmatched.has(c.id));
-    if (firstWaiting >= 0) {
-      const prev = changes[firstWaiting - 1];
-      saved = prev ? { at: prev.at, id: prev.id, ...(keep.since ? { since: keep.since } : {}) } : keep;
-      console.log(
-        JSON.stringify({ event: 'notify.cursor_held', waiting: packages.unmatched.size, at: saved.at }),
-      );
-    }
-    // Late rows are read from this bound next run: the first one not matched, else past the last one read.
-    const late = changes.slice(forwardCount);
-    const firstLate = late.find((c) => packages.unmatched.has(c.id));
-    const lateBound = firstLate ?? (ctx.lateFull ? late[late.length - 1] : undefined);
-    saved = { ...saved, ...(lateBound ? { late: { at: lateBound.at, id: lateBound.id } } : {}) };
-    if (!lateBound && saved.late) delete saved.late;
-  } else if (saved.late) {
-    saved = { at: saved.at, id: saved.id, ...(saved.since ? { since: saved.since } : {}) };
   }
   const stmts: D1PreparedStatement[] = [];
   for (let i = 0; i < inserts.length; i += INSERT_CHUNK)
@@ -553,7 +466,7 @@ export async function matchAndQueue(
     env.DB_USERS.prepare(
       `INSERT INTO notify_state (name, value, updated_at) VALUES ('cursor', ?1, ?2)
        ON CONFLICT (name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    ).bind(JSON.stringify(saved), at),
+    ).bind(JSON.stringify(cursor), at),
   );
   const results = await env.DB_USERS.batch(stmts);
   const added = results.slice(0, insertCount).reduce((n, r) => n + (r.meta.changes ?? 0), 0);

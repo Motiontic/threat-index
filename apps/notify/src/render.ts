@@ -21,6 +21,8 @@ export interface PackageInfo {
   subjectLabel: string | null;
   /** Up to five distinct fixed versions for this package, ordered; empty means none yet. */
   fixed: string[];
+  /** The fixed versions could not be read: the line says "fixed version: see MTI". */
+  unknownFixed?: boolean;
 }
 
 /** The `ecosystem/name` of a watch row for a subject, or null when the name could carry anything else. */
@@ -91,6 +93,7 @@ function pct(v: string | null): string {
 /** "Package: PyPI/langchain. Fixed in 1.2.3" for a package alert; empty for anything else. */
 export function packageLine(i: RenderItem): string {
   if (!i.pkg) return '';
+  if (i.pkg.unknownFixed) return `Package: ${shownName(i.pkg.label)}. fixed version: see MTI`;
   const versions = i.pkg.fixed.map(clean).filter((v) => SHOWN_VERSION.test(v));
   const fixed =
     versions.length > 0 ? `Fixed in ${versions.map((v) => defang(v)).join(', ')}` : 'no fixed version yet';
