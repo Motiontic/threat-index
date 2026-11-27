@@ -170,6 +170,12 @@ function unknownInfo(via: string): PackageInfo {
   return { label: `${eco}/${name}`, subjectLabel: subjectPackage(eco, name), fixed: [], unknownFixed: true };
 }
 
+/** `+name` keeps SQLite on `affected_by_vuln` (vuln_key, then the ecosystem range) rather than `affected_by_name`. */
+export const FIXED_SQL = `SELECT DISTINCT fixed FROM affected
+  WHERE vuln_key = ?1 AND +name = ?3
+    AND (ecosystem = ?2 OR (ecosystem > ?2 || ':' AND ecosystem < ?2 || ';'))
+    AND fixed IS NOT NULL AND fixed != '' ORDER BY fixed LIMIT ?4`;
+
 /**
  * Package and up to MAX_FIXED_LISTED distinct fixed versions for each package-watch item:
  * `${vulnKey}\0${ecosystem}/${name}` → info. One bounded statement per item (`SELECT DISTINCT fixed … LIMIT 5`
@@ -191,12 +197,7 @@ async function loadPackageInfo(
       const results = await env.DB_ADVISORIES.batch<{ fixed: string | null }>(
         part.map((w) => {
           const { eco, name } = viaPackage(w.via);
-          return env.DB_ADVISORIES.prepare(
-            `SELECT DISTINCT fixed FROM affected
-             WHERE vuln_key = ?1 AND name = ?3
-               AND (ecosystem = ?2 OR (ecosystem > ?2 || ':' AND ecosystem < ?2 || ';'))
-               AND fixed IS NOT NULL AND fixed != '' LIMIT ?4`,
-          ).bind(w.key, eco, name, MAX_FIXED_LISTED);
+          return env.DB_ADVISORIES.prepare(FIXED_SQL).bind(w.key, eco, name, MAX_FIXED_LISTED + 1);
         }),
       );
       part.forEach((w, n) => {
@@ -209,6 +210,7 @@ async function loadPackageInfo(
           label: `${eco}/${name}`,
           subjectLabel: subjectPackage(eco, name),
           fixed: ordered.slice(0, MAX_FIXED_LISTED),
+          ...(stored.length > MAX_FIXED_LISTED ? { moreFixed: true } : {}),
         });
       });
     }

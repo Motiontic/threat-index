@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type EntityDoc, matchesSearch, matchOrder, parseTriggers } from '../src/match';
+import { type EntityDoc, matchesSearch, parseTriggers } from '../src/match';
 
 const doc = (o: Partial<EntityDoc> = {}): EntityDoc => ({
   type: 'vuln',
@@ -61,26 +61,5 @@ describe('parseTriggers', () => {
       ['breach_notice', 'epss_band', 'fix_released', 'newly_exploited', 'public_exploit'].sort(),
     );
     expect(parseTriggers('["cvss_change"]').has('cvss_change')).toBe(true);
-  });
-});
-
-describe('matchOrder', () => {
-  const ch = (id: string, kind: string) => ({
-    id,
-    entity_key: id,
-    kind,
-    old: null,
-    new: null,
-    at: '2026-11-01T00:00:00Z',
-    source: null,
-  });
-  it('puts new_advisory changes first, then the other kinds, each in order', () => {
-    const changes = [
-      ch('a', 'kev_added'),
-      ch('b', 'new_advisory'),
-      ch('c', 'public_exploit'),
-      ch('d', 'new_advisory'),
-    ];
-    expect(matchOrder(changes).map((c) => c.id)).toEqual(['b', 'd', 'a', 'c']);
   });
 });

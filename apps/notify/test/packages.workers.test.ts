@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Change } from '../src/collect';
 import { collect } from '../src/collect';
-import { runNotify } from '../src/consume';
+import { FIXED_SQL, runNotify } from '../src/consume';
 import { matchAndQueue } from '../src/match';
 import {
   captureLogs,
@@ -496,6 +496,127 @@ describe('package matching', () => {
     // u2 watches the base ecosystem `Ubuntu`: every kernel CVE (its Ubuntu:* rows) matches.
     expect(await queueOf('u2')).toHaveLength(100);
     expect(logs.lines.some((l) => l.includes('notify.package_match_truncated'))).toBe(false);
+  });
+
+  it('the kernel run with maxPairs: 3 is not truncated: DISTINCT collapses the releases', async () => {
+    await seedUser('u2', { instant: 0, digest: 'daily' });
+    await seedPkgWatch('u2', 'Ubuntu', 'linux');
+    const adv: D1PreparedStatement[] = [];
+    for (let r = 0; r < 300; r++)
+      adv.push(
+        E.DB_ADVISORIES.prepare(
+          "INSERT INTO affected (ecosystem, name, source, source_id, range_no, vuln_key, range_type) VALUES (?1, 'linux', 'osv', 'K1', ?2, 'CVE-2026-9001', 'ECOSYSTEM')",
+        ).bind(r % 2 ? `Ubuntu:${r}.04` : `Debian:${r}`, r),
+      );
+    for (let i = 0; i < adv.length; i += 90) await E.DB_ADVISORIES.batch(adv.slice(i, i + 90));
+    await seedChange('k1', 'CVE-2026-9001', 'public_exploit', T('07:00'));
+    const got = await collect(E, MON_9);
+    await matchAndQueue(E, got.changes, got.cursor, MON_9, { maxPairs: 3 });
+    expect(await queueOf('u2')).toHaveLength(1);
+    expect(logs.lines.some((l) => l.includes('notify.package_match_truncated'))).toBe(false);
+  });
+
+  it('at the pair cap the new_advisory records are kept before vuln keys', async () => {
+    await seedUser('u1', { instant: 0, digest: 'daily' });
+    await seedPkgWatch('u1', 'npm', 'fresh');
+    await seedAffected('npm', 'other', 'osv', 'O1', 'CVE-2026-8001', null);
+    await seedAffected('npm', 'fresh', 'osv', 'GHSA-new', 'GHSA-new', null);
+    await seedChange('c1', 'CVE-2026-8001', 'public_exploit', T('07:00'));
+    await E.DB_SIGNALS.prepare(
+      "INSERT INTO changes (id, entity_key, kind, new, at, source) VALUES ('na1', 'GHSA-new', 'new_advisory', 'osv:GHSA-new', ?1, 'osv')",
+    )
+      .bind(T('07:01'))
+      .run();
+    const got = await collect(E, MON_9);
+    await matchAndQueue(E, got.changes, got.cursor, MON_9, { maxPairs: 1 });
+    expect((await queueOf('u1')).map((r) => r.change_id)).toEqual(['na1']);
+  });
+
+  it('1,000 watchers x 500 changes stays within the per-user cap and inserts in bounded batches', async () => {
+    const batchSizes: number[] = [];
+    const spied = {
+      ...E,
+      DB_USERS: new Proxy(E.DB_USERS, {
+        get(t, k) {
+          if (k === 'batch')
+            return (s: D1PreparedStatement[]) => {
+              batchSizes.push(s.length);
+              return t.batch(s);
+            };
+          const v = Reflect.get(t, k) as unknown;
+          return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+        },
+      }),
+    } as typeof E;
+    const users = Array.from({ length: 1000 }, (_, i) =>
+      E.DB_USERS.prepare(
+        `INSERT INTO users (id, email, created_at, alert_instant, digest, digest_weekday) VALUES (?1, ?2, '2026-01-01T00:00:00.000Z', 0, 'daily', 1)`,
+      ).bind(`b${i}`, `b${i}@example.com`),
+    );
+    for (let i = 0; i < users.length; i += 250) await E.DB_USERS.batch(users.slice(i, i + 250));
+    const watches = Array.from({ length: 1000 }, (_, i) =>
+      E.DB_USERS.prepare(
+        "INSERT INTO watch_packages (user_id, ecosystem, name, created_at, alerts_on) VALUES (?1, 'npm', 'shared', '2026-01-01T00:00:00.000Z', 1)",
+      ).bind(`b${i}`),
+    );
+    for (let i = 0; i < watches.length; i += 250) await E.DB_USERS.batch(watches.slice(i, i + 250));
+    await seedAffected('npm', 'shared', 'osv', 'S1', 'CVE-2026-6000', null);
+    const sig = Array.from({ length: 500 }, (_, i) =>
+      E.DB_SIGNALS.prepare(
+        "INSERT INTO changes (id, entity_key, kind, at, source) VALUES (?1, 'CVE-2026-6000', 'public_exploit', ?2, 'osv')",
+      ).bind(`bc${String(i).padStart(3, '0')}`, T('07:00')),
+    );
+    await E.DB_SIGNALS.batch(sig);
+    // 500 changes share one vuln key, so each watcher matches all 500; the cap keeps 200 per user.
+    const got = await collect(E, MON_9);
+    await matchAndQueue(spied, got.changes, got.cursor, MON_9);
+    const worst = await rows<{ n: number }>(
+      'SELECT MAX(c) AS n FROM (SELECT COUNT(*) AS c FROM alert_queue GROUP BY user_id)',
+    );
+    expect(worst[0]?.n).toBeLessThanOrEqual(200);
+    expect(batchSizes.length).toBeGreaterThan(1);
+    expect(Math.max(...batchSizes)).toBeLessThanOrEqual(500);
+    expect((await cursorRow()).id).toBe('bc499');
+  });
+
+  it('a round-6 cursor with a late field parses and is saved without it', async () => {
+    await E.DB_USERS.prepare("INSERT INTO notify_state (name, value, updated_at) VALUES ('cursor', ?1, ?2)")
+      .bind(JSON.stringify({ at: T('06:00'), id: 'x', late: { at: T('01:00'), id: 'y' } }), T('06:00'))
+      .run();
+    await seedChange('n1', 'CVE-2026-1', 'public_exploit', T('07:00'));
+    const got = await collect(E, MON_9);
+    expect(got.changes.map((c) => c.id)).toEqual(['n1']);
+    await matchAndQueue(E, got.changes, got.cursor, MON_9);
+    const saved = await rows<{ value: string }>("SELECT value FROM notify_state WHERE name = 'cursor'");
+    const j = JSON.parse(saved[0]?.value ?? '{}') as Record<string, unknown>;
+    expect(j.id).toBe('n1');
+    expect('late' in j).toBe(false);
+  });
+
+  it('the fixed-version lookup uses affected_by_vuln for an npm item and an Ubuntu item, ordered and bounded', async () => {
+    for (const eco of ['npm', 'Ubuntu']) {
+      const plan = (
+        await E.DB_ADVISORIES.prepare(`EXPLAIN QUERY PLAN ${FIXED_SQL}`)
+          .bind('CVE-2026-1', eco, 'linux', 6)
+          .all<{ detail: string }>()
+      ).results
+        .map((r) => r.detail)
+        .join(' | ');
+      expect(plan).toContain('affected_by_vuln (vuln_key=?');
+      expect(plan).not.toContain('affected_by_name');
+    }
+  });
+
+  it('lists five fixed versions in a fixed order and says "and more" when there are more', async () => {
+    await seedUser('u1', { instant: 1, digest: 'off' });
+    await seedPkgWatch('u1', 'npm', 'many');
+    for (let i = 0; i < 7; i++)
+      await seedAffected('npm', 'many', 'osv', 'M1', 'CVE-2026-4000', `1.${i}.0`, i);
+    await seedChange('mf', 'CVE-2026-4000', 'public_exploit', T('07:00'));
+    const f = fakeFetch();
+    await runNotify(withKey(), MON_9, f.deps);
+    expect(f.sent).toHaveLength(1);
+    expect(JSON.stringify(f.sent[0])).toContain('and more');
   });
 
   it('an OS watch on Ubuntu matches Ubuntu:22.04 rows', async () => {

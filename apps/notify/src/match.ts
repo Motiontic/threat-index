@@ -141,7 +141,7 @@ const BASE_ECO =
 
 /**
  * Package watches. No budget, prefix or hold: a run always finishes.
- * (1) `SELECT DISTINCT` base ecosystem and name from `affected` for the run's vuln keys and records, in chunks of
+ * (1) Records of `new_advisory` changes first, then vuln keys, so at the cap new advisories are kept. `SELECT DISTINCT` base ecosystem and name from `affected` for the run's vuln keys and records, in chunks of
  *     PACKAGE_KEYS_PER_CHUNK (all chunks, every run). DISTINCT collapses distro releases, so a kernel CVE gives a
  *     few rows. At most MAX_PACKAGE_PAIRS distinct pairs are kept; past that no more chunks are read and
  *     `package_match_truncated` is logged (counts only).
@@ -187,22 +187,6 @@ export async function matchPackages(
     }
     return p;
   };
-  for (const keys of chunks(vulnKeys, PACKAGE_KEYS_PER_CHUNK)) {
-    if (full) break;
-    const rows = (
-      await env.DB_ADVISORIES.prepare(
-        `SELECT DISTINCT vuln_key, ${BASE_ECO} AS eco, name FROM affected
-         WHERE vuln_key IN (SELECT value FROM json_each(?1))`,
-      )
-        .bind(JSON.stringify(keys))
-        .all<{ vuln_key: string; eco: string; name: string }>()
-    ).results;
-    for (const r of rows) {
-      seenRows++;
-      const p = take(r.eco, r.name);
-      if (p) add(byVuln, r.vuln_key, p);
-    }
-  }
   for (const recs of chunks(records, PACKAGE_KEYS_PER_CHUNK)) {
     if (full) break;
     const rows = (
@@ -217,6 +201,22 @@ export async function matchPackages(
       seenRows++;
       const p = take(r.eco, r.name);
       if (p) add(byRecord, r.source + SEP + r.source_id, p);
+    }
+  }
+  for (const keys of chunks(vulnKeys, PACKAGE_KEYS_PER_CHUNK)) {
+    if (full) break;
+    const rows = (
+      await env.DB_ADVISORIES.prepare(
+        `SELECT DISTINCT vuln_key, ${BASE_ECO} AS eco, name FROM affected
+         WHERE vuln_key IN (SELECT value FROM json_each(?1))`,
+      )
+        .bind(JSON.stringify(keys))
+        .all<{ vuln_key: string; eco: string; name: string }>()
+    ).results;
+    for (const r of rows) {
+      seenRows++;
+      const p = take(r.eco, r.name);
+      if (p) add(byVuln, r.vuln_key, p);
     }
   }
   if (full)
@@ -370,14 +370,8 @@ export interface MatchContext {
   maxPairs?: number;
 }
 
-/** Package matching order: `new_advisory` records first, then other kinds. */
-export function matchOrder(changes: Change[]): Change[] {
-  return [
-    ...changes.filter((c) => c.kind === 'new_advisory'),
-    ...changes.filter((c) => c.kind !== 'new_advisory'),
-  ];
-}
-
+/** Statements per D1 batch. */
+export const MAX_BATCH_STATEMENTS = 500;
 /** Rows per insert statement. */
 const INSERT_CHUNK = 200;
 /** Queue order: entry watch, then package watch, then saved search. */
@@ -412,7 +406,7 @@ export async function matchAndQueue(
     const searches = await matchSearches(env, changes, docs);
     let packages: QueueInsert[] = [];
     try {
-      packages = await matchPackages(env, matchOrder(changes), ctx.maxPairs);
+      packages = await matchPackages(env, changes, ctx.maxPairs);
     } catch (err) {
       // Package alerts are skipped for this run; entry-watch and saved-search alerts go out and the cursor advances.
       console.log(
@@ -424,13 +418,24 @@ export async function matchAndQueue(
       );
     }
     // Entry watch first, then package watch, then saved search: a change is queued once per user (first wins).
+    // At most MAX_QUEUED_PER_USER rows per user are kept in memory, in that class order.
     const seen = new Set<string>();
-    for (const r of [...watch, ...packages, ...searches]) {
-      const k = r.userId + SEP + r.changeId;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      inserts.push(r);
-    }
+    const perUser = new Map<string, number>();
+    let overCap = 0;
+    for (const group of [watch, packages, searches])
+      for (const r of group) {
+        const k = r.userId + SEP + r.changeId;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const n = perUser.get(r.userId) ?? 0;
+        if (n >= MAX_QUEUED_PER_USER) {
+          overCap++;
+          continue;
+        }
+        perUser.set(r.userId, n + 1);
+        inserts.push(r);
+      }
+    if (overCap > 0) console.log(JSON.stringify({ event: 'notify.queue_capped', dropped: overCap }));
   }
   const stmts: D1PreparedStatement[] = [];
   for (let i = 0; i < inserts.length; i += INSERT_CHUNK)
@@ -462,13 +467,18 @@ export async function matchAndQueue(
       ).bind(JSON.stringify(users.slice(i, i + 500)), MAX_QUEUED_PER_USER, at),
     );
   const insertCount = Math.ceil(inserts.length / INSERT_CHUNK);
-  stmts.push(
-    env.DB_USERS.prepare(
-      `INSERT INTO notify_state (name, value, updated_at) VALUES ('cursor', ?1, ?2)
-       ON CONFLICT (name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    ).bind(JSON.stringify(cursor), at),
-  );
-  const results = await env.DB_USERS.batch(stmts);
+  const cursorStmt = env.DB_USERS.prepare(
+    `INSERT INTO notify_state (name, value, updated_at) VALUES ('cursor', ?1, ?2)
+     ON CONFLICT (name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).bind(JSON.stringify(cursor), at);
+  // Batches of at most MAX_BATCH_STATEMENTS. The cursor goes in the last batch, after every insert, so a failure
+  // before it just retries the window (inserts are idempotent through the alert_queue key).
+  const batches = chunks(stmts, MAX_BATCH_STATEMENTS - 1);
+  if (batches.length === 0) batches.push([]);
+  const lastBatch = batches[batches.length - 1];
+  if (lastBatch) lastBatch.push(cursorStmt);
+  const results: D1Result[] = [];
+  for (const b of batches) results.push(...(await env.DB_USERS.batch(b)));
   const added = results.slice(0, insertCount).reduce((n, r) => n + (r.meta.changes ?? 0), 0);
   const dropped = results.slice(insertCount, -1).reduce((n, r) => n + (r.meta.changes ?? 0), 0);
   if (dropped > 0) console.log(JSON.stringify({ event: 'notify.queue_capped', dropped }));

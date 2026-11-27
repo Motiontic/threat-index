@@ -23,6 +23,8 @@ export interface PackageInfo {
   fixed: string[];
   /** The fixed versions could not be read: the line says "fixed version: see MTI". */
   unknownFixed?: boolean;
+  /** More fixed versions exist than are listed. */
+  moreFixed?: boolean;
 }
 
 /** The `ecosystem/name` of a watch row for a subject, or null when the name could carry anything else. */
@@ -96,7 +98,9 @@ export function packageLine(i: RenderItem): string {
   if (i.pkg.unknownFixed) return `Package: ${shownName(i.pkg.label)}. fixed version: see MTI`;
   const versions = i.pkg.fixed.map(clean).filter((v) => SHOWN_VERSION.test(v));
   const fixed =
-    versions.length > 0 ? `Fixed in ${versions.map((v) => defang(v)).join(', ')}` : 'no fixed version yet';
+    versions.length > 0
+      ? `Fixed in ${versions.map((v) => defang(v)).join(', ')}${i.pkg.moreFixed ? ' and more' : ''}`
+      : 'no fixed version yet';
   return `Package: ${shownName(i.pkg.label)}. ${fixed}`;
 }
 
