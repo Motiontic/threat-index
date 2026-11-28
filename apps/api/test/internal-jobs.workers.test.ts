@@ -801,16 +801,26 @@ describe('complete: a job-supplied partial cursor', () => {
       .bind('red-hat')
       .first<{ kind: string; value: string; etag: string | null }>();
   /** A running big-file job for red-hat whose stored cursor is FROM and whose request is (FROM, TO]. */
-  const setup = async (n: number, opts: { source?: string | null; withFrom?: boolean } = {}) => {
-    const id = ULID(n);
+  const setup = async (
+    n: number,
+    opts: {
+      source?: string | null;
+      withFrom?: boolean;
+      withTarget?: boolean;
+      kind?: string;
+      from?: { kind: string; value: string };
+    } = {},
+  ) => {
+    // Its own id space (ULID() keeps only two digits), distinct from every other test's ids.
+    const id = `01HZX3K9ABCDEFGHJKMNPQ${String(n).padStart(4, '0')}`;
     ids.push(id);
     const source = opts.source === undefined ? 'red-hat' : opts.source;
-    await seed(id, 'big-file', 'running', source);
+    await seed(id, opts.kind ?? 'big-file', 'running', source);
     await env.BUCKET.put(
       `jobs/${id}/request.json`,
       JSON.stringify({
-        cursor: { ...pairOf(TO), etag: '"v2"' },
-        ...(opts.withFrom === false ? {} : { from: pairOf(FROM) }),
+        ...(opts.withTarget === false ? {} : { cursor: { ...pairOf(TO), etag: '"v2"' } }),
+        ...(opts.withFrom === false ? {} : { from: opts.from ?? pairOf(FROM) }),
       }),
     );
     await env.DB_CONTROL.prepare(
@@ -854,6 +864,13 @@ describe('complete: a job-supplied partial cursor', () => {
     ['a bad date', pairOf(['not a date', 'a'])],
     ['over 512 characters', pairOf(['2026-11-21T00:00:00Z', 'a'.repeat(600)])],
     ['not an object', 'x'],
+    [
+      'a pair with an extra element',
+      { kind: 'timestamp', value: JSON.stringify(['2026-11-21T00:00:00Z', 'a', {}]) },
+    ],
+    ['a time with no offset', pairOf(['2026-11-21T00:00:00', 'a'])],
+    ['a bare number for a time', pairOf(['1', 'a'])],
+    ['an empty ref', pairOf(['2026-11-21T00:00:00Z', ''])],
   ])('fails the job with bad cursor when it is %s, leaving the stored cursor alone', async (_n, cursor) => {
     const id = await setup(113);
     const res = await complete(id, cursor);
@@ -873,6 +890,38 @@ describe('complete: a job-supplied partial cursor', () => {
     expect((await complete(id, pairOf(['2026-11-21T00:00:00Z', 'a']))).status).toBe(400);
     expect(await row(id)).toMatchObject({ status: 'failed' });
     await unchanged();
+  });
+  it('fails a job whose request has no target', async () => {
+    const id = await setup(117, { withTarget: false });
+    expect((await complete(id, pairOf(['2026-11-21T00:00:00Z', 'a']))).status).toBe(400);
+    await unchanged();
+  });
+  it('fails a first-load job that sends a partial cursor', async () => {
+    const id = await setup(118, { kind: 'first-load' });
+    expect((await complete(id, pairOf(['2026-11-21T00:00:00Z', 'a']))).status).toBe(400);
+    expect(String((await row(id))?.error ?? '')).toContain('invalid_manifest: bad cursor');
+    await unchanged();
+  });
+  it('orders +00:00 and Z, and sub-ms digits, by ms then ref', async () => {
+    // Same ms as FROM (2026-11-20T00:00:00Z) written with an offset and extra digits; ref 'n' > 'm'.
+    const id = await setup(119);
+    const same: [string, string] = ['2026-11-20T00:00:00.000400+00:00', 'n'];
+    expect((await complete(id, pairOf(same))).status).toBe(200);
+    expect(await stored()).toMatchObject({ value: JSON.stringify(same), etag: null });
+    const id2 = await setup(120);
+    expect((await complete(id2, pairOf(['2026-11-20T00:00:00.000400+00:00', 'l']))).status).toBe(400);
+  });
+  it('stores the checked pair re-serialised, not the raw text', async () => {
+    const id = await setup(121);
+    const raw = '[ "2026-11-21T00:00:00Z" , "a" ]';
+    expect((await complete(id, { kind: 'timestamp', value: raw })).status).toBe(200);
+    expect(await stored()).toMatchObject({ value: JSON.stringify(['2026-11-21T00:00:00Z', 'a']) });
+  });
+  it('stores the target as before when the request holds a long from of another kind', async () => {
+    // A fingerprint cursor can be far over 2,048 characters; it must not stop the target being stored.
+    const id = await setup(122, { from: { kind: 'version', value: 'x'.repeat(5000) } });
+    expect((await complete(id)).status).toBe(200);
+    expect(await stored()).toEqual({ kind: 'timestamp', value: JSON.stringify(TO), etag: '"v2"' });
   });
   it('without a manifest cursor, stores the target and its etag as before', async () => {
     const id = await setup(116);

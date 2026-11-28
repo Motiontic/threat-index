@@ -308,6 +308,63 @@ describe('big-file over the cap', () => {
   });
 });
 
+describe('update windows through readChangeList', () => {
+  const write = (lines: string[]) => {
+    const path = join(tmpdir(), `list-${process.pid}-${Date.now()}-${Math.random()}.csv`);
+    writeFileSync(path, lines.join('\n'));
+    return path;
+  };
+  const plain = { timeColumn: 0, refColumn: 1 };
+
+  it('the next window starts after `reached`: no line is repeated or skipped, even at equal ms', async () => {
+    // Equal ms written two ways (Z and +00:00, sub-ms digits), plus later lines.
+    const lines = [
+      '2026-11-20T00:00:02Z,f',
+      '2026-11-20T00:00:01.000900+00:00,e',
+      '2026-11-20T00:00:01.000Z,d',
+      '2026-11-20T00:00:01Z,c',
+      '2026-11-20T00:00:01.0001Z,b',
+      '2026-11-20T00:00:00Z,a',
+    ];
+    const path = write(lines);
+    const seen: string[] = [];
+    let from: [string, string] | null = ['2026-11-19T00:00:00Z', ''];
+    for (let round = 0; round < 10 && from; round++) {
+      const listed = await readChangeList(path, plain, { from, to: null });
+      const cut = applyCap(listed.lines, 'update', 2);
+      seen.push(...cut.lines.map((l) => l.ref));
+      from = cut.reached ?? null;
+    }
+    expect(seen).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+  });
+
+  it('filters before the cap: dropped lines never make an update partial', async () => {
+    const t = (i: number) => new Date(Date.UTC(2026, 10, 20) + i * 1000).toISOString();
+    const lines = Array.from({ length: 15 }, (_, i) => `${t(i)},${i % 3 === 0 ? 'Ubuntu' : 'npm'}/X-${i}`);
+    const path = write(lines.reverse());
+    const cfg = { ...plain, refPrefixes: ['npm'] };
+    const listed = await readChangeList(path, cfg, { from: ['2026-11-19T00:00:00Z', ''], to: null });
+    expect(listed.lines).toHaveLength(10);
+    expect(listed.filtered).toBe(5);
+    expect(applyCap(listed.lines, 'update', 10).reached).toBeUndefined();
+  });
+
+  it('counts filtered lines inside the window only', async () => {
+    const path = write([
+      '2026-11-20T00:00:03Z,Ubuntu/U-3',
+      '2026-11-20T00:00:02Z,npm/N-2',
+      '2026-11-20T00:00:01Z,Ubuntu/U-1',
+    ]);
+    const cfg = { ...plain, refPrefixes: ['npm'] };
+    const listed = await readChangeList(path, cfg, {
+      from: ['2026-11-20T00:00:01Z', 'Ubuntu/U-1'],
+      to: null,
+    });
+    expect(listed.lines.map((l) => l.ref)).toEqual(['npm/N-2']);
+    expect(listed.filtered).toBe(1);
+  });
+});
+
 describe('readChangeList refPrefixes', () => {
   it('keeps listed ecosystems and counts the rest as filtered, not unreadable', async () => {
     const dir = tmpdir();

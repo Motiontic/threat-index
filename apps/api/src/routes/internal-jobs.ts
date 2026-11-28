@@ -451,31 +451,36 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
       return c.json({ error: 'invalid_manifest' }, 400);
     };
     // A partial cursor from the job is checked before anything is queued: it must lie inside the planned window.
+    // Only a change-list `big-file` update stops short, so no other kind may send one.
     const partial = parsed.manifest.cursor;
+    if (partial && (!row.source_id || row.kind !== 'big-file')) return badCursor();
     let nextCursor: z.infer<typeof cursorSchema> | undefined;
     if (row.source_id) {
       const reqObj = await c.env.BUCKET.get(`${jobPrefix(id)}request.json`);
-      let from: z.infer<typeof cursorSchema> | undefined;
+      let request: unknown;
       if (reqObj) {
         try {
-          const r = z
-            .object({ cursor: cursorSchema.optional(), from: cursorSchema.optional() })
-            .safeParse(JSON.parse(await reqObj.text()));
-          nextCursor = r.success ? r.data.cursor : undefined;
-          from = r.success ? r.data.from : undefined;
+          request = JSON.parse(await reqObj.text());
         } catch {
-          nextCursor = undefined;
+          request = undefined;
         }
       }
+      // The target, parsed on its own as before: a `from` of any shape or size must not stop it being stored.
+      const r = z.object({ cursor: cursorSchema.optional() }).safeParse(request);
+      nextCursor = r.success ? r.data.cursor : undefined;
       if (partial) {
+        const f = z
+          .object({ from: z.object({ kind: z.literal('timestamp'), value: z.string() }) })
+          .safeParse(request);
+        const start = f.success ? readCheckedPair(f.data.from.value) : null;
         const to = nextCursor?.kind === 'timestamp' ? readCheckedPair(nextCursor.value) : null;
-        const start = from?.kind === 'timestamp' ? readCheckedPair(from.value) : null;
         const reached = readCheckedPair(partial.value);
         if (!to || !start || !reached || !cursorInBounds(reached, start, to)) return badCursor();
-        // No etag: the next run's `check` must not answer `unchanged` from the list's validator.
-        nextCursor = { kind: 'timestamp', value: partial.value };
+        // Store the checked pair, re-serialised, with no etag: the next run's `check` must not answer
+        // `unchanged` from the list's validator.
+        nextCursor = { kind: 'timestamp', value: JSON.stringify(reached) };
       }
-    } else if (partial) return badCursor();
+    }
 
     // Priority comes from the job's kind, never from the manifest.
     const priority = row.kind === 'first-load' ? 'first-load' : 'steady';

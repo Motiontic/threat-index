@@ -51,13 +51,14 @@ export async function readChangeList(
       unreadable++;
       continue;
     }
+    const l = { time, ref, ms };
+    if (from && !Number.isNaN(from.ms) && cmpLines(l, from) <= 0) continue;
+    if (to && !Number.isNaN(to.ms) && cmpLines(l, to) > 0) continue;
+    // Counted inside the window only, so `filtered` compares with `lines`. The cap applies after the filter.
     if (!refKept(ref, cfg.refPrefixes)) {
       filtered++;
       continue;
     }
-    const l = { time, ref, ms };
-    if (from && !Number.isNaN(from.ms) && cmpLines(l, from) <= 0) continue;
-    if (to && !Number.isNaN(to.ms) && cmpLines(l, to) > 0) continue;
     lines.push(l);
   }
   return { lines: lines.sort(cmpLines), unreadable, filtered };

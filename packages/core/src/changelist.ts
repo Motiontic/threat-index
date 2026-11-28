@@ -18,11 +18,26 @@ export function readPair(value: string | null | undefined): Pair | null {
   return null;
 }
 
-/** Like `readPair`, but also at most `MAX_PAIR_CHARS` long with a time that parses as a date. */
+/** An ISO 8601 date-time with `Z` or a numeric offset: the only form read the same in every time zone. */
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * For values from outside ti-api: at most `MAX_PAIR_CHARS` long, exactly two strings, a non-empty ref, and an ISO
+ * time with `Z` or an offset that parses as a date.
+ */
 export function readCheckedPair(value: string | null | undefined): Pair | null {
   if (!value || value.length > MAX_PAIR_CHARS) return null;
-  const pair = readPair(value);
-  return pair && !Number.isNaN(Date.parse(pair[0])) ? pair : null;
+  let v: unknown;
+  try {
+    v = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(v) || v.length !== 2) return null;
+  const [time, ref] = v as unknown[];
+  if (typeof time !== 'string' || typeof ref !== 'string' || ref === '') return null;
+  if (!ISO_TIME.test(time) || Number.isNaN(Date.parse(time))) return null;
+  return [time, ref];
 }
 
 /** Orders by time in ms, then by ref. Times must parse (callers check). */
