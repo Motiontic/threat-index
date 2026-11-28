@@ -1,6 +1,7 @@
 /**
  * Starts any job on a deployed ti-api and polls it.
  *   JOB_HMAC_SECRET=… pnpm --filter @ti/e2b-jobs start-job -- --api <origin> --kind <kind>
+ *     (kind: first-load, epss-diff, big-file, nightly-fold, search-index, affected-backfill, echo)
  *     [--source <id>] [--url <https>] [--day YYYY-MM-DD] [--no-wait]
  * Prints the job id and status only. Exit 0 only when the job ends `complete` (with --no-wait: when it started).
  */
@@ -17,7 +18,15 @@ export interface StartArgs {
   wait: boolean;
 }
 
-const KINDS = ['first-load', 'epss-diff', 'big-file', 'nightly-fold', 'search-index', 'echo'];
+export const KINDS = [
+  'first-load',
+  'epss-diff',
+  'big-file',
+  'nightly-fold',
+  'search-index',
+  'affected-backfill',
+  'echo',
+];
 
 export function parseArgs(argv: string[]): StartArgs | string {
   const out: Partial<StartArgs> = { wait: true };
@@ -67,7 +76,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const secret = process.env.JOB_HMAC_SECRET;
   if (typeof args === 'string' || !secret) {
     console.error(
-      `${typeof args === 'string' ? `${args}\n` : ''}usage: JOB_HMAC_SECRET=… start-job --api <origin> --kind <kind> [--source <id>] [--url <https>] [--day YYYY-MM-DD] [--no-wait]`,
+      `${typeof args === 'string' ? `${args}\n` : ''}usage: JOB_HMAC_SECRET=… start-job --api <origin> --kind <${KINDS.join('|')}> [--source <id>] [--url <https>] [--day YYYY-MM-DD] [--no-wait]`,
     );
     process.exit(2);
   }

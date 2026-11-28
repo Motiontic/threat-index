@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { deriveJobKey, SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyRequest } from '@ti/core/sign';
 import { describe, expect, it } from 'vitest';
-import { parseArgs, startJob } from './start-job.ts';
+import { KINDS, parseArgs, startJob } from './start-job.ts';
 
 const SECRET = 'ops-secret';
 
@@ -85,5 +86,27 @@ describe('start-job', () => {
       }),
     ).toBe(0);
     expect(out).toEqual(['job J running']);
+  });
+});
+
+describe('start-job kinds', () => {
+  it('accepts affected-backfill', () => {
+    expect(parseArgs(['--api', 'https://x', '--kind', 'affected-backfill'])).toEqual({
+      api: 'https://x',
+      kind: 'affected-backfill',
+      wait: true,
+    });
+  });
+
+  it('KINDS holds every kind ti-api enables, except deep-query (ti-api starts it for a signed-in user)', () => {
+    const src = readFileSync(new URL('../../../apps/api/src/lib/e2b.ts', import.meta.url), 'utf8');
+    const m = /ENABLED_JOB_KINDS[^=]*=\s*\[([^\]]*)\]/.exec(src);
+    expect(m).not.toBeNull();
+    const enabled = [...(m?.[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] as string);
+    expect(enabled.length).toBeGreaterThan(5);
+    const OPERATOR_EXCEPTION = 'deep-query';
+    expect(enabled).toContain(OPERATOR_EXCEPTION);
+    expect(enabled.filter((k) => k !== OPERATOR_EXCEPTION).filter((k) => !KINDS.includes(k))).toEqual([]);
+    expect(KINDS).not.toContain(OPERATOR_EXCEPTION);
   });
 });

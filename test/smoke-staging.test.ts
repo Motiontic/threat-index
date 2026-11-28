@@ -20,7 +20,12 @@ const STATUS: Record<string, number> = {
 };
 
 function fake(
-  opts: { drop?: { host: string; path: string; header: string }; hits?: unknown[]; cookieOn?: string } = {},
+  opts: {
+    mcpOff?: boolean | 'wrong';
+    drop?: { host: string; path: string; header: string };
+    hits?: unknown[];
+    cookieOn?: string;
+  } = {},
 ) {
   const seen: string[] = [];
   const fetchImpl = async (url: string, init: { method?: string; headers?: Record<string, string> } = {}) => {
@@ -30,6 +35,9 @@ function fake(
     const isApi = u.hostname === 'api.test';
     headers['content-type'] = isApi ? 'application/json' : 'text/html';
     let status = STATUS[u.pathname] ?? 200;
+    if (opts.mcpOff && u.pathname.includes('mcp')) {
+      return new Response('{}', { status: opts.mcpOff === true ? 404 : 405, headers });
+    }
     let body: string | null = null;
     if (u.pathname === '/.well-known/oauth-protected-resource/mcp') {
       headers['content-type'] = 'application/json';
@@ -146,5 +154,32 @@ describe('runSmoke', () => {
     expect(rows.find((r: { check: string }) => r.check === 'api /v1/sources').result).toContain(
       'no x-request-id',
     );
+  });
+
+  it('--mcp off: the four MCP rows must be 404, the If-None-Match row is skipped, the rest is unchanged', async () => {
+    const { fetchImpl, seen } = fake({ mcpOff: true });
+    const rows = await runSmoke(fetchImpl, { ...cfg, mcp: 'off' });
+    expect(rows.filter((r: { result: string }) => r.result.startsWith('fail'))).toEqual([]);
+    const mcpRows = rows.filter((r: { check: string }) => r.check.includes('(MCP off)'));
+    expect(mcpRows).toHaveLength(5);
+    expect(mcpRows.filter((r: { status: unknown }) => r.status === 404)).toHaveLength(4);
+    expect(mcpRows.filter((r: { result: string }) => r.result.startsWith('skip'))).toHaveLength(1);
+    expect(seen.length).toBeLessThanOrEqual(43);
+  });
+
+  it('--mcp off fails when MCP answers (405), and when an MCP 404 sets a cookie', async () => {
+    const rows = await runSmoke(fake({ mcpOff: 'wrong' }).fetchImpl, { ...cfg, mcp: 'off' });
+    const bad = rows.filter((r: { result: string }) => r.result.startsWith('fail'));
+    expect(bad).toHaveLength(4);
+    for (const r of bad) expect(r.result).toContain('status 405, wanted 404');
+  });
+
+  it('--mcp on is the default', async () => {
+    const a = await runSmoke(fake().fetchImpl, cfg);
+    const b = await runSmoke(fake().fetchImpl, { ...cfg, mcp: 'on' });
+    expect(b).toEqual(a);
+    // MCP 404s with --mcp on fail
+    const rows = await runSmoke(fake({ mcpOff: true }).fetchImpl, { ...cfg, mcp: 'on' });
+    expect(rows.filter((r: { result: string }) => r.result.startsWith('fail')).length).toBeGreaterThan(0);
   });
 });

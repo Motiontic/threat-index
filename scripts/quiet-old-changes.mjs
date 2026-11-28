@@ -5,14 +5,24 @@
 //   node scripts/quiet-old-changes.mjs --env staging|production [--apply]
 //
 // It touches only rows with `quiet IS NULL` and sets only `event_at` and `quiet`. It never deletes and never
-// holds rows. A second run changes nothing. The rule lives in packages/linker/src/age.ts; the planning in
+// holds rows. A second run changes nothing. Exploit and fix dates are read only for the keys the changes need
+// (by primary key / index, never a whole-table GROUP BY), and a D1 overload (7429) is waited out and retried. The rule lives in packages/linker/src/age.ts; the planning in
 // scripts/lib/quiet-plan.mjs (pure, tested); this file is the thin wrangler part.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { firstLoadBoundaries, planQuiet, updateChunks } from './lib/quiet-plan.mjs';
+import {
+  exploitDatesSql,
+  firstLoadBoundaries,
+  fixDatesSql,
+  keyBatches,
+  neededKeys,
+  planQuiet,
+  updateChunks,
+  withRetry,
+} from './lib/quiet-plan.mjs';
 import { loadDotEnv, ROOT, writeDeployConfig } from './wrangler-config.mjs';
 
 const PAGE = 10_000;
@@ -47,76 +57,102 @@ function makeD1(target, config) {
       encoding: 'utf8',
       maxBuffer: 256 * 1024 * 1024,
       env: { ...process.env, CI: process.env.CI ?? '1' },
-      stdio: ['ignore', 'pipe', 'inherit'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
+  // stderr is piped so an overload can be recognised; show it so the operator still sees wrangler's messages.
+  const run = (args) =>
+    withRetry(
+      async () => {
+        try {
+          return wrangler(args);
+        } catch (err) {
+          if (err.stderr) process.stderr.write(String(err.stderr));
+          throw err;
+        }
+      },
+      {
+        sleep: (ms) => {
+          console.error(`D1 overloaded; waiting ${ms / 1000}s before retrying`);
+          return new Promise((r) => setTimeout(r, ms));
+        },
+      },
+    );
   return {
-    query(db, sql) {
-      const res = JSON.parse(wrangler([...base(db), '--json', '--command', sql]));
+    async query(db, sql) {
+      const res = JSON.parse(await run([...base(db), '--json', '--command', sql]));
       return res[0]?.results ?? [];
     },
-    file(db, path) {
-      wrangler([...base(db), '--file', path]);
+    async file(db, path) {
+      await run([...base(db), '--file', path]);
     },
   };
 }
 
 /** Reads every row of a query, at most PAGE per call; `after(row)` is the keyset condition for the next page. */
-function readAll(d1, db, select, after) {
+async function readAll(d1, db, select, after) {
   const rows = [];
   let cond = '';
   for (;;) {
-    const page = d1.query(db, select(cond, PAGE));
+    const page = await d1.query(db, select(cond, PAGE));
     rows.push(...page);
     if (page.length < PAGE) return rows;
     cond = after(page[page.length - 1]);
   }
 }
 
-function load(d1) {
-  const changes = readAll(
+/** Reads dates for `keys` in batches of 800, one query each; progress to stderr every 10 batches. */
+async function readByKeys(d1, db, label, keys, sqlFor) {
+  const batches = keyBatches(keys);
+  const rows = [];
+  for (let i = 0; i < batches.length; i++) {
+    rows.push(...(await d1.query(db, sqlFor(batches[i]))));
+    if ((i + 1) % 10 === 0) console.error(`${label}: ${i + 1}/${batches.length} batches`);
+  }
+  return rows;
+}
+
+async function load(d1) {
+  const changes = await readAll(
     d1,
     'ti_signals',
     (cond, n) =>
       `SELECT id, kind, source, entity_key, new, at, event_at, quiet FROM changes WHERE quiet IS NULL${cond} ORDER BY id LIMIT ${n}`,
     (r) => ` AND id > ${lit(r.id)}`,
   );
+  const need = neededKeys(changes);
   const exploit = new Map(
-    readAll(
-      d1,
-      'ti_signals',
-      (cond, n) =>
-        `SELECT vuln_key, MIN(first_seen) AS d FROM signals WHERE kind = 'public_exploit'${cond} GROUP BY vuln_key ORDER BY vuln_key LIMIT ${n}`,
-      (r) => ` AND vuln_key > ${lit(r.vuln_key)}`,
-    ).map((r) => [r.vuln_key, r.d]),
+    (await readByKeys(d1, 'ti_signals', 'exploit dates', need.exploit, exploitDatesSql)).map((r) => [
+      r.vuln_key,
+      r.d,
+    ]),
   );
   const fix = new Map(
-    readAll(
-      d1,
-      'ti_advisories',
-      (cond, n) =>
-        `SELECT source, vuln_key, COALESCE(MIN(published), MIN(modified)) AS d FROM advisories WHERE vuln_key IS NOT NULL${cond} GROUP BY source, vuln_key ORDER BY source, vuln_key LIMIT ${n}`,
-      (r) => ` AND (source, vuln_key) > (${lit(r.source)}, ${lit(r.vuln_key)})`,
-    ).map((r) => [`${r.source}\u0000${r.vuln_key}`, r.d]),
+    (await readByKeys(d1, 'ti_advisories', 'fix dates', need.fix, fixDatesSql)).map((r) => [
+      `${r.source}\u0000${r.vuln_key}`,
+      r.d,
+    ]),
   );
   const notice = new Map(
-    readAll(
-      d1,
-      'ti_world',
-      (cond, n) =>
-        `SELECT source, notice_id, COALESCE(notified, discovered) AS d FROM breach_notices WHERE 1 = 1${cond} ORDER BY source, notice_id LIMIT ${n}`,
-      (r) => ` AND (source, notice_id) > (${lit(r.source)}, ${lit(r.notice_id)})`,
+    (
+      await readAll(
+        d1,
+        'ti_world',
+        (cond, n) =>
+          `SELECT source, notice_id, COALESCE(notified, discovered) AS d FROM breach_notices WHERE 1 = 1${cond} ORDER BY source, notice_id LIMIT ${n}`,
+        (r) => ` AND (source, notice_id) > (${lit(r.source)}, ${lit(r.notice_id)})`,
+      )
     )
       .filter((r) => r.d)
       .map((r) => [`${r.source}:${r.notice_id}`, r.d]),
   );
-  const runs = readAll(
+  const runs = await readAll(
     d1,
     'ti_control',
     (cond, n) =>
       `SELECT id, source_id, status, error, started_at, finished_at FROM runs WHERE 1 = 1${cond} ORDER BY id LIMIT ${n}`,
     (r) => ` AND id > ${lit(r.id)}`,
   );
-  const jobs = readAll(
+  const jobs = await readAll(
     d1,
     'ti_control',
     (cond, n) =>
@@ -126,12 +162,12 @@ function load(d1) {
   return { changes, exploit, fix, notice, boundaries: firstLoadBoundaries(runs, jobs) };
 }
 
-function main() {
+async function main() {
   const { env: target, apply } = parseArgs(process.argv.slice(2));
   loadDotEnv();
   const config = writeDeployConfig('api', target);
   const d1 = makeD1(target, config);
-  const data = load(d1);
+  const data = await load(d1);
   const { updates, summary } = planQuiet(data.changes, data);
   console.log(`${target}: ${data.changes.length} alertable rows read, ${updates.length} to update`);
   console.log('kind\tsource\treason\trows');
@@ -143,15 +179,15 @@ function main() {
   const dir = mkdtempSync(join(tmpdir(), 'quiet-changes-'));
   try {
     const chunks = updateChunks(updates);
-    chunks.forEach((sql, i) => {
+    for (const [i, sql] of chunks.entries()) {
       const path = join(dir, `chunk-${i}.sql`);
       writeFileSync(path, sql);
-      d1.file('ti_signals', path);
+      await d1.file('ti_signals', path);
       console.log(`wrote chunk ${i + 1}/${chunks.length}`);
-    });
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
