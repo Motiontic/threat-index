@@ -1,5 +1,11 @@
 import { gzipSync } from 'node:zlib';
-import { type InboxRow, inboxChunkKey, inboxManifestKey, MAX_ROWS_PER_CHUNK } from '@ti/core/inbox';
+import {
+  type InboxManifest,
+  type InboxRow,
+  inboxChunkKey,
+  inboxManifestKey,
+  MAX_ROWS_PER_CHUNK,
+} from '@ti/core/inbox';
 import type { JobApi } from '../client.ts';
 import { mapLimited } from './pool.ts';
 
@@ -14,6 +20,7 @@ export async function writeInboxChunks(
   jobId: string,
   chunks: InboxRow[][],
   now: () => Date = () => new Date(),
+  cursor?: InboxManifest['cursor'],
 ): Promise<{ chunks: number }> {
   const slices = chunks.map((rows, n) => {
     if (rows.length === 0 || rows.length > MAX_ROWS_PER_CHUNK)
@@ -28,7 +35,12 @@ export async function writeInboxChunks(
   const manifest = slices.map((s) => ({ key: s.key, rows: s.rows.length }));
   await api.putObject(
     inboxManifestKey(jobId),
-    JSON.stringify({ jobId, createdAt: now().toISOString(), chunks: manifest }),
+    JSON.stringify({
+      jobId,
+      createdAt: now().toISOString(),
+      chunks: manifest,
+      ...(cursor ? { cursor } : {}),
+    }),
     'application/json',
   );
   return { chunks: manifest.length };
@@ -40,9 +52,10 @@ export function writeInbox(
   jobId: string,
   rows: InboxRow[],
   now: () => Date = () => new Date(),
+  cursor?: InboxManifest['cursor'],
 ): Promise<{ chunks: number }> {
   const chunks: InboxRow[][] = [];
   for (let i = 0; i < rows.length; i += MAX_ROWS_PER_CHUNK)
     chunks.push(rows.slice(i, i + MAX_ROWS_PER_CHUNK));
-  return writeInboxChunks(api, jobId, chunks, now);
+  return writeInboxChunks(api, jobId, chunks, now, cursor);
 }

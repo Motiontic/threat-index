@@ -192,4 +192,50 @@ describe('changelist', () => {
     expect(JSON.stringify(r)).not.toContain('\ufffd');
     expect(h.requests.filter((q) => q.headers.range).length).toBeGreaterThan(1);
   });
+
+  describe('refPrefixes', () => {
+    const withPrefixes = {
+      ...source,
+      pull: { changelist: { ...(source.pull?.changelist as object), refPrefixes: ['npm'] } },
+    } as typeof source;
+    const kept = 'npm/GHSA-2025-1019';
+
+    it('counts only kept lines as fresh; newest covers every line', async () => {
+      // Newest line is a dropped one (PyPI), the kept line is older.
+      const list = `2025-05-21T01:00:00Z,Ubuntu/UBUNTU-1\n2025-05-20T23:00:00Z,${kept}\n2025-05-18T00:00:00Z,npm/old\n`;
+      const cur = at('2025-05-19T00:00:00Z', 'npm/x');
+      const h = makeCtx({
+        source: withPrefixes,
+        cursor: cur,
+        routes: [route(LIST, ranged(list, { etag: VALIDATOR })), route(ITEMS, reply(record))],
+      });
+      const r = await fetch(h.ctx);
+      expect(r.items.map((i) => i.id)).toEqual([kept]);
+      expect(h.requests.filter((q) => ITEMS.test(q.url)).map((q) => q.url)).toEqual([
+        `https://osv-vulnerabilities.storage.googleapis.com/${kept}.json`,
+      ]);
+      // The kept item is the last one fetched, so the cursor sits on it (more: false keeps the validator).
+      expect(r.nextCursor).toEqual(at('2025-05-20T23:00:00Z', kept, VALIDATOR));
+    });
+
+    it('a complete scan with only dropped lines moves the cursor to newest and fetches nothing', async () => {
+      const list = `2025-05-21T01:00:00Z,Ubuntu/UBUNTU-2\n2025-05-20T01:00:00Z,Chainguard/CGA-1\n2025-05-18T00:00:00Z,npm/old\n`;
+      const h = makeCtx({
+        source: withPrefixes,
+        cursor: at('2025-05-19T00:00:00Z', 'npm/x', '"old"'),
+        routes: [route(LIST, ranged(list, { etag: VALIDATOR }))],
+      });
+      const r = await fetch(h.ctx);
+      expect(r).toMatchObject({ items: [], receipt: null, more: false });
+      expect(r.nextCursor).toEqual(at('2025-05-21T01:00:00Z', 'Ubuntu/UBUNTU-2', VALIDATOR));
+      expect(h.requests.some((q) => ITEMS.test(q.url))).toBe(false);
+    });
+
+    it('stays unchanged when newest is not after the cursor', async () => {
+      const list = `2025-05-18T00:00:00Z,npm/old\n`;
+      const cur = at('2025-05-19T00:00:00Z', 'npm/x', '"old"');
+      const h = makeCtx({ source: withPrefixes, cursor: cur, routes: [route(LIST, ranged(list))] });
+      expect((await fetch(h.ctx)).nextCursor).toEqual(cur);
+    });
+  });
 });

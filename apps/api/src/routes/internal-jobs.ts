@@ -1,3 +1,4 @@
+import { cursorInBounds, readCheckedPair } from '@ti/core/changelist';
 import type { JobRequest } from '@ti/core/control';
 import type { LoadMessage } from '@ti/core/inbox';
 import { inboxManifestKey } from '@ti/core/inbox';
@@ -443,6 +444,39 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
       return c.json({ error: 'invalid_manifest' }, 400);
     }
 
+    const badCursor = async () => {
+      await failJob(c, id, 'invalid_manifest: bad cursor');
+      log('job failed', { jobId: id, kind: row.kind, status: 'failed', sandboxId: row.sandbox_id });
+      killLater(c, row.sandbox_id, id, row.kind);
+      return c.json({ error: 'invalid_manifest' }, 400);
+    };
+    // A partial cursor from the job is checked before anything is queued: it must lie inside the planned window.
+    const partial = parsed.manifest.cursor;
+    let nextCursor: z.infer<typeof cursorSchema> | undefined;
+    if (row.source_id) {
+      const reqObj = await c.env.BUCKET.get(`${jobPrefix(id)}request.json`);
+      let from: z.infer<typeof cursorSchema> | undefined;
+      if (reqObj) {
+        try {
+          const r = z
+            .object({ cursor: cursorSchema.optional(), from: cursorSchema.optional() })
+            .safeParse(JSON.parse(await reqObj.text()));
+          nextCursor = r.success ? r.data.cursor : undefined;
+          from = r.success ? r.data.from : undefined;
+        } catch {
+          nextCursor = undefined;
+        }
+      }
+      if (partial) {
+        const to = nextCursor?.kind === 'timestamp' ? readCheckedPair(nextCursor.value) : null;
+        const start = from?.kind === 'timestamp' ? readCheckedPair(from.value) : null;
+        const reached = readCheckedPair(partial.value);
+        if (!to || !start || !reached || !cursorInBounds(reached, start, to)) return badCursor();
+        // No etag: the next run's `check` must not answer `unchanged` from the list's validator.
+        nextCursor = { kind: 'timestamp', value: partial.value };
+      }
+    } else if (partial) return badCursor();
+
     // Priority comes from the job's kind, never from the manifest.
     const priority = row.kind === 'first-load' ? 'first-load' : 'steady';
     const messages = parsed.manifest.chunks.map((ch): { body: LoadMessage } => ({
@@ -458,22 +492,18 @@ export function createInternalJobsRoute(deps: InternalJobsDeps = {}) {
 
     // The cursor moves only now, after every message is out.
     if (row.source_id) {
-      const reqObj = await c.env.BUCKET.get(`${jobPrefix(id)}request.json`);
-      let cursor: z.infer<typeof cursorSchema> | undefined;
-      if (reqObj) {
-        try {
-          const r = z.object({ cursor: cursorSchema.optional() }).safeParse(JSON.parse(await reqObj.text()));
-          cursor = r.success ? r.data.cursor : undefined;
-        } catch {
-          cursor = undefined;
-        }
-      }
-      if (cursor) {
+      if (nextCursor) {
         await c.env.DB_CONTROL.prepare(
           `INSERT INTO cursors (source_id, kind, value, etag, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
            ON CONFLICT(source_id) DO UPDATE SET kind=excluded.kind, value=excluded.value, etag=excluded.etag, updated_at=excluded.updated_at`,
         )
-          .bind(row.source_id, cursor.kind, cursor.value, cursor.etag ?? null, now().toISOString())
+          .bind(
+            row.source_id,
+            nextCursor.kind,
+            nextCursor.value,
+            nextCursor.etag ?? null,
+            now().toISOString(),
+          )
           .run();
       }
     }

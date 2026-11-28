@@ -1,6 +1,7 @@
 /** Reading a newest-first change list (CSV) and fetching its documents, for `first-load` and `big-file`. */
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { compareLines, type Pair, readPair, refKept } from '@ti/core/changelist';
 import type { ChangeItem } from '@ti/patterns/changelist';
 import { fillTemplate, parseCsvLine } from '@ti/patterns/util';
 import type { PullConfig } from '@ti/sources/pull';
@@ -11,7 +12,8 @@ export const MAX_LIST_DOCS = 10_000;
 export const ITEMS_IN_FLIGHT = 8;
 export const ITEMS_PER_SECOND = 10;
 
-export type Pair = [time: string, ref: string];
+export type { Pair };
+export { readPair };
 export interface ListLine {
   time: string;
   ref: string;
@@ -19,21 +21,8 @@ export interface ListLine {
 }
 type ChangelistConfig = NonNullable<PullConfig['changelist']>;
 
-/** A `[time, ref]` JSON pair (a cursor value), or null. */
-export function readPair(value: string | undefined): Pair | null {
-  if (!value) return null;
-  try {
-    const v = JSON.parse(value) as unknown;
-    if (Array.isArray(v) && typeof v[0] === 'string' && typeof v[1] === 'string') return [v[0], v[1]];
-  } catch {
-    // not JSON
-  }
-  return null;
-}
-
 /** Orders lines like the pattern's `cmp`: by time, then by ref. */
-export const cmpLines = (a: ListLine, b: ListLine): number =>
-  a.ms - b.ms || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0);
+export const cmpLines = compareLines;
 
 const lineOf = (pair: Pair): ListLine => ({ time: pair[0], ref: pair[1], ms: Date.parse(pair[0]) });
 
@@ -43,13 +32,14 @@ const lineOf = (pair: Pair): ListLine => ({ time: pair[0], ref: pair[1], ms: Dat
  */
 export async function readChangeList(
   path: string,
-  cfg: Pick<ChangelistConfig, 'timeColumn' | 'refColumn'>,
+  cfg: Pick<ChangelistConfig, 'timeColumn' | 'refColumn' | 'refPrefixes'>,
   window: { from: Pair | null; to: Pair | null },
-): Promise<{ lines: ListLine[]; unreadable: number }> {
+): Promise<{ lines: ListLine[]; unreadable: number; filtered: number }> {
   const from = window.from ? lineOf(window.from) : null;
   const to = window.to ? lineOf(window.to) : null;
   const lines: ListLine[] = [];
   let unreadable = 0;
+  let filtered = 0;
   const rl = createInterface({ input: createReadStream(path), crlfDelay: Number.POSITIVE_INFINITY });
   for await (const raw of rl) {
     if (!raw) continue;
@@ -61,22 +51,34 @@ export async function readChangeList(
       unreadable++;
       continue;
     }
+    if (!refKept(ref, cfg.refPrefixes)) {
+      filtered++;
+      continue;
+    }
     const l = { time, ref, ms };
     if (from && !Number.isNaN(from.ms) && cmpLines(l, from) <= 0) continue;
     if (to && !Number.isNaN(to.ms) && cmpLines(l, to) > 0) continue;
     lines.push(l);
   }
-  return { lines: lines.sort(cmpLines), unreadable };
+  return { lines: lines.sort(cmpLines), unreadable, filtered };
 }
 
-/** Applies the per-job cap: a first load keeps the newest `MAX_LIST_DOCS`; an update over it fails. */
+/**
+ * Applies the per-job cap. A first load keeps the newest `MAX_LIST_DOCS`. An update over it keeps the oldest
+ * `MAX_LIST_DOCS` (the ones right after `from`) and returns the last kept line as `reached`, so the cursor
+ * can move there and the next run carries on.
+ */
 export function applyCap(
   lines: ListLine[],
   mode: 'first-load' | 'update',
   cap = MAX_LIST_DOCS,
-): { lines: ListLine[]; older: number } {
+): { lines: ListLine[]; older: number; reached?: Pair } {
   if (lines.length <= cap) return { lines, older: 0 };
-  if (mode === 'update') throw new Error(`too many changes: ${lines.length}`);
+  if (mode === 'update') {
+    const kept = lines.slice(0, cap);
+    const last = kept[cap - 1] as ListLine;
+    return { lines: kept, older: 0, reached: [last.time, last.ref] };
+  }
   return { lines: lines.slice(lines.length - cap), older: lines.length - cap };
 }
 

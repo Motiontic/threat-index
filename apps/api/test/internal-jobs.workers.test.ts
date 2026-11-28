@@ -791,3 +791,92 @@ describe('logs', () => {
       expect(all).not.toContain(bad as string);
   });
 });
+
+describe('complete: a job-supplied partial cursor', () => {
+  const FROM: [string, string] = ['2026-11-20T00:00:00Z', 'm'];
+  const TO: [string, string] = ['2026-11-22T00:00:00Z', 'z'];
+  const pairOf = (p: [string, string]) => ({ kind: 'timestamp', value: JSON.stringify(p) });
+  const stored = () =>
+    env.DB_CONTROL.prepare('SELECT kind, value, etag FROM cursors WHERE source_id=?1')
+      .bind('red-hat')
+      .first<{ kind: string; value: string; etag: string | null }>();
+  /** A running big-file job for red-hat whose stored cursor is FROM and whose request is (FROM, TO]. */
+  const setup = async (n: number, opts: { source?: string | null; withFrom?: boolean } = {}) => {
+    const id = ULID(n);
+    ids.push(id);
+    const source = opts.source === undefined ? 'red-hat' : opts.source;
+    await seed(id, 'big-file', 'running', source);
+    await env.BUCKET.put(
+      `jobs/${id}/request.json`,
+      JSON.stringify({
+        cursor: { ...pairOf(TO), etag: '"v2"' },
+        ...(opts.withFrom === false ? {} : { from: pairOf(FROM) }),
+      }),
+    );
+    await env.DB_CONTROL.prepare(
+      `INSERT OR REPLACE INTO cursors (source_id, kind, value, etag, updated_at) VALUES ('red-hat', 'timestamp', ?1, '"v1"', ?2)`,
+    )
+      .bind(JSON.stringify(FROM), clock.toISOString())
+      .run();
+    return id;
+  };
+  const complete = async (id: string, cursor?: unknown) => {
+    await putManifest(id, chunks(id, 1), cursor === undefined ? {} : { cursor });
+    return asJob(app(), id, 'complete', { ok: true });
+  };
+  const unchanged = async () =>
+    expect(await stored()).toEqual({ kind: 'timestamp', value: JSON.stringify(FROM), etag: '"v1"' });
+
+  it('stores a valid partial cursor with no etag', async () => {
+    const id = await setup(110);
+    const mid = ['2026-11-21T00:00:00Z', 'a'] as [string, string];
+    const res = await complete(id, pairOf(mid));
+    expect(res.status).toBe(200);
+    expect(await stored()).toEqual({ kind: 'timestamp', value: JSON.stringify(mid), etag: null });
+    expect(await row(id)).toMatchObject({ status: 'complete' });
+  });
+  it('accepts a cursor equal to the target', async () => {
+    const id = await setup(111);
+    expect((await complete(id, pairOf(TO))).status).toBe(200);
+    expect(await stored()).toMatchObject({ value: JSON.stringify(TO), etag: null });
+  });
+  it('orders equal times by ref', async () => {
+    const id = await setup(112);
+    expect((await complete(id, pairOf(['2026-11-20T00:00:00Z', 'n']))).status).toBe(200);
+  });
+  it.each([
+    ['equal to from', pairOf(FROM)],
+    ['before from', pairOf(['2026-11-19T00:00:00Z', 'a'])],
+    ['same time as from, earlier ref', pairOf(['2026-11-20T00:00:00Z', 'a'])],
+    ['after the target', pairOf(['2026-11-22T00:00:00Z', 'zz'])],
+    ['another kind', { kind: 'etag', value: JSON.stringify(['2026-11-21T00:00:00Z', 'a']) }],
+    ['unparsable', { kind: 'timestamp', value: 'nope' }],
+    ['a bad date', pairOf(['not a date', 'a'])],
+    ['over 512 characters', pairOf(['2026-11-21T00:00:00Z', 'a'.repeat(600)])],
+    ['not an object', 'x'],
+  ])('fails the job with bad cursor when it is %s, leaving the stored cursor alone', async (_n, cursor) => {
+    const id = await setup(113);
+    const res = await complete(id, cursor);
+    expect(res.status).toBe(400);
+    expect(await row(id)).toMatchObject({ status: 'failed' });
+    expect(String((await row(id))?.error ?? '')).toContain('invalid_manifest: bad cursor');
+    expect(load.batches).toHaveLength(0);
+    await unchanged();
+  });
+  it('fails a job whose request has no from cursor', async () => {
+    const id = await setup(114, { withFrom: false });
+    expect((await complete(id, pairOf(['2026-11-21T00:00:00Z', 'a']))).status).toBe(400);
+    await unchanged();
+  });
+  it('fails a job with no source_id', async () => {
+    const id = await setup(115, { source: null });
+    expect((await complete(id, pairOf(['2026-11-21T00:00:00Z', 'a']))).status).toBe(400);
+    expect(await row(id)).toMatchObject({ status: 'failed' });
+    await unchanged();
+  });
+  it('without a manifest cursor, stores the target and its etag as before', async () => {
+    const id = await setup(116);
+    expect((await complete(id)).status).toBe(200);
+    expect(await stored()).toEqual({ kind: 'timestamp', value: JSON.stringify(TO), etag: '"v2"' });
+  });
+});

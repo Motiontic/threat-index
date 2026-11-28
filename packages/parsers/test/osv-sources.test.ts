@@ -129,7 +129,10 @@ describe('the four sources', () => {
         });
       } else {
         const dir = id === 'osv' ? '' : `${id === 'debian' ? 'Debian' : 'Ubuntu'}/`;
-        expect(s?.pull?.changelist).toEqual({
+        const { refPrefixes, ...rest } = s?.pull?.changelist ?? ({} as { refPrefixes?: string[] });
+        // Only osv filters its list; the parser's own ecosystem set is checked against it in e2b/jobs.
+        expect(refPrefixes !== undefined).toBe(id === 'osv');
+        expect(rest).toEqual({
           listUrl: `${HOST}/${dir}modified_id.csv`,
           timeColumn: 0,
           refColumn: 1,

@@ -22,6 +22,8 @@ export interface InboxManifest {
   jobId: string;
   createdAt: string; // ISO
   chunks: InboxChunkRef[];
+  /** Set only when a `big-file` job stopped short: the last change-list line it processed. */
+  cursor?: { kind: 'timestamp'; value: string };
 }
 
 /**

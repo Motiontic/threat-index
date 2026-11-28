@@ -23,6 +23,8 @@ export interface PullConfig {
     refColumn: number;
     itemUrl: string;
     rangeBytes?: number;
+    /** Keep only lines whose ref's text before the first `/` is listed. */
+    refPrefixes?: string[];
   };
   since?: {
     url: string;
