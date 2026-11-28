@@ -238,7 +238,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     );
     process.exit(2);
   }
-  const mcp = arg('mcp') ?? 'on';
+  // `--mcp off` or `--mcp=off`; a bare or misspelt flag is an error, never a silent `on`.
+  const eq = process.argv.find((a) => a.startsWith('--mcp='));
+  const mcp = eq ? eq.slice('--mcp='.length) : process.argv.includes('--mcp') ? (arg('mcp') ?? '') : 'on';
   if (mcp !== 'on' && mcp !== 'off') {
     console.error('--mcp must be on or off');
     process.exit(2);

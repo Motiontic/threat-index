@@ -100,7 +100,8 @@ describe('start-job kinds', () => {
 
   it('KINDS holds every kind ti-api enables, except deep-query (ti-api starts it for a signed-in user)', () => {
     const src = readFileSync(new URL('../../../apps/api/src/lib/e2b.ts', import.meta.url), 'utf8');
-    const m = /ENABLED_JOB_KINDS[^=]*=\s*\[([^\]]*)\]/.exec(src);
+    // Up to the array's closing `];`, so a `]` in a comment inside the array can't cut the list short.
+    const m = /ENABLED_JOB_KINDS[^=]*=\s*\[([\s\S]*?)\];/.exec(src);
     expect(m).not.toBeNull();
     const enabled = [...(m?.[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] as string);
     expect(enabled.length).toBeGreaterThan(5);

@@ -36,6 +36,7 @@ function fake(
     headers['content-type'] = isApi ? 'application/json' : 'text/html';
     let status = STATUS[u.pathname] ?? 200;
     if (opts.mcpOff && u.pathname.includes('mcp')) {
+      if (opts.cookieOn === u.pathname) headers['set-cookie'] = '__session=x';
       return new Response('{}', { status: opts.mcpOff === true ? 404 : 405, headers });
     }
     let body: string | null = null;
@@ -172,6 +173,14 @@ describe('runSmoke', () => {
     const bad = rows.filter((r: { result: string }) => r.result.startsWith('fail'));
     expect(bad).toHaveLength(4);
     for (const r of bad) expect(r.result).toContain('status 405, wanted 404');
+
+    const withCookie = await runSmoke(fake({ mcpOff: true, cookieOn: '/mcp' }).fetchImpl, {
+      ...cfg,
+      mcp: 'off',
+    });
+    const cookieRows = withCookie.filter((r: { result: string }) => r.result.startsWith('fail'));
+    expect(cookieRows.length).toBeGreaterThan(0);
+    for (const r of cookieRows) expect(r.result).toContain('sets a cookie');
   });
 
   it('--mcp on is the default', async () => {

@@ -250,7 +250,12 @@ describe('reading dates by key', () => {
 });
 
 describe('withRetry', () => {
-  const overload = () => new Error('D1 DB is overloaded. Too many resources [code: 7429]');
+  // As wrangler fails: the error JSON is on stdout; the message repeats the command.
+  const overload = () =>
+    Object.assign(new Error('Command failed: wrangler d1 execute ti_signals'), {
+      stdout:
+        '{"error":{"notes":[{"text":"D1 DB is overloaded. Too many resources consumed [code: 7429]"}]}}',
+    });
   it('retries overloads with 5 s x attempt waits, then returns', async () => {
     let n = 0;
     const waits: number[] = [];
@@ -270,7 +275,10 @@ describe('withRetry', () => {
     let n = 0;
     const out = await withRetry(
       async () => {
-        if (++n === 1) throw Object.assign(new Error('Command failed'), { stderr: 'ERROR code: 7429' });
+        if (++n === 1)
+          throw Object.assign(new Error('Command failed'), {
+            stderr: '✘ [ERROR] D1 DB is overloaded. [code: 7429]',
+          });
         return 1;
       },
       { sleep: async () => {} },
@@ -292,6 +300,25 @@ describe('withRetry', () => {
     expect(n).toBe(1);
   });
 
+  it('does not take a key that contains 7429 for an overload', async () => {
+    let n = 0;
+    await expect(
+      withRetry(
+        async () => {
+          n++;
+          throw Object.assign(
+            new Error(
+              "Command failed: wrangler d1 execute ti_signals --command SELECT … IN ('CVE-2024-27429')",
+            ),
+            { stdout: '{"error":{"notes":[{"text":"no such column: first_seen [code: 7500]"}]}}' },
+          );
+        },
+        { sleep: async () => {} },
+      ),
+    ).rejects.toThrow(/CVE-2024-27429/);
+    expect(n).toBe(1);
+  });
+
   it('gives up after 5 retries', async () => {
     let n = 0;
     await expect(
@@ -302,7 +329,7 @@ describe('withRetry', () => {
         },
         { sleep: async () => {} },
       ),
-    ).rejects.toThrow(/7429/);
+    ).rejects.toMatchObject({ stdout: expect.stringContaining('[code: 7429]') });
     expect(n).toBe(6);
   });
 });

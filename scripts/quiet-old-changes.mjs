@@ -8,7 +8,7 @@
 // holds rows. A second run changes nothing. Exploit and fix dates are read only for the keys the changes need
 // (by primary key / index, never a whole-table GROUP BY), and a D1 overload (7429) is waited out and retried. The rule lives in packages/linker/src/age.ts; the planning in
 // scripts/lib/quiet-plan.mjs (pure, tested); this file is the thin wrangler part.
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,32 +51,35 @@ function makeD1(target, config) {
     '-c',
     config,
   ];
-  const wrangler = (args) =>
-    execFileSync(join(ROOT, 'node_modules', '.bin', 'wrangler'), args, {
+  // stderr is captured so an overload can be recognised, and always passed on, so the operator still sees
+  // wrangler's warnings, on success too.
+  const wrangler = (args) => {
+    const r = spawnSync(join(ROOT, 'node_modules', '.bin', 'wrangler'), args, {
       cwd: ROOT,
       encoding: 'utf8',
       maxBuffer: 256 * 1024 * 1024,
       env: { ...process.env, CI: process.env.CI ?? '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-  // stderr is piped so an overload can be recognised; show it so the operator still sees wrangler's messages.
-  const run = (args) =>
-    withRetry(
-      async () => {
-        try {
-          return wrangler(args);
-        } catch (err) {
-          if (err.stderr) process.stderr.write(String(err.stderr));
-          throw err;
-        }
-      },
-      {
-        sleep: (ms) => {
-          console.error(`D1 overloaded; waiting ${ms / 1000}s before retrying`);
-          return new Promise((r) => setTimeout(r, ms));
+    if (r.stderr) process.stderr.write(r.stderr);
+    if (r.error) throw r.error;
+    if (r.status !== 0)
+      throw Object.assign(
+        new Error(`wrangler ${args.slice(0, 3).join(' ')} exited ${r.status ?? r.signal}`),
+        {
+          stdout: r.stdout,
+          stderr: r.stderr,
         },
+      );
+    return r.stdout;
+  };
+  const run = (args) =>
+    withRetry(async () => wrangler(args), {
+      sleep: (ms) => {
+        console.error(`D1 overloaded; waiting ${ms / 1000}s before retrying`);
+        return new Promise((r) => setTimeout(r, ms));
       },
-    );
+    });
   return {
     async query(db, sql) {
       const res = JSON.parse(await run([...base(db), '--json', '--command', sql]));

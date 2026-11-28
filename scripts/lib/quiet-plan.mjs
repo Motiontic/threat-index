@@ -158,10 +158,14 @@ export function fixDatesSql(batch) {
   return `SELECT source, vuln_key, COALESCE(MIN(published), MIN(modified)) AS d FROM advisories WHERE vuln_key IN (${inList(batch)}) GROUP BY source, vuln_key`;
 }
 
-/** True when a failed wrangler call was D1 shedding load (code 7429), which is worth waiting out. */
+/**
+ * True when a failed wrangler call was D1 shedding load (code 7429), which is worth waiting out. Only wrangler's
+ * own output is read: `err.message` repeats the whole command, SQL and keys included, and a key such as
+ * CVE-2024-27429 would otherwise look like an overload.
+ */
 export function isOverload(err) {
-  const text = [err?.message, err?.stdout, err?.stderr].map((x) => String(x ?? '')).join('\n');
-  return /7429|overloaded/i.test(text);
+  const text = [err?.stdout, err?.stderr].map((x) => String(x ?? '')).join('\n');
+  return /\[code: 7429\]|D1 DB is overloaded/i.test(text);
 }
 
 /**
