@@ -1,7 +1,11 @@
 // Smoke check of a DEPLOYED ti-web and ti-api (staging or a local pair). Read-only: GET requests, no
 // credentials, no writes, at most 40 requests, one at a time.
 //
-//   node scripts/smoke-staging.mjs --web <url> --api <url>     (or TI_WEB_URL and TI_API_URL)
+//   node scripts/smoke-staging.mjs --web <url> --api <url> [--mcp on|off]   (or TI_WEB_URL and TI_API_URL)
+//
+// `--mcp on` (the default) expects MCP switched on, as in staging. `--mcp off` expects it switched off
+// (MCP_ENABLED = "0", as in production until launch): the four MCP rows must answer 404 and set no cookie, and
+// the If-None-Match row is skipped. Every other row is the same in both modes.
 //
 // Prints a `check | status | result` table and exits 1 when any row fails.
 import { fileURLToPath } from 'node:url';
@@ -10,7 +14,8 @@ const MAX_REQUESTS = 43;
 const trim = (u) => u.replace(/\/+$/, '');
 
 /** One row per check. `fetchImpl` is `fetch`-shaped, so tests can pass a fake. */
-export async function runSmoke(fetchImpl, { web, api }) {
+export async function runSmoke(fetchImpl, { web, api, mcp = 'on' }) {
+  if (mcp !== 'on' && mcp !== 'off') throw new Error('mcp must be on or off');
   const rows = [];
   let requests = 0;
   const get = async (base, path, { method = 'GET', headers = {}, body } = {}) => {
@@ -87,7 +92,7 @@ export async function runSmoke(fetchImpl, { web, api }) {
     return res;
   }
 
-  const skip = (label) => rows.push({ check: label, status: '-', result: 'skip: no record found' });
+  const skip = (label, result = 'skip: no record found') => rows.push({ check: label, status: '-', result });
 
   // The first hit of a search gives a real record key for the entry checks.
   let key = null;
@@ -114,68 +119,84 @@ export async function runSmoke(fetchImpl, { web, api }) {
     await check(`web ${p}`, web, p, { status: 200, web: true });
   await check('web missing page', web, '/no-such-page-smoke', { status: 404, web: true });
   await check('web /ops', web, '/ops', { status: 404, web: true });
-  // MCP, forwarded by ti-web to ti-mcp (switched on in staging). Not pages, so no Permissions-Policy requirement
-  // beyond what ti-mcp sets; the headers are checked and no cookie may be set.
-  await check('web /mcp', web, '/mcp', { status: 405, noCookie: true });
   const wellKnown = '/.well-known/oauth-protected-resource/mcp';
-  await check(`web ${wellKnown}`, web, wellKnown, {
-    status: 200,
-    json: true,
-    noCookie: true,
-    expect: async (res) => {
-      const d = await res.json();
-      if (d.resource !== `${trim(web)}/mcp`) return 'resource is not <web>/mcp';
-      if (!Array.isArray(d.authorization_servers) || d.authorization_servers.length !== 1)
-        return 'authorization_servers is not one entry';
-      if (JSON.stringify(d.bearer_methods_supported) !== '["header"]')
-        return 'bearer_methods_supported is not ["header"]';
-      if (JSON.stringify(d).includes('offline_access')) return 'offline_access is listed';
-      return null;
-    },
-  });
-  const card = await check('web /mcp/server-card', web, '/mcp/server-card', {
-    status: 200,
-    contentType: 'application/mcp-server-card+json',
-    noCookie: true,
-    expect: async (res) => {
-      if (res.headers.get('access-control-allow-origin') !== '*') return 'no Access-Control-Allow-Origin: *';
-      return res.headers.get('etag') ? null : 'no ETag';
-    },
-  });
-  const etag = card?.headers.get('etag');
-  if (etag)
-    await check('web /mcp/server-card (If-None-Match)', web, '/mcp/server-card', {
-      status: 304,
-      noCookie: true,
-      headers: { 'If-None-Match': etag },
+  if (mcp === 'off') {
+    // MCP switched off: ti-web answers 404 for all four, and sets no cookie.
+    const off = { status: 404, noCookie: true };
+    await check('web /mcp (MCP off)', web, '/mcp', off);
+    await check(`web ${wellKnown} (MCP off)`, web, wellKnown, off);
+    await check('web /mcp/server-card (MCP off)', web, '/mcp/server-card', off);
+    await check('web POST /mcp (no token) (MCP off)', web, '/mcp', {
+      ...off,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: '{}',
     });
-  else skip('web /mcp/server-card (If-None-Match)');
-  // No token: 401 with a challenge that names the metadata document and scope, and no `error`.
-  await check('web POST /mcp (no token)', web, '/mcp', {
-    status: 401,
-    json: true,
-    noCookie: true,
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-      'MCP-Protocol-Version': '2026-07-28',
-      'Mcp-Method': 'tools/list',
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/list',
-      params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' } },
-    }),
-    expect: async (res) => {
-      const c = res.headers.get('www-authenticate') ?? '';
-      if (!c.includes(`resource_metadata="${trim(web)}${wellKnown}"`))
-        return 'challenge has no resource_metadata';
-      if (!c.includes('scope="mti:read"')) return 'challenge has no scope';
-      return /error=/.test(c) ? 'challenge has an error=' : null;
-    },
-  });
+    skip('web /mcp/server-card (If-None-Match) (MCP off)', 'skip: MCP off');
+  } else {
+    // MCP, forwarded by ti-web to ti-mcp (switched on in staging). Not pages, so no Permissions-Policy requirement
+    // beyond what ti-mcp sets; the headers are checked and no cookie may be set.
+    await check('web /mcp', web, '/mcp', { status: 405, noCookie: true });
+    await check(`web ${wellKnown}`, web, wellKnown, {
+      status: 200,
+      json: true,
+      noCookie: true,
+      expect: async (res) => {
+        const d = await res.json();
+        if (d.resource !== `${trim(web)}/mcp`) return 'resource is not <web>/mcp';
+        if (!Array.isArray(d.authorization_servers) || d.authorization_servers.length !== 1)
+          return 'authorization_servers is not one entry';
+        if (JSON.stringify(d.bearer_methods_supported) !== '["header"]')
+          return 'bearer_methods_supported is not ["header"]';
+        if (JSON.stringify(d).includes('offline_access')) return 'offline_access is listed';
+        return null;
+      },
+    });
+    const card = await check('web /mcp/server-card', web, '/mcp/server-card', {
+      status: 200,
+      contentType: 'application/mcp-server-card+json',
+      noCookie: true,
+      expect: async (res) => {
+        if (res.headers.get('access-control-allow-origin') !== '*')
+          return 'no Access-Control-Allow-Origin: *';
+        return res.headers.get('etag') ? null : 'no ETag';
+      },
+    });
+    const etag = card?.headers.get('etag');
+    if (etag)
+      await check('web /mcp/server-card (If-None-Match)', web, '/mcp/server-card', {
+        status: 304,
+        noCookie: true,
+        headers: { 'If-None-Match': etag },
+      });
+    else skip('web /mcp/server-card (If-None-Match)');
+    // No token: 401 with a challenge that names the metadata document and scope, and no `error`.
+    await check('web POST /mcp (no token)', web, '/mcp', {
+      status: 401,
+      json: true,
+      noCookie: true,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        'MCP-Protocol-Version': '2026-07-28',
+        'Mcp-Method': 'tools/list',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/list',
+        params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' } },
+      }),
+      expect: async (res) => {
+        const c = res.headers.get('www-authenticate') ?? '';
+        if (!c.includes(`resource_metadata="${trim(web)}${wellKnown}"`))
+          return 'challenge has no resource_metadata';
+        if (!c.includes('scope="mti:read"')) return 'challenge has no scope';
+        return /error=/.test(c) ? 'challenge has an error=' : null;
+      },
+    });
+  }
 
   await check('api /v1/health', api, '/v1/health', { status: 200, json: true });
   if (key)
@@ -213,11 +234,18 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const api = arg('api') ?? process.env.TI_API_URL;
   if (!web || !api) {
     console.error(
-      'usage: node scripts/smoke-staging.mjs --web <url> --api <url>  (or TI_WEB_URL and TI_API_URL)',
+      'usage: node scripts/smoke-staging.mjs --web <url> --api <url> [--mcp on|off]  (or TI_WEB_URL and TI_API_URL)',
     );
     process.exit(2);
   }
-  const rows = await runSmoke(fetch, { web, api });
+  // `--mcp off` or `--mcp=off`; a bare or misspelt flag is an error, never a silent `on`.
+  const eq = process.argv.find((a) => a.startsWith('--mcp='));
+  const mcp = eq ? eq.slice('--mcp='.length) : process.argv.includes('--mcp') ? (arg('mcp') ?? '') : 'on';
+  if (mcp !== 'on' && mcp !== 'off') {
+    console.error('--mcp must be on or off');
+    process.exit(2);
+  }
+  const rows = await runSmoke(fetch, { web, api, mcp });
   console.log(formatTable(rows));
   const failed = rows.filter((r) => r.result.startsWith('fail')).length;
   console.log(failed ? `\n${failed} of ${rows.length} checks failed` : `\nall ${rows.length} checks passed`);

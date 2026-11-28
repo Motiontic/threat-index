@@ -123,3 +123,65 @@ export function updateChunks(updates, size = 500) {
   }
   return chunks;
 }
+
+/**
+ * The exploit and fix keys the changes need, so the dates are read by key and never by grouping a whole table.
+ * @returns {{exploit: Set<string>, fix: Set<string>}}
+ */
+export function neededKeys(changes) {
+  const exploit = new Set();
+  const fix = new Set();
+  for (const c of changes) {
+    if (c.kind === 'public_exploit') exploit.add(c.entity_key);
+    else if (c.kind === 'fix_released') fix.add(c.entity_key);
+  }
+  return { exploit, fix };
+}
+
+/** Sorted batches of at most `size` keys. */
+export function keyBatches(keys, size = 800) {
+  const sorted = [...keys].sort();
+  const out = [];
+  for (let i = 0; i < sorted.length; i += size) out.push(sorted.slice(i, i + size));
+  return out;
+}
+
+const inList = (batch) => batch.map(lit).join(', ');
+
+/** First-seen date of each exploit, for one batch of keys. Uses signals' primary key (vuln_key, kind, ...). */
+export function exploitDatesSql(batch) {
+  return `SELECT vuln_key, MIN(first_seen) AS d FROM signals WHERE vuln_key IN (${inList(batch)}) AND kind = 'public_exploit' GROUP BY vuln_key`;
+}
+
+/** Fix date per (source, vuln_key), for one batch of keys. Uses the advisories_by_vuln index. */
+export function fixDatesSql(batch) {
+  return `SELECT source, vuln_key, COALESCE(MIN(published), MIN(modified)) AS d FROM advisories WHERE vuln_key IN (${inList(batch)}) GROUP BY source, vuln_key`;
+}
+
+/**
+ * True when a failed wrangler call was D1 shedding load (code 7429), which is worth waiting out. Only wrangler's
+ * own output is read: `err.message` repeats the whole command, SQL and keys included, and a key such as
+ * CVE-2024-27429 would otherwise look like an overload.
+ */
+export function isOverload(err) {
+  const text = [err?.stdout, err?.stderr].map((x) => String(x ?? '')).join('\n');
+  return /\[code: 7429\]|D1 DB is overloaded/i.test(text);
+}
+
+/**
+ * Runs `fn`; on an overload error waits 5 s x the attempt number and tries again, at most `retries` times.
+ * Any other error is thrown at once. `sleep` is injected so tests don't wait.
+ */
+export async function withRetry(
+  fn,
+  { retries = 5, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {},
+) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isOverload(err) || attempt > retries) throw err;
+      await sleep(5000 * attempt);
+    }
+  }
+}

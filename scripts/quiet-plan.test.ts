@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { firstLoadBoundaries, planQuiet, updateChunks } from './lib/quiet-plan.mjs';
+import {
+  exploitDatesSql,
+  firstLoadBoundaries,
+  fixDatesSql,
+  keyBatches,
+  neededKeys,
+  planQuiet,
+  updateChunks,
+  withRetry,
+} from './lib/quiet-plan.mjs';
 
 const AT = '2026-11-25T12:00:00.000Z';
 type C = {
@@ -175,5 +184,152 @@ describe('updateChunks', () => {
   });
   it('refuses to write held', () => {
     expect(() => updateChunks([{ id: 'z', event_at: null, quiet: 'held' }])).toThrow(/held/);
+  });
+});
+
+describe('reading dates by key', () => {
+  it('neededKeys picks only public_exploit and fix_released entity keys, once each', () => {
+    const k = neededKeys([
+      row('a', 'public_exploit', 's', { entity_key: 'CVE-1' }),
+      row('b', 'public_exploit', 's2', { entity_key: 'CVE-1' }),
+      row('c', 'fix_released', 's', { entity_key: 'CVE-2' }),
+      row('d', 'fix_released', 's3', { entity_key: 'CVE-2' }),
+      row('e', 'newly_exploited', 's', { entity_key: 'CVE-3' }),
+      row('f', 'new_advisory', 's', { entity_key: 'CVE-4' }),
+    ]);
+    expect([...k.exploit]).toEqual(['CVE-1']);
+    expect([...k.fix]).toEqual(['CVE-2']);
+  });
+
+  it('keyBatches splits 1,801 keys into 800/800/201, sorted', () => {
+    const keys = Array.from({ length: 1801 }, (_, i) => `K${String(i).padStart(5, '0')}`).reverse();
+    const b = keyBatches(new Set(keys));
+    expect(b.map((x: string[]) => x.length)).toEqual([800, 800, 201]);
+    expect(b.flat()).toEqual([...keys].sort());
+  });
+
+  it('SQL builders quote with doubled single quotes and group by key', () => {
+    const e = exploitDatesSql(["a'b", 'c']);
+    expect(e).toContain("IN ('a''b', 'c')");
+    expect(e).toContain("kind = 'public_exploit'");
+    expect(e).toContain('GROUP BY vuln_key');
+    const f = fixDatesSql(["a'b"]);
+    expect(f).toContain("IN ('a''b')");
+    expect(f).toContain('GROUP BY source, vuln_key');
+  });
+
+  it('a plan from by-key maps equals the plan from the full maps', () => {
+    const changes = [
+      row('x1', 'public_exploit', 'exploit-db'),
+      row('x2', 'public_exploit', 'metasploit'),
+      row('f1', 'fix_released', 'msrc'),
+      row('f2', 'fix_released', 'github-advisory-db'),
+    ];
+    const fullExploit = new Map([
+      ['CVE-x1', '2014-01-01'],
+      ['CVE-x2', '2026-11-24'],
+      ['CVE-unrelated', '2010-01-01'],
+    ]);
+    const fullFix = new Map([
+      ['msrc\u0000CVE-f1', '2020-01-01'],
+      ['github-advisory-db\u0000CVE-f2', '2026-11-24'],
+      ['msrc\u0000CVE-unrelated', '2010-01-01'],
+    ]);
+    const need = neededKeys(changes);
+    const byKey = <T>(m: Map<string, T>, keep: (k: string) => boolean) =>
+      new Map([...m].filter(([k]) => keep(k)));
+    const keyed = maps({
+      exploit: byKey(fullExploit, (k) => need.exploit.has(k)),
+      fix: byKey(fullFix, (k) => need.fix.has(k.split('\u0000')[1])),
+    });
+    expect(keyed.exploit.size).toBe(2);
+    expect(planQuiet(changes, keyed)).toEqual(
+      planQuiet(changes, maps({ exploit: fullExploit, fix: fullFix })),
+    );
+  });
+});
+
+describe('withRetry', () => {
+  // As wrangler fails: the error JSON is on stdout; the message repeats the command.
+  const overload = () =>
+    Object.assign(new Error('Command failed: wrangler d1 execute ti_signals'), {
+      stdout:
+        '{"error":{"notes":[{"text":"D1 DB is overloaded. Too many resources consumed [code: 7429]"}]}}',
+    });
+  it('retries overloads with 5 s x attempt waits, then returns', async () => {
+    let n = 0;
+    const waits: number[] = [];
+    const out = await withRetry(
+      async () => {
+        if (++n <= 2) throw overload();
+        return 'done';
+      },
+      { sleep: async (ms: number) => void waits.push(ms) },
+    );
+    expect(out).toBe('done');
+    expect(n).toBe(3);
+    expect(waits).toEqual([5000, 10000]);
+  });
+
+  it('recognises an overload in the captured stderr', async () => {
+    let n = 0;
+    const out = await withRetry(
+      async () => {
+        if (++n === 1)
+          throw Object.assign(new Error('Command failed'), {
+            stderr: '✘ [ERROR] D1 DB is overloaded. [code: 7429]',
+          });
+        return 1;
+      },
+      { sleep: async () => {} },
+    );
+    expect(out).toBe(1);
+  });
+
+  it('throws any other error at once', async () => {
+    let n = 0;
+    await expect(
+      withRetry(
+        async () => {
+          n++;
+          throw new Error('no such table');
+        },
+        { sleep: async () => {} },
+      ),
+    ).rejects.toThrow('no such table');
+    expect(n).toBe(1);
+  });
+
+  it('does not take a key that contains 7429 for an overload', async () => {
+    let n = 0;
+    await expect(
+      withRetry(
+        async () => {
+          n++;
+          throw Object.assign(
+            new Error(
+              "Command failed: wrangler d1 execute ti_signals --command SELECT … IN ('CVE-2024-27429')",
+            ),
+            { stdout: '{"error":{"notes":[{"text":"no such column: first_seen [code: 7500]"}]}}' },
+          );
+        },
+        { sleep: async () => {} },
+      ),
+    ).rejects.toThrow(/CVE-2024-27429/);
+    expect(n).toBe(1);
+  });
+
+  it('gives up after 5 retries', async () => {
+    let n = 0;
+    await expect(
+      withRetry(
+        async () => {
+          n++;
+          throw overload();
+        },
+        { sleep: async () => {} },
+      ),
+    ).rejects.toMatchObject({ stdout: expect.stringContaining('[code: 7429]') });
+    expect(n).toBe(6);
   });
 });
