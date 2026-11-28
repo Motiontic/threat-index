@@ -1,3 +1,4 @@
+import { compareLines, type Pair, readPair, refKept } from '@ti/core/changelist';
 import type { Cursor } from '@ti/core/types';
 import { PatternError } from './errors';
 import { request } from './http';
@@ -11,7 +12,6 @@ import {
   parseCsvLine,
   pullBlock,
   reasonOf,
-  tryJsonObject,
   unchanged,
 } from './util';
 
@@ -24,7 +24,6 @@ export interface ChangeItem {
 export const MAX_RANGE_READS = 4;
 const DEFAULT_RANGE_BYTES = 65_536;
 
-type Pair = [time: string, ref: string];
 interface Line {
   time: string;
   ref: string;
@@ -32,13 +31,13 @@ interface Line {
 }
 
 function readCursor(cursor: Cursor | null): Pair | null {
-  if (!cursor) return null;
-  const v = tryJsonObject(cursor.value);
-  if (Array.isArray(v) && typeof v[0] === 'string' && typeof v[1] === 'string') return [v[0], v[1]];
-  return null;
+  return cursor ? readPair(cursor.value) : null;
 }
 
-const cmp = (a: Line, b: Line) => a.ms - b.ms || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0);
+const cmp = compareLines;
+const lineOf = (p: Pair): Line => ({ time: p[0], ref: p[1], ms: Date.parse(p[0]) });
+/** `a`, or `b` when it is later. */
+const laterOf = (a: Line, b: Line | null): Line => (b && cmp(b, a) > 0 ? b : a);
 
 export async function check(ctx: PatternContext): Promise<'unchanged' | 'changed'> {
   const cfg = pullBlock(ctx, 'changelist');
@@ -54,6 +53,8 @@ interface Scan {
   newest: Line | null;
   validator: string | null;
   skipped: number;
+  /** Lines the `refPrefixes` filter dropped. */
+  filtered: number;
   /** The boundary (or the end of the list) was reached within the allowed reads. */
   complete: boolean;
 }
@@ -63,7 +64,7 @@ async function scan(ctx: PatternContext, cursor: Pair | null): Promise<Scan> {
   const cfg = pullBlock(ctx, 'changelist');
   const size = cfg.rangeBytes ?? DEFAULT_RANGE_BYTES;
   const cursorMs = cursor ? Date.parse(cursor[0]) : Number.NEGATIVE_INFINITY;
-  const out: Scan = { fresh: [], newest: null, validator: null, skipped: 0, complete: false };
+  const out: Scan = { fresh: [], newest: null, validator: null, skipped: 0, filtered: 0, complete: false };
   let carry = '';
   // One streaming decoder for every range: a character split across a boundary stays whole.
   const decoder = new TextDecoder();
@@ -108,7 +109,11 @@ async function scan(ctx: PatternContext, cursor: Pair | null): Promise<Scan> {
         boundary = true;
         break;
       }
-      if (!cursor || cmp(l, { time: cursor[0], ref: cursor[1], ms: cursorMs }) > 0) out.fresh.push(l);
+      if (!refKept(ref, cfg.refPrefixes)) {
+        out.filtered++;
+        continue;
+      }
+      if (!cursor || cmp(l, lineOf(cursor)) > 0) out.fresh.push(l);
     }
     if (boundary || eof) {
       out.complete = true;
@@ -116,6 +121,7 @@ async function scan(ctx: PatternContext, cursor: Pair | null): Promise<Scan> {
     }
   }
   if (out.skipped) ctx.log('changelist: skipped unreadable lines', { skipped: out.skipped });
+  if (out.filtered) ctx.log('changelist: lines outside refPrefixes', { filtered: out.filtered });
   return out;
 }
 
@@ -168,11 +174,22 @@ export async function fetch(ctx: PatternContext): Promise<PatternResult> {
       reason: `more than ${MAX_RANGE_READS} ranges of new changes`,
     });
   }
-  if (s.fresh.length === 0) return unchanged(ctx);
+  if (s.fresh.length === 0) {
+    // Nothing kept is new, but dropped lines sit past the cursor: move it over them, so later scans stop there.
+    if (s.newest && cmp(s.newest, lineOf(cursor)) > 0)
+      return {
+        items: [],
+        receipt: null,
+        nextCursor: pairCursor(s.newest, s.validator),
+        more: false,
+      };
+    return unchanged(ctx);
+  }
 
   const sorted = s.fresh.sort(cmp);
   if (ctx.source.heavy) {
-    const newest = sorted[sorted.length - 1] as Line;
+    // The job filters the same way, so its target may be a dropped line past the newest kept one.
+    const newest = laterOf(sorted[sorted.length - 1] as Line, s.newest);
     return heavyResult(ctx, pairCursor(newest, s.validator), {
       kind: jobKind(ctx),
       url: cfg.listUrl,
@@ -221,7 +238,8 @@ export async function fetch(ctx: PatternContext): Promise<PatternResult> {
   return {
     items,
     receipt: buildReceipt(ctx, parts),
-    nextCursor: pairCursor(last, more ? null : s.validator),
+    // When done, move over any dropped lines past the last kept one, so the next scan stops at the list's head.
+    nextCursor: more ? pairCursor(last, null) : pairCursor(laterOf(last, s.newest), s.validator),
     more,
   };
 }

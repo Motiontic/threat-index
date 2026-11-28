@@ -192,4 +192,94 @@ describe('changelist', () => {
     expect(JSON.stringify(r)).not.toContain('\ufffd');
     expect(h.requests.filter((q) => q.headers.range).length).toBeGreaterThan(1);
   });
+
+  describe('refPrefixes', () => {
+    const withPrefixes = {
+      ...source,
+      pull: { changelist: { ...(source.pull?.changelist as object), refPrefixes: ['npm'] } },
+    } as typeof source;
+    const kept = 'npm/GHSA-2025-1019';
+
+    it('counts only kept lines as fresh; newest covers every line', async () => {
+      // Newest line is a dropped one (PyPI), the kept line is older.
+      const list = `2025-05-21T01:00:00Z,Ubuntu/UBUNTU-1\n2025-05-20T23:00:00Z,${kept}\n2025-05-18T00:00:00Z,npm/old\n`;
+      const cur = at('2025-05-19T00:00:00Z', 'npm/x');
+      const h = makeCtx({
+        source: withPrefixes,
+        cursor: cur,
+        routes: [route(LIST, ranged(list, { etag: VALIDATOR })), route(ITEMS, reply(record))],
+      });
+      const r = await fetch(h.ctx);
+      expect(r.items.map((i) => i.id)).toEqual([kept]);
+      expect(h.requests.filter((q) => ITEMS.test(q.url)).map((q) => q.url)).toEqual([
+        `https://osv-vulnerabilities.storage.googleapis.com/${kept}.json`,
+      ]);
+      // Done (more: false): the cursor moves past the kept item to the newest line, a dropped one, with the
+      // validator, so the next scan stops at the list's head instead of reading the dropped line again.
+      expect(r.nextCursor).toEqual(at('2025-05-21T01:00:00Z', 'Ubuntu/UBUNTU-1', VALIDATOR));
+    });
+
+    it('an incomplete scan hands off with the newest line as target, even when it is dropped', async () => {
+      const lines = Array.from({ length: 40 }, (_, i) => {
+        const t = new Date(Date.UTC(2025, 4, 21) - i * 60_000).toISOString();
+        return `${t},${i === 0 ? 'Ubuntu/UBUNTU-9' : `npm/N-${i}`}`;
+      });
+      const small = {
+        ...withPrefixes,
+        pull: { changelist: { ...(withPrefixes.pull?.changelist as object), rangeBytes: 100 } },
+      } as typeof source;
+      const h = makeCtx({
+        source: small,
+        cursor: at('2024-01-01T00:00:00Z', 'npm/x'),
+        routes: [route(LIST, ranged(`${lines.join('\n')}\n`, { etag: VALIDATOR }))],
+      });
+      const r = await fetch(h.ctx);
+      expect(r.heavy).toMatchObject({ kind: 'big-file', url: LIST });
+      expect(r.nextCursor).toEqual(
+        at(new Date(Date.UTC(2025, 4, 21)).toISOString(), 'Ubuntu/UBUNTU-9', VALIDATOR),
+      );
+    });
+
+    it('a heavy source hands off with the newest line as target, even when it is dropped', async () => {
+      const list = `2025-05-21T01:00:00Z,Ubuntu/UBUNTU-1\n2025-05-20T23:00:00Z,${kept}\n2025-05-18T00:00:00Z,npm/old\n`;
+      const h = makeCtx({
+        source: { ...withPrefixes, heavy: true },
+        cursor: at('2025-05-19T00:00:00Z', 'npm/x'),
+        routes: [route(LIST, ranged(list, { etag: VALIDATOR }))],
+      });
+      const r = await fetch(h.ctx);
+      expect(r.heavy?.kind).toBe('big-file');
+      expect(r.nextCursor).toEqual(at('2025-05-21T01:00:00Z', 'Ubuntu/UBUNTU-1', VALIDATOR));
+    });
+
+    it('without refPrefixes, a finished in-Worker run still ends on its last item', async () => {
+      const list = `2025-05-20T23:00:00Z,${kept}\n2025-05-18T00:00:00Z,npm/old\n`;
+      const h = makeCtx({
+        source,
+        cursor: at('2025-05-19T00:00:00Z', 'npm/x'),
+        routes: [route(LIST, ranged(list, { etag: VALIDATOR })), route(ITEMS, reply(record))],
+      });
+      expect((await fetch(h.ctx)).nextCursor).toEqual(at('2025-05-20T23:00:00Z', kept, VALIDATOR));
+    });
+
+    it('a complete scan with only dropped lines moves the cursor to newest and fetches nothing', async () => {
+      const list = `2025-05-21T01:00:00Z,Ubuntu/UBUNTU-2\n2025-05-20T01:00:00Z,Chainguard/CGA-1\n2025-05-18T00:00:00Z,npm/old\n`;
+      const h = makeCtx({
+        source: withPrefixes,
+        cursor: at('2025-05-19T00:00:00Z', 'npm/x', '"old"'),
+        routes: [route(LIST, ranged(list, { etag: VALIDATOR }))],
+      });
+      const r = await fetch(h.ctx);
+      expect(r).toMatchObject({ items: [], receipt: null, more: false });
+      expect(r.nextCursor).toEqual(at('2025-05-21T01:00:00Z', 'Ubuntu/UBUNTU-2', VALIDATOR));
+      expect(h.requests.some((q) => ITEMS.test(q.url))).toBe(false);
+    });
+
+    it('stays unchanged when newest is not after the cursor', async () => {
+      const list = `2025-05-18T00:00:00Z,npm/old\n`;
+      const cur = at('2025-05-19T00:00:00Z', 'npm/x', '"old"');
+      const h = makeCtx({ source: withPrefixes, cursor: cur, routes: [route(LIST, ranged(list))] });
+      expect((await fetch(h.ctx)).nextCursor).toEqual(cur);
+    });
+  });
 });

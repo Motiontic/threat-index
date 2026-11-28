@@ -10,6 +10,7 @@
  * The REST path was not built.
  */
 
+import { MAX_PAIR_CHARS } from '@ti/core/changelist';
 import type { JobRequest } from '@ti/core/control';
 import type { InboxManifest } from '@ti/core/inbox';
 import { inboxChunkKey, MAX_ROWS_PER_CHUNK } from '@ti/core/inbox';
@@ -211,5 +212,19 @@ export function parseManifest(
       return { error: `chunk ${n} has bad rows` };
     chunks.push({ key: c.key, rows: c.rows as number });
   }
-  return { manifest: { jobId, createdAt: m.createdAt, chunks } };
+  let cursor: InboxManifest['cursor'];
+  if (m.cursor !== undefined) {
+    const c = m.cursor as Record<string, unknown> | null;
+    if (
+      typeof c !== 'object' ||
+      c === null ||
+      Array.isArray(c) ||
+      c.kind !== 'timestamp' ||
+      typeof c.value !== 'string' ||
+      c.value.length > MAX_PAIR_CHARS
+    )
+      return { error: 'bad cursor' };
+    cursor = { kind: 'timestamp', value: c.value };
+  }
+  return { manifest: { jobId, createdAt: m.createdAt, chunks, ...(cursor ? { cursor } : {}) } };
 }

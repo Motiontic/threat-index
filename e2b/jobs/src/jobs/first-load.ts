@@ -20,6 +20,7 @@ import {
   fetchItem,
   fetchItems,
   MAX_LIST_DOCS,
+  type Pair,
   readChangeList,
   readPair,
 } from '../lib/changelist.ts';
@@ -277,6 +278,8 @@ export async function runLoad(
   /** Lake keys this attempt has written, removed again if the load fails before the inbox is written. */
   const written: string[] = [];
   const hasRecords = () => total > 0;
+  /** Set when an update stopped short of the end of its window: the last change-list line it took. */
+  let reached: Pair | undefined;
   // Package rows: first-load mode never writes them (they would load at first-load priority, days late, outside
   // the backfill's cap), nor does an update from a whole archive or one over the cap.
   const keepPackages = mode === 'update' && shape !== 'archive';
@@ -395,8 +398,17 @@ export async function runLoad(
           ctx.log('downloaded', { bytes: got.bytes });
           return readChangeList(dest, cfg, { from, to: target });
         });
-        const { lines, older } = applyCap(listed.lines, mode, MAX_LIST_DOCS);
-        ctx.log('change list read', { lines: lines.length, older, unreadable: listed.unreadable });
+        const capped = applyCap(listed.lines, mode, MAX_LIST_DOCS);
+        const { lines, older } = capped;
+        reached = capped.reached;
+        ctx.log('change list read', {
+          lines: lines.length,
+          older,
+          unreadable: listed.unreadable,
+          filtered: listed.filtered,
+          partial: reached !== undefined,
+          ...(reached ? { reached } : {}),
+        });
         const out = await fetchItems(cfg, lines, { ...net, now }, (item) => docs.feed(item));
         oversize = out.oversize;
       } else if (shape === 'change-item') {
@@ -480,7 +492,13 @@ export async function runLoad(
       });
     if (!hasRecords()) ctx.log('no records: no lake part');
 
-    const { chunks } = await writeInbox(ctx.api, job.id, rows, now);
+    const { chunks } = await writeInbox(
+      ctx.api,
+      job.id,
+      rows,
+      now,
+      reached ? { kind: 'timestamp', value: JSON.stringify(reached) } : undefined,
+    );
     ctx.log('inbox written', { chunks, rows: rows.length });
   };
 
